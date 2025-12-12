@@ -316,7 +316,9 @@ impl CodeGenerator {
             Expr::Ident(name) => {
                 if let Some(&offset) = self.variables.get(name) {
                     // Load variable from stack (Windows x64)
-                    self.text_section.push(format!("    mov rax, [rbp + {}]  ; load variable {}", 32 + offset, name));
+                    // Variables are stored at negative offsets from rbp
+                    // offset is the stack offset, we need to use it as negative
+                    self.text_section.push(format!("    mov rax, [rbp - {}]  ; load variable {}", offset + 8, name));
                 } else {
                     return Err(adead_common::ADeadError::RuntimeError {
                         message: format!("undefined variable: {} (variables must be declared with 'let')", name),

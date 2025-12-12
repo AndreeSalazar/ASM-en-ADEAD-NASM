@@ -10,7 +10,8 @@
 program  ::= stmt*
 
 stmt     ::= "print" expr
-           | "let" IDENT "=" expr
+           | "let" ["mut"] IDENT "=" expr
+           | "struct" IDENT "{" fields "}"
            | "if" expr "{" stmt* "}" ["else" "{" stmt* "}"]
            | "while" expr "{" stmt* "}"
            | "fn" IDENT "(" params? ")" "{" stmt* "}"
@@ -36,6 +37,14 @@ call     ::= primary ("(" args? ")")?
 args     ::= expr ("," expr)*
 
 primary  ::= NUMBER | STRING | IDENT | "(" expr ")"
+           | IDENT "{" (IDENT ":" expr ("," IDENT ":" expr)*)? "}"
+           | expr "." IDENT
+           | expr "." IDENT "(" args? ")"
+           | "&" ["mut"] expr
+           | "*" expr
+           | "Some" "(" expr ")" | "None"
+           | "Ok" "(" expr ")" | "Err" "(" expr ")"
+           | "match" expr "{" (pattern "=>" expr ",")* "}"
 ```
 
 ## Tokens
@@ -49,13 +58,16 @@ IDENT    ::= [a-zA-Z_][a-zA-Z0-9_]*
 ## Keywords
 
 ```
-print, let, if, else, while, fn, return
+print, let, mut, if, else, while, fn, return, struct, match, Some, None, Ok, Err
 ```
 
-## Tipos (MVP)
+## Tipos (Actual)
 
 - `int64`: Enteros de 64 bits
 - `string`: Cadenas de caracteres
+- `struct`: Estructuras definidas por el usuario
+- `Option<T>`: Tipos opcionales (Some/None)
+- `Result<T, E>`: Tipos de resultado (Ok/Err)
 
 ## Ejemplos
 

@@ -1,10 +1,10 @@
 # Tutorial de ADead
 
 **Autor:** Eddi Andreé Salazar Matos  
-**Fecha:** 11 de Diciembre de 2025  
+**Fecha:** Diciembre 2025  
 🇵🇪 *Proyecto peruano* 🇵🇪
 
-Un tutorial rápido de 5 minutos para empezar con ADead.
+Tutorial rápido para empezar con ADead.
 
 ## Instalación
 
@@ -25,18 +25,14 @@ print "Hello, ADead!"
 adeadc run hello.ad
 ```
 
-### Forma tradicional:
+### Forma tradicional (pasos separados):
 
-```bash
-# Compilar a ASM
-adeadc compile hello.ad -o hello.asm
-
-# Ensamblar y enlazar
-nasm -felf64 hello.asm -o hello.o
-ld hello.o -o hello
-
-# Ejecutar
-./hello
+```powershell
+# Windows
+.\target\release\adeadc.exe compile hello.ad
+.\target\release\adeadc.exe assemble hello.asm
+.\target\release\adeadc.exe link hello.obj
+.\target\release\adeadc.exe run hello.exe
 ```
 
 ### Opciones avanzadas:
@@ -61,17 +57,17 @@ Las variables son inferidas como `int64` para números y `string` para cadenas.
 Soportamos operaciones aritméticas básicas:
 
 ```adead
-let a = 5 + 3      // 8
-let b = 10 - 2     // 8
-let c = 4 * 2      // 8
-let d = 16 / 2     // 8
+let a = 5 + 3
+let b = 10 - 2
+let c = 4 * 2
+let d = 16 / 2
 ```
 
-Y comparaciones:
+Comparaciones:
 
 ```adead
-let is_true = 5 > 3      // true (1)
-let is_false = 2 == 3    // false (0)
+let is_true = 5 > 3
+let is_false = 2 == 3
 ```
 
 ## Condicionales
@@ -91,24 +87,12 @@ if x > 5 {
 ```adead
 let i = 0
 while i < 5 {
-    print "Iteration: "
-    print i
+    print "Iteration"
     i = i + 1
 }
 ```
 
 ## Funciones
-
-```adead
-fn greet(name) {
-    print "Hello, "
-    print name
-}
-
-greet("World")
-```
-
-Funciones con retorno:
 
 ```adead
 fn add(a, b) {
@@ -118,27 +102,25 @@ fn add(a, b) {
 let result = add(5, 3)
 ```
 
-## Ejemplo Completo: Factorial
+## Structs
 
 ```adead
-let n = 5
-let result = 1
-let i = 1
-
-while i <= n {
-    result = result * i
-    i = i + 1
+struct Persona {
+    edad: int64,
+    id: int64
 }
 
-print "Factorial of "
-print n
-print " is "
-print result
+let persona = Persona {
+    edad: 25,
+    id: 1
+}
+
+let edad = persona.edad
 ```
 
 ## Próximos Pasos
 
-- Explora los [ejemplos](../examples/)
-- Lee la [gramática completa](grammar.md)
-- ¡Contribuye al proyecto!
+- Explora los [ejemplos](../Ejemplos-Reales/ejemplos/)
+- Lee la [documentación completa](../Ejemplos-Reales/documentacion/)
+- Ver [¿Es suficiente para juegos?](respuesta.md)
 

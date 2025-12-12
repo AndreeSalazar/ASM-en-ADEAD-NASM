@@ -64,10 +64,10 @@ LD → Ejecutable
 
 ### Limitaciones (MVP)
 
-- ❌ Solo Linux x86_64
-- ❌ Tipos limitados
-- ❌ Sin gestión de memoria avanzada
-- ❌ Sin optimizaciones
+- ⚠️ Windows x64 (soporte completo), Linux en desarrollo
+- ⚠️ Tipos básicos (int64, string, structs)
+- ⚠️ Sin gestión de memoria avanzada (stack-based)
+- ⚠️ Sin optimizaciones avanzadas
 
 ## Roadmap Técnico
 
