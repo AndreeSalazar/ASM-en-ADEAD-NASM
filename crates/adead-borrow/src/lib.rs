@@ -8,7 +8,7 @@
 //! - Verificación de mutabilidad
 
 use adead_common::{ADeadError, Result};
-use adead_parser::{BorrowType, Expr, Program, Stmt};
+use adead_parser::{BorrowType, Expr, Program, Stmt, Visibility};
 use std::collections::HashMap;
 
 /// Estado de ownership de una variable
@@ -28,12 +28,24 @@ struct VariableInfo {
     borrowed_by: Vec<String>,  // Variables que tienen referencias a esta
 }
 
-/// Borrow Checker - Verifica reglas de ownership y borrowing
+/// Información sobre un struct (O5 - Encapsulación)
+#[derive(Debug, Clone)]
+struct StructInfo {
+    name: String,
+    fields: HashMap<String, Visibility>,  // Nombre del campo -> visibilidad
+    methods: HashMap<String, Visibility>, // Nombre del método -> visibilidad
+}
+
+/// Borrow Checker - Verifica reglas de ownership y borrowing + acceso (O5)
 pub struct BorrowChecker {
     /// Variables y su estado de ownership
     variables: HashMap<String, VariableInfo>,
     /// Stack de scopes (para variables locales)
     scope_stack: Vec<HashMap<String, VariableInfo>>,
+    /// Structs registrados con su información de visibilidad (O5)
+    structs: HashMap<String, StructInfo>,
+    /// Variable que contiene cada tipo de struct (para verificar acceso)
+    variable_types: HashMap<String, String>,  // Nombre de variable -> nombre de struct
 }
 
 impl BorrowChecker {
@@ -42,14 +54,43 @@ impl BorrowChecker {
         Self {
             variables: HashMap::new(),
             scope_stack: Vec::new(),
+            structs: HashMap::new(),
+            variable_types: HashMap::new(),
         }
     }
 
     /// Verificar un programa completo
     pub fn check(&mut self, program: &Program) -> Result<()> {
-        // Primera pasada: registrar todas las variables
+        // Primera pasada: registrar structs con su información de visibilidad (O5)
         for stmt in &program.statements {
-            if let Stmt::Let { mutable, name, .. } = stmt {
+            if let Stmt::Struct { name, fields, init, destroy } = stmt {
+                let mut field_visibility = HashMap::new();
+                for field in fields {
+                    field_visibility.insert(field.name.clone(), field.visibility);
+                }
+                
+                let mut method_visibility = HashMap::new();
+                if let Some(init_method) = init {
+                    method_visibility.insert("init".to_string(), init_method.visibility);
+                }
+                if let Some(destroy_method) = destroy {
+                    method_visibility.insert("destroy".to_string(), destroy_method.visibility);
+                }
+                
+                self.structs.insert(
+                    name.clone(),
+                    StructInfo {
+                        name: name.clone(),
+                        fields: field_visibility,
+                        methods: method_visibility,
+                    },
+                );
+            }
+        }
+        
+        // Segunda pasada: registrar todas las variables y sus tipos
+        for stmt in &program.statements {
+            if let Stmt::Let { mutable, name, value } = stmt {
                 self.variables.insert(
                     name.clone(),
                     VariableInfo {
@@ -58,10 +99,15 @@ impl BorrowChecker {
                         borrowed_by: Vec::new(),
                     },
                 );
+                
+                // Rastrear tipo de struct si es un StructLiteral (O5)
+                if let Expr::StructLiteral { name: struct_name, .. } = value {
+                    self.variable_types.insert(name.clone(), struct_name.clone());
+                }
             }
         }
         
-        // Segunda pasada: verificar statements completos (ahora las variables están registradas)
+        // Tercera pasada: verificar statements completos (ahora las variables y structs están registrados)
         for stmt in &program.statements {
             self.check_stmt(stmt)?;
         }
@@ -274,17 +320,25 @@ impl BorrowChecker {
                 }
                 Ok(())
             }
-            Expr::FieldAccess { object, .. } => {
+            Expr::FieldAccess { object, field } => {
                 // Verificar que el objeto puede ser accedido
                 self.check_expr(object)?;
+                
+                // O5 - Verificar acceso al campo
+                self.check_field_access(object, field)?;
+                
                 Ok(())
             }
-            Expr::MethodCall { object, args, .. } => {
+            Expr::MethodCall { object, method, args } => {
                 // Verificar objeto y argumentos
                 self.check_expr(object)?;
                 for arg in args {
                     self.check_expr(arg)?;
                 }
+                
+                // O5 - Verificar acceso al método
+                self.check_method_access(object, method)?;
+                
                 Ok(())
             }
         }
@@ -300,6 +354,73 @@ impl BorrowChecker {
         }
         // Buscar en variables globales
         self.variables.get(name)
+    }
+    
+    /// Verificar acceso a un campo (O5 - Encapsulación)
+    fn check_field_access(&self, object: &Expr, field_name: &str) -> Result<()> {
+        // Obtener el tipo del objeto (nombre del struct)
+        let struct_name = if let Expr::Ident(var_name) = object {
+            self.variable_types.get(var_name).cloned()
+        } else {
+            // Por ahora, solo verificamos acceso desde variables directas
+            // TODO: Verificar acceso desde expresiones más complejas
+            return Ok(());  // Permitir acceso si no podemos determinar el tipo
+        };
+        
+        if let Some(struct_name) = struct_name {
+            if let Some(struct_info) = self.structs.get(&struct_name) {
+                if let Some(&_field_visibility) = struct_info.fields.get(field_name) {
+                    // Por ahora, siempre permitimos acceso (verificación dentro del mismo módulo)
+                    // En el futuro, necesitaremos rastrear el scope actual para verificar acceso
+                    // TODO: Verificar que el acceso es desde el mismo módulo o que el campo es público
+                    
+                    // Por ahora, solo verificamos que el campo existe
+                    // La verificación completa de visibilidad requiere sistema de módulos
+                    Ok(())
+                } else {
+                    Err(ADeadError::TypeError {
+                        message: format!(
+                            "Campo '{}' no existe en struct '{}'",
+                            field_name, struct_name
+                        ),
+                    })
+                }
+            } else {
+                // Struct no registrado, permitir acceso (puede ser un tipo básico)
+                Ok(())
+            }
+        } else {
+            // No podemos determinar el tipo, permitir acceso
+            Ok(())
+        }
+    }
+    
+    /// Verificar acceso a un método (O5 - Encapsulación)
+    fn check_method_access(&self, object: &Expr, method_name: &str) -> Result<()> {
+        // Similar a check_field_access
+        let struct_name = if let Expr::Ident(var_name) = object {
+            self.variable_types.get(var_name).cloned()
+        } else {
+            return Ok(());
+        };
+        
+        if let Some(struct_name) = struct_name {
+            if let Some(struct_info) = self.structs.get(&struct_name) {
+                if let Some(&_method_visibility) = struct_info.methods.get(method_name) {
+                    // Por ahora, siempre permitimos acceso
+                    // TODO: Verificar visibilidad cuando tengamos sistema de módulos
+                    Ok(())
+                } else {
+                    // Método no existe en el struct, pero puede ser una función global
+                    // Permitir acceso (se verificará en otro lugar)
+                    Ok(())
+                }
+            } else {
+                Ok(())
+            }
+        } else {
+            Ok(())
+        }
     }
 
     /// Crear un nuevo scope

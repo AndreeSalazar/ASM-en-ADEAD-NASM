@@ -86,17 +86,32 @@ pub struct MatchArm {
     pub body: Box<Expr>,
 }
 
-/// Campo de struct (Fase 1.2 - O3)
+/// Nivel de visibilidad (O5 - Encapsulación)
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Visibility {
+    Private,  // Privado (por defecto) - solo visible en el módulo actual
+    Public,   // Público - visible desde cualquier lugar
+}
+
+impl Default for Visibility {
+    fn default() -> Self {
+        Visibility::Private  // Privado por defecto (más seguro)
+    }
+}
+
+/// Campo de struct (Fase 1.2 - O3, O5 - Encapsulación)
 #[derive(Debug, Clone, PartialEq)]
 pub struct StructField {
+    pub visibility: Visibility,  // O5 - Visibilidad del campo
     pub mutable: bool,  // true = mut field, false = inmutable (por defecto)
     pub name: String,
     pub ty: Option<String>,  // Tipo opcional (None = inferido)
 }
 
-/// Método de struct (O2 - Constructores y Destructores)
+/// Método de struct (O2 - Constructores y Destructores, O5 - Encapsulación)
 #[derive(Debug, Clone, PartialEq)]
 pub struct StructMethod {
+    pub visibility: Visibility,  // O5 - Visibilidad del método
     pub params: Vec<FnParam>,  // Parámetros del método
     pub body: Vec<Stmt>,        // Cuerpo del método
 }
@@ -289,10 +304,11 @@ fn stmt_parser() -> impl Parser<char, Stmt, Error = Simple<char>> + Clone {
                 body,
             });
 
-        // Struct definition (Fase 1.2 - O1)
-        let struct_field = just("mut")
+        // Struct definition (Fase 1.2 - O1, O5 - Encapsulación)
+        let struct_field = just("pub")
             .padded()
             .or_not()
+            .then(just("mut").padded().or_not())
             .then(ident.clone())
             .then(
                 just(":")
@@ -300,19 +316,23 @@ fn stmt_parser() -> impl Parser<char, Stmt, Error = Simple<char>> + Clone {
                     .ignore_then(text::ident())
                     .or_not(),
             )
-            .map(|((mutable, name), ty)| StructField {
+            .map(|(((visibility, mutable), name), ty)| StructField {
+                visibility: if visibility.is_some() { Visibility::Public } else { Visibility::Private },
                 mutable: mutable.is_some(),
                 name,
                 ty,
             });
 
-        // Parser para métodos de struct (init, destroy)
-        let struct_method = just("init")
+        // Parser para métodos de struct (init, destroy) - O5: soporta pub
+        let struct_method = just("pub")
             .padded()
-            .map(|_| "init".to_string())
-            .or(just("destroy")
+            .or_not()
+            .then(just("init")
                 .padded()
-                .map(|_| "destroy".to_string()))
+                .map(|_| "init".to_string())
+                .or(just("destroy")
+                    .padded()
+                    .map(|_| "destroy".to_string())))
             .then(
                 just("(")
                     .padded()
@@ -329,8 +349,13 @@ fn stmt_parser() -> impl Parser<char, Stmt, Error = Simple<char>> + Clone {
                     .ignore_then(stmt.clone().repeated())
                     .then_ignore(just("}").padded()),
             )
-            .map(|((method_name, params), body)| (method_name, StructMethod { params, body }));
+            .map(|(((visibility, method_name), params), body)| {
+                let vis = if visibility.is_some() { Visibility::Public } else { Visibility::Private };
+                (method_name, StructMethod { visibility: vis, params, body })
+            });
 
+        // Parser mejorado que acepta campos y métodos mezclados dentro del bloque
+        // Estrategia: parsear secuencia de campos (separados por comas) seguida opcionalmente por métodos
         let struct_stmt = just("struct")
             .padded()
             .ignore_then(ident.clone())
@@ -338,18 +363,23 @@ fn stmt_parser() -> impl Parser<char, Stmt, Error = Simple<char>> + Clone {
                 just("{")
                     .padded()
                     .ignore_then(
+                        // Primero parsear campos (que pueden estar separados por comas o nuevas líneas)
                         struct_field
-                            .separated_by(just(",").padded())
-                            .allow_trailing(),
+                            .separated_by(
+                                just(",").padded()
+                                    .or(just("\n").padded().then_ignore(just("\n").padded().or_not()))
+                            )
+                            .allow_trailing()
+                            .then(
+                                // Luego parsear métodos opcionales (sin comas antes)
+                                struct_method
+                                    .repeated()
+                                    .collect::<Vec<_>>()
+                            )
                     )
                     .then_ignore(just("}").padded()),
             )
-            .then(
-                struct_method
-                    .repeated()
-                    .collect::<Vec<_>>(),
-            )
-            .map(|((name, fields), methods)| {
+            .map(|(name, (fields, methods))| {
                 let mut init = None;
                 let mut destroy = None;
                 
@@ -918,7 +948,9 @@ mod tests {
             assert_eq!(fields.len(), 2);
             assert_eq!(fields[0].name, "nombre");
             assert_eq!(fields[0].mutable, false);  // Inmutable por defecto
+            assert_eq!(fields[0].visibility, Visibility::Private);  // Privado por defecto (O5)
             assert_eq!(fields[1].name, "edad");
+            assert_eq!(fields[1].visibility, Visibility::Private);  // Privado por defecto (O5)
             assert!(init.is_none());  // Sin constructor
             assert!(destroy.is_none());  // Sin destructor
         } else {
@@ -936,6 +968,7 @@ mod tests {
         let program = parse(src).unwrap();
         if let Stmt::Struct { fields, init, destroy, .. } = &program.statements[0] {
             assert_eq!(fields[0].mutable, true);  // Campo mutable
+            assert_eq!(fields[0].visibility, Visibility::Private);  // Privado por defecto (O5)
             assert!(init.is_none());  // Sin constructor
             assert!(destroy.is_none());  // Sin destructor
         } else {

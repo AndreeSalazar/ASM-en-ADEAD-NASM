@@ -58,6 +58,8 @@ Una vez generado, puedes ejecutar el `.exe` directamente:
 - **`loop-infinito.ad`** - Bucle infinito con print (usa `Ctrl+C` para detener)
 - **`structs.ad`** - Structs/Clases básicas: definición, creación de instancias, acceso a campos
 - **`structs-metodos.ad`** - Structs con funciones que actúan como métodos
+- **`raii-init-destroy.ad`** - Ejemplo de RAII: constructores y destructores automáticos
+- **`encapsulacion.ad`** - Encapsulación: campos y métodos públicos/privados (O5)
 
 ### En `ejemplos-con-asm/` (Educativo)
 
