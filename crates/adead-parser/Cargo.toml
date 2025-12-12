@@ -1,0 +1,11 @@
+[package]
+name = "adead-parser"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+chumsky = { workspace = true }
+adead-common = { path = "../adead-common" }
+anyhow = { workspace = true }
+

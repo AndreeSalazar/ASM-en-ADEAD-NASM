@@ -1,0 +1,178 @@
+<div align="center">
+
+# 🇵🇪 ADead — ASM is dead (but powerful)
+
+**ADead** es un lenguaje de alto nivel con sintaxis simple estilo Python que compila directamente a **NASM (x86_64 Linux)** sin overhead. El toolchain está escrito en Rust.
+
+**Desarrollado por:** Eddi Andreé Salazar Matos  
+**Fecha:** 11 de Diciembre de 2025
+
+🇵🇪 *Hecho con orgullo en Perú* 🇵🇪
+
+</div>
+
+## 🚀 Quickstart
+
+### Requisitos
+
+- Rust (última versión estable)
+- NASM (`nasm` en PATH)
+- binutils (`ld` en PATH)
+- Linux x86_64
+
+### Instalación
+
+```bash
+# Clonar el repo
+git clone https://github.com/tuusuario/adead.git
+cd adead
+
+# Compilar
+cargo build --release
+
+# El binario estará en: target/release/adeadc
+```
+
+### Uso
+
+```bash
+# Compilar a ASM
+./target/release/adeadc compile examples/hello.ad -o hello.asm
+
+# Compilar, ensamblar y enlazar
+./target/release/adeadc compile examples/hello.ad -o hello.asm --run
+
+# Ejecutar
+./hello
+```
+
+## 📝 Ejemplos
+
+### Hello World
+
+```adead
+print "Hola Mundo"
+```
+
+### Variables y Aritmética
+
+```adead
+let x = 10
+let y = 20
+let sum = x + y
+```
+
+### Condicionales
+
+```adead
+if x > 5 {
+    print "x is greater than 5"
+} else {
+    print "x is less than or equal to 5"
+}
+```
+
+### Loops
+
+```adead
+let i = 0
+while i < 10 {
+    print "Iteration: "
+    print i
+    i = i + 1
+}
+```
+
+### Funciones
+
+```adead
+fn add(a, b) {
+    return a + b
+}
+
+let result = add(5, 3)
+```
+
+## 🏗️ Arquitectura
+
+```
+Source (.ad) 
+  → Lexer (tokens)
+  → Parser (AST)
+  → Code Generator (NASM)
+  → nasm -felf64
+  → ld
+  → Ejecutable
+```
+
+## 📚 Documentación
+
+- [Gramática](docs/grammar.md)
+- [Tutorial](docs/tutorial.md)
+- [Diseño Técnico](docs/design.md)
+- [Contribuir](CONTRIBUTING.md)
+- [Autores](AUTHORS.md)
+- [Changelog](CHANGELOG.md)
+
+## 🛠️ Estado del Proyecto
+
+**MVP Funcional** ✅
+
+- ✅ Parser completo (print, let, if, while, funciones)
+- ✅ Generación NASM para x86_64 Linux
+- ✅ CLI tool
+- ✅ Ejemplos básicos
+
+**En desarrollo:**
+
+- [ ] Sistema de tipos más robusto
+- [ ] Optimizaciones (const folding, dead code elimination)
+- [ ] Registro allocation mejorado
+- [ ] Arrays y strings
+- [ ] Interoperabilidad con C
+
+## 🧪 Testing
+
+```bash
+cargo test --workspace
+```
+
+## 🤝 Contribuir
+
+¡Las contribuciones son bienvenidas! Por favor lee [CONTRIBUTING.md](CONTRIBUTING.md) para más detalles.
+
+## 👨‍💻 Autor
+
+**Eddi Andreé Salazar Matos**
+
+- Proyecto iniciado: 11 de Diciembre de 2025
+- 🇵🇪 Perú
+
+Para más información, ver [AUTHORS.md](AUTHORS.md)
+
+## 📄 Licencia
+
+MIT License - ver [LICENSE](LICENSE) para más detalles.
+
+Copyright (c) 2025 Eddi Andreé Salazar Matos
+
+## 🎯 Roadmap
+
+1. ✅ **MVP**: print/let/if/while/func + tests
+2. 🔄 **Reg Alloc**: mejor asignación de registros
+3. 📅 **IR y optimizaciones**: const-fold, dead-code
+4. 📅 **Calls & extern**: interoperabilidad con C
+5. 📅 **SIMD/intrinsics**: operaciones optimizadas
+6. 📅 **Multi-target**: Windows/Mac
+7. 📅 **Tooling**: LSP, formatter, playground web
+
+---
+
+<div align="center">
+
+**Hecho con ❤️ en Rust por Eddi Andreé Salazar Matos**
+
+🇵🇪 *Perú, 11 de Diciembre de 2025* 🇵🇪
+
+</div>
+

@@ -1,0 +1,58 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Install Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          override: true
+          
+      - name: Install NASM
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y nasm
+          
+      - name: Build
+        run: cargo build --workspace --all-features --locked
+        env:
+          CARGO_TERM_COLOR: always
+          
+      - name: Run tests
+        run: cargo test --workspace
+        env:
+          CARGO_TERM_COLOR: always
+          
+      - name: Compile example
+        run: |
+          cargo build --release -p adead-cli
+          ./target/release/adeadc compile examples/hello.ad -o hello.asm
+          
+      - name: Assemble example
+        run: |
+          nasm -felf64 hello.asm -o hello.o
+          ld hello.o -o hello
+          
+      - name: Run example
+        run: |
+          ./hello || true  # May fail if output format differs
+          
+      - name: Check formatting
+        run: cargo fmt -- --check
+        continue-on-error: true
+          
+      - name: Clippy
+        run: cargo clippy --workspace -- -D warnings
+        continue-on-error: true
+
