@@ -1,5 +1,5 @@
 use adead_common::Result;
-use adead_parser::{BinOp, Expr, Program, Stmt};
+use adead_parser::{BinOp, Expr, Pattern, Program, Stmt};
 use std::collections::HashMap;
 
 pub struct CodeGenerator {
@@ -423,6 +423,152 @@ impl CodeGenerator {
                     self.text_section.push(format!("    mov [rbp - {}], rax", offset + 8));
                 }
             }
+            // Option/Result constructors (O0.4) - Tagged unions en NASM
+            // Opción<T>: 16 bytes = tag (8 bytes) + valor (8 bytes)
+            //   Tag 0 = None, Tag 1 = Some(valor)
+            // Result<T, E>: 16 bytes = tag (8 bytes) + valor (8 bytes)
+            //   Tag 0 = Ok(valor), Tag 1 = Err(error)
+            
+            Expr::Some(expr) => {
+                // Some(valor): tag = 1, valor = expr
+                // Resultado en stack: [rbp - offset] = tag (1), [rbp - offset + 8] = valor
+                self.generate_expr_windows(expr)?;
+                // Guardar valor en rbx temporalmente
+                self.text_section.push("    push rax  ; guardar valor de Some".to_string());
+                // Tag = 1 para Some
+                self.text_section.push("    mov rax, 1  ; tag Some = 1".to_string());
+                // El resultado es la dirección del tagged union en stack
+                // Necesitamos espacio para tag + valor = 16 bytes
+                let offset = self.stack_offset;
+                self.stack_offset += 16;  // Tag (8) + valor (8)
+                self.text_section.push("    sub rsp, 16  ; espacio para Option (tag + valor)".to_string());
+                // Guardar tag
+                self.text_section.push(format!("    mov [rbp - {}], rax  ; tag = 1 (Some)", offset + 8));
+                // Guardar valor
+                self.text_section.push("    pop rax  ; recuperar valor".to_string());
+                self.text_section.push(format!("    mov [rbp - {}], rax  ; valor", offset + 16));
+                // Dejar dirección del tagged union en rax (dirección del tag)
+                self.text_section.push(format!("    lea rax, [rbp - {}]  ; dirección del Option", offset + 8));
+            }
+            Expr::Ok(expr) => {
+                // Ok(valor): tag = 0, valor = expr
+                self.generate_expr_windows(expr)?;
+                self.text_section.push("    push rax  ; guardar valor de Ok".to_string());
+                // Tag = 0 para Ok
+                self.text_section.push("    mov rax, 0  ; tag Ok = 0".to_string());
+                let offset = self.stack_offset;
+                self.stack_offset += 16;
+                self.text_section.push("    sub rsp, 16  ; espacio para Result (tag + valor)".to_string());
+                self.text_section.push(format!("    mov [rbp - {}], rax  ; tag = 0 (Ok)", offset + 8));
+                self.text_section.push("    pop rax  ; recuperar valor".to_string());
+                self.text_section.push(format!("    mov [rbp - {}], rax  ; valor", offset + 16));
+                self.text_section.push(format!("    lea rax, [rbp - {}]  ; dirección del Result", offset + 8));
+            }
+            Expr::Err(expr) => {
+                // Err(error): tag = 1, error = expr
+                self.generate_expr_windows(expr)?;
+                self.text_section.push("    push rax  ; guardar error de Err".to_string());
+                // Tag = 1 para Err
+                self.text_section.push("    mov rax, 1  ; tag Err = 1".to_string());
+                let offset = self.stack_offset;
+                self.stack_offset += 16;
+                self.text_section.push("    sub rsp, 16  ; espacio para Result (tag + valor)".to_string());
+                self.text_section.push(format!("    mov [rbp - {}], rax  ; tag = 1 (Err)", offset + 8));
+                self.text_section.push("    pop rax  ; recuperar error".to_string());
+                self.text_section.push(format!("    mov [rbp - {}], rax  ; error", offset + 16));
+                self.text_section.push(format!("    lea rax, [rbp - {}]  ; dirección del Result", offset + 8));
+            }
+            Expr::None => {
+                // None: tag = 0, valor = 0
+                let offset = self.stack_offset;
+                self.stack_offset += 16;
+                self.text_section.push("    sub rsp, 16  ; espacio para Option (tag + valor)".to_string());
+                // Tag = 0 para None
+                self.text_section.push("    mov rax, 0  ; tag None = 0".to_string());
+                self.text_section.push(format!("    mov [rbp - {}], rax  ; tag = 0 (None)", offset + 8));
+                // Valor = 0
+                self.text_section.push(format!("    mov [rbp - {}], rax  ; valor = 0", offset + 16));
+                // Dejar dirección en rax
+                self.text_section.push(format!("    lea rax, [rbp - {}]  ; dirección del Option", offset + 8));
+            }
+            Expr::Match { expr, arms } => {
+                // Generar match exhaustivo con saltos condicionales
+                // Evalúa expr (debe ser Option o Result, resultado es dirección del tagged union)
+                self.generate_expr_windows(expr)?;
+                // rax contiene la dirección del tagged union
+                // Cargar tag
+                self.text_section.push("    mov rbx, [rax]  ; cargar tag del tagged union".to_string());
+                
+                // Generar labels para cada brazo
+                let mut arm_labels = Vec::new();
+                let end_label = self.new_label("match_end");
+                
+                // Generar código para cada brazo
+                for (i, arm) in arms.iter().enumerate() {
+                    let arm_label = self.new_label(&format!("match_arm_{}", i));
+                    arm_labels.push(arm_label.clone());
+                    
+                    // Comparar tag con el patrón
+                    match &arm.pattern {
+                        Pattern::Some => {
+                            // Tag debe ser 1 para Some
+                            self.text_section.push(format!("    cmp rbx, 1  ; comparar tag con Some"));
+                            self.text_section.push(format!("    je {}", arm_label));
+                        }
+                        Pattern::None => {
+                            // Tag debe ser 0 para None
+                            self.text_section.push(format!("    cmp rbx, 0  ; comparar tag con None"));
+                            self.text_section.push(format!("    je {}", arm_label));
+                        }
+                        Pattern::Ok => {
+                            // Tag debe ser 0 para Ok
+                            self.text_section.push(format!("    cmp rbx, 0  ; comparar tag con Ok"));
+                            self.text_section.push(format!("    je {}", arm_label));
+                        }
+                        Pattern::Err => {
+                            // Tag debe ser 1 para Err
+                            self.text_section.push(format!("    cmp rbx, 1  ; comparar tag con Err"));
+                            self.text_section.push(format!("    je {}", arm_label));
+                        }
+                        Pattern::Wildcard => {
+                            // Wildcard siempre coincide (salto incondicional al final)
+                            self.text_section.push(format!("    jmp {}", arm_label));
+                        }
+                        _ => {
+                            // Otros patrones (literales, ident) no son compatibles con Option/Result
+                            // Por ahora, tratar como wildcard
+                            self.text_section.push(format!("    jmp {}", arm_label));
+                        }
+                    }
+                }
+                
+                // Si no coincide ningún patrón, saltar al final (o panic si no hay wildcard)
+                self.text_section.push(format!("    jmp {}", end_label));
+                
+                // Generar código de cada brazo
+                for (i, arm) in arms.iter().enumerate() {
+                    self.text_section.push(format!("{}:", arm_labels[i]));
+                    
+                    // Si el patrón tiene binding (Some, Ok, Err), cargar el valor
+                    match &arm.pattern {
+                        Pattern::Some | Pattern::Ok | Pattern::Err => {
+                            // Cargar valor desde [rax + 8]
+                            self.text_section.push("    mov rax, [rax + 8]  ; cargar valor del tagged union".to_string());
+                        }
+                        _ => {
+                            // No hay binding, mantener rax como está
+                        }
+                    }
+                    
+                    // Generar código del cuerpo del brazo
+                    self.generate_expr_windows(&arm.body)?;
+                    // Saltar al final
+                    self.text_section.push(format!("    jmp {}", end_label));
+                }
+                
+                // Label de fin
+                self.text_section.push(format!("{}:", end_label));
+            }
         }
         Ok(())
     }
@@ -589,6 +735,32 @@ impl CodeGenerator {
                 self.generate_expr(expr)?;
                 // Si el valor está en rax (dirección), cargar desde esa dirección
                 self.text_section.push("    mov rax, [rax]".to_string());
+            }
+            // Option/Result constructors (O0.4) - TODO: Implementar generación de código
+            Expr::Some(expr) | Expr::Ok(expr) => {
+                // Por ahora, simplemente evaluar la expresión interna
+                // TODO: Implementar tagged union en NASM
+                self.generate_expr(expr)?;
+            }
+            Expr::Err(expr) => {
+                // Por ahora, simplemente evaluar la expresión interna
+                // TODO: Implementar tagged union en NASM
+                self.generate_expr(expr)?;
+            }
+            Expr::None => {
+                // None/Err sin valor: poner 0 en rax como marcador
+                // TODO: Implementar tag apropiado en NASM
+                self.text_section.push("    mov rax, 0".to_string());
+            }
+            Expr::Match { expr, arms } => {
+                // Generar match expression
+                // TODO: Implementar match exhaustivo con saltos condicionales
+                // Por ahora, generar el código de la expresión base
+                self.generate_expr(expr)?;
+                // TODO: Implementar lógica de matching real
+                if let Some(first_arm) = arms.first() {
+                    self.generate_expr(&first_arm.body)?;
+                }
             }
             Expr::Ident(name) => {
                 if let Some(&offset) = self.variables.get(name) {

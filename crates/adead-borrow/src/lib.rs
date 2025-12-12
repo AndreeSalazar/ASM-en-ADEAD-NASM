@@ -245,6 +245,21 @@ impl BorrowChecker {
                 // TODO: Verificar que realmente es una referencia
                 Ok(())
             }
+            // Option/Result constructors (O0.4)
+            Expr::Some(expr) | Expr::Ok(expr) | Expr::Err(expr) => {
+                self.check_expr(expr)?;
+                Ok(())
+            }
+            Expr::None => Ok(()), // None no necesita verificación
+            Expr::Match { expr, arms } => {
+                self.check_expr(expr)?;
+                // Verificar cada brazo del match
+                for arm in arms {
+                    self.check_expr(&arm.body)?;
+                    // TODO: Verificar que los patrones son exhaustivos y compatibles
+                }
+                Ok(())
+            }
         }
     }
 
@@ -320,6 +335,18 @@ impl BorrowChecker {
             }
             Expr::Deref(expr) => {
                 self.check_expr_borrowing(expr)?;
+                Ok(())
+            }
+            Expr::Some(expr) | Expr::Ok(expr) | Expr::Err(expr) => {
+                self.check_expr_borrowing(expr)?;
+                Ok(())
+            }
+            Expr::None => Ok(()),
+            Expr::Match { expr, arms } => {
+                self.check_expr_borrowing(expr)?;
+                for arm in arms {
+                    self.check_expr_borrowing(&arm.body)?;
+                }
                 Ok(())
             }
             _ => Ok(()), // Otros casos no necesitan verificación adicional

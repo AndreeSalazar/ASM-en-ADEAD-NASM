@@ -25,6 +25,16 @@ pub enum Expr {
         mutable: bool,  // false = &T, true = &mut T
     },
     Deref(Box<Expr>),  // *expr para dereferenciar
+    
+    // Option y Result Types (O0.4)
+    Some(Box<Expr>),           // Some(value)
+    None,                      // None (para Option)
+    Ok(Box<Expr>),             // Ok(value)
+    Err(Box<Expr>),            // Err(error)
+    Match {                     // match expr { pattern => body, ... }
+        expr: Box<Expr>,
+        arms: Vec<MatchArm>,
+    },
 }
 
 /// Parámetro de función con información de borrowing
@@ -40,6 +50,26 @@ pub enum BorrowType {
     Owned,      // Valor owned (por defecto)
     Borrowed,   // &T - referencia inmutable
     MutBorrowed, // &mut T - referencia mutable
+}
+
+/// Patrón para match expressions (O0.4)
+#[derive(Debug, Clone, PartialEq)]
+pub enum Pattern {
+    Some,       // Some(_)
+    None,       // None
+    Ok,         // Ok(_)
+    Err,        // Err(_)
+    Ident(String), // Variable binding: x
+    LiteralNumber(i64), // 42
+    LiteralString(String), // "hello"
+    Wildcard,   // _ (catch-all)
+}
+
+/// Brazo de match expression (O0.4)
+#[derive(Debug, Clone, PartialEq)]
+pub struct MatchArm {
+    pub pattern: Pattern,
+    pub body: Box<Expr>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -281,10 +311,47 @@ fn expr_parser() -> impl Parser<char, Expr, Error = Simple<char>> + Clone {
             .map(|e| Expr::Deref(Box::new(e)))
             .labelled("deref");
 
+        // Option/Result constructors (O0.4)
+        let some = just("Some")
+            .padded()
+            .ignore_then(
+                expr.clone()
+                    .delimited_by(just("(").padded(), just(")").padded())
+            )
+            .map(|e| Expr::Some(Box::new(e)))
+            .labelled("Some");
+
+        let none = just("None")
+            .padded()
+            .map(|_| Expr::None)
+            .labelled("None");
+
+        let ok = just("Ok")
+            .padded()
+            .ignore_then(
+                expr.clone()
+                    .delimited_by(just("(").padded(), just(")").padded())
+            )
+            .map(|e| Expr::Ok(Box::new(e)))
+            .labelled("Ok");
+
+        let err = just("Err")
+            .padded()
+            .ignore_then(
+                expr.clone()
+                    .delimited_by(just("(").padded(), just(")").padded())
+            )
+            .map(|e| Expr::Err(Box::new(e)))
+            .labelled("Err");
+
         let atom = number
             .or(string)
             .or(borrow)  // Borrow debe ir ANTES de ident para que &x se parse como Borrow, no como Call
             .or(deref)
+            .or(some.clone())
+            .or(none.clone())
+            .or(ok.clone())
+            .or(err.clone())
             .or(ident.clone())
             .or(expr
                 .clone()
@@ -311,7 +378,64 @@ fn expr_parser() -> impl Parser<char, Expr, Error = Simple<char>> + Clone {
             })
             .or(atom);
 
-        let unary = call;
+        // Match expression (O0.4)
+        let pattern = recursive(|_pattern| {
+            let some_pattern = just("Some").padded().to(Pattern::Some);
+            let none_pattern = just("None").padded().to(Pattern::None);
+            let ok_pattern = just("Ok").padded().to(Pattern::Ok);
+            let err_pattern = just("Err").padded().to(Pattern::Err);
+            let wildcard = just("_").padded().to(Pattern::Wildcard);
+            let ident_pattern = text::ident().map(Pattern::Ident);
+            let number_pattern = text::int(10)
+                .map(|s: String| s.parse::<i64>().unwrap())
+                .map(Pattern::LiteralNumber);
+            let string_pattern = just('"')
+                .ignore_then(none_of('"').repeated())
+                .then_ignore(just('"'))
+                .collect::<String>()
+                .map(Pattern::LiteralString);
+            
+            some_pattern
+                .or(none_pattern)
+                .or(ok_pattern)
+                .or(err_pattern)
+                .or(wildcard)
+                .or(number_pattern)
+                .or(string_pattern)
+                .or(ident_pattern)
+                .labelled("pattern")
+        });
+
+        let match_arm = pattern
+            .then_ignore(just("=>").padded())
+            .then(expr.clone())
+            .map(|(pat, body)| MatchArm {
+                pattern: pat,
+                body: Box::new(body),
+            })
+            .labelled("match arm");
+
+        let match_expr = just("match")
+            .padded()
+            .ignore_then(expr.clone())
+            .then(
+                just("{")
+                    .padded()
+                    .ignore_then(
+                        match_arm
+                            .separated_by(just(",").padded())
+                            .allow_trailing()
+                    )
+                    .then_ignore(just("}").padded())
+            )
+            .map(|(expr, arms)| Expr::Match {
+                expr: Box::new(expr),
+                arms,
+            })
+            .labelled("match");
+
+        let unary = call
+            .or(match_expr);
 
         let product = unary
             .clone()
@@ -469,6 +593,134 @@ mod tests {
             assert_eq!(params[0].borrow_type, BorrowType::MutBorrowed);
         } else {
             panic!("Expected Fn statement");
+        }
+    }
+
+    // ========== Tests para Option/Result (O0.4) ==========
+    
+    #[test]
+    fn test_parse_some() {
+        let src = r#"let x = Some(42)"#;
+        let program = parse(src).unwrap();
+        if let Stmt::Let { value, .. } = &program.statements[0] {
+            assert!(matches!(value, Expr::Some(_)));
+            if let Expr::Some(inner) = value {
+                assert!(matches!(inner.as_ref(), Expr::Number(42)));
+            }
+        } else {
+            panic!("Expected Let statement");
+        }
+    }
+
+    #[test]
+    fn test_parse_none() {
+        let src = r#"let x = None"#;
+        let program = parse(src).unwrap();
+        if let Stmt::Let { value, .. } = &program.statements[0] {
+            assert!(matches!(value, Expr::None));
+        } else {
+            panic!("Expected Let statement");
+        }
+    }
+
+    #[test]
+    fn test_parse_ok() {
+        let src = r#"let x = Ok(10)"#;
+        let program = parse(src).unwrap();
+        if let Stmt::Let { value, .. } = &program.statements[0] {
+            assert!(matches!(value, Expr::Ok(_)));
+            if let Expr::Ok(inner) = value {
+                assert!(matches!(inner.as_ref(), Expr::Number(10)));
+            }
+        } else {
+            panic!("Expected Let statement");
+        }
+    }
+
+    #[test]
+    fn test_parse_err() {
+        let src = r#"let x = Err("error")"#;
+        let program = parse(src).unwrap();
+        if let Stmt::Let { value, .. } = &program.statements[0] {
+            assert!(matches!(value, Expr::Err(_)));
+            if let Expr::Err(inner) = value {
+                assert!(matches!(inner.as_ref(), Expr::String(_)));
+            }
+        } else {
+            panic!("Expected Let statement");
+        }
+    }
+
+    #[test]
+    fn test_parse_match_simple() {
+        let src = r#"
+            match x {
+                Some => 1,
+                None => 0
+            }
+        "#;
+        let program = parse(src).unwrap();
+        if let Stmt::Expr(Expr::Match { expr, arms }) = &program.statements[0] {
+            assert!(matches!(expr.as_ref(), Expr::Ident(_)));
+            assert_eq!(arms.len(), 2);
+            assert!(matches!(arms[0].pattern, Pattern::Some));
+            assert!(matches!(arms[1].pattern, Pattern::None));
+        } else {
+            panic!("Expected Match expression");
+        }
+    }
+
+    #[test]
+    fn test_parse_match_with_bindings() {
+        let src = r#"
+            match resultado {
+                Ok => "success",
+                Err => "error",
+                _ => "unknown"
+            }
+        "#;
+        let program = parse(src).unwrap();
+        if let Stmt::Expr(Expr::Match { arms, .. }) = &program.statements[0] {
+            assert_eq!(arms.len(), 3);
+            assert!(matches!(arms[0].pattern, Pattern::Ok));
+            assert!(matches!(arms[1].pattern, Pattern::Err));
+            assert!(matches!(arms[2].pattern, Pattern::Wildcard));
+        } else {
+            panic!("Expected Match expression");
+        }
+    }
+
+    #[test]
+    fn test_parse_match_with_literals() {
+        let src = r#"
+            match x {
+                0 => "zero",
+                1 => "one",
+                _ => "other"
+            }
+        "#;
+        let program = parse(src).unwrap();
+        if let Stmt::Expr(Expr::Match { arms, .. }) = &program.statements[0] {
+            assert_eq!(arms.len(), 3);
+            assert!(matches!(arms[0].pattern, Pattern::LiteralNumber(0)));
+            assert!(matches!(arms[1].pattern, Pattern::LiteralNumber(1)));
+            assert!(matches!(arms[2].pattern, Pattern::Wildcard));
+        } else {
+            panic!("Expected Match expression");
+        }
+    }
+
+    #[test]
+    fn test_parse_nested_some() {
+        let src = r#"let x = Some(Some(42))"#;
+        let program = parse(src).unwrap();
+        if let Stmt::Let { value, .. } = &program.statements[0] {
+            assert!(matches!(value, Expr::Some(_)));
+            if let Expr::Some(inner) = value {
+                assert!(matches!(inner.as_ref(), Expr::Some(_)));
+            }
+        } else {
+            panic!("Expected Let statement");
         }
     }
 }

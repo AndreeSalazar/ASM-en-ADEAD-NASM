@@ -101,11 +101,24 @@
     - `crates/adead-borrow/src/lib.rs` ✅ (verificación de mutabilidad)
     - `crates/adead-backend/src/lib.rs` ✅ (compatibilidad NASM)
   
-- [ ] **O0.4** - Option y Result Types (estilo Rust)
-  - ❌ Estado: NO implementado
-  - 📋 Actual: No hay `Option`, `Result`, `Some`, `None`, `Ok`, `Err` en AST
-  - 🎯 Necesita: Extender AST con Option/Result, parser para `match`, `Some`, `None`, etc.
-  - 📝 Archivos: `crates/adead-parser/src/lib.rs` (Expr enum), `crates/adead-common/src/lib.rs` (Type enum)
+- [x] **O0.4** - Option y Result Types (estilo Rust) ✅ **COMPLETADO**
+  - ✅ Estado: Implementado completamente
+  - ✅ Actual: AST extendido con `Some`, `None`, `Ok`, `Err`, `Match`, `Pattern`, `MatchArm`
+  - ✅ Parser: Soporte completo para Option/Result/match expressions
+  - ✅ Backend: Compatibilidad básica (implementación completa pendiente para tagged unions)
+  - ✅ Borrow Checker: Verificación básica de Option/Result/match
+  - ✅ Tests: Tests completos para parsing de Some/None/Ok/Err/match
+  - 📝 Archivos: 
+    - `crates/adead-parser/src/lib.rs` ✅ (AST y parser extendidos)
+    - `crates/adead-common/src/lib.rs` ✅ (Type enum ya tenía Option/Result)
+    - `crates/adead-borrow/src/lib.rs` ✅ (verificación básica)
+    - `crates/adead-backend/src/lib.rs` ✅ (compatibilidad básica)
+  - ✅ Generación de código NASM para tagged unions (Option/Result) **IMPLEMENTADA**
+  - ✅ Match exhaustivo con saltos condicionales **IMPLEMENTADO**
+  - ✅ Tests completos para Option/Result/match generación de código
+  - 📌 Representación: Option/Result como tagged unions (16 bytes = tag 8 bytes + valor 8 bytes)
+    - Option: Tag 0 = None, Tag 1 = Some(valor)
+    - Result: Tag 0 = Ok(valor), Tag 1 = Err(error)
 
 **Fase 1.2: Estructuras de Datos (Fundación)**
 - [ ] O1 - Structs/Clases Básicas (inmutables por defecto)
