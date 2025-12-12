@@ -35,6 +35,20 @@ pub enum Expr {
         expr: Box<Expr>,
         arms: Vec<MatchArm>,
     },
+    // Structs/Clases (Fase 1.2 - O1)
+    StructLiteral {             // StructName { field1: value1, field2: value2 }
+        name: String,
+        fields: Vec<(String, Expr)>,  // (field_name, value)
+    },
+    FieldAccess {               // expr.field_name
+        object: Box<Expr>,
+        field: String,
+    },
+    MethodCall {                // expr.method_name(args)
+        object: Box<Expr>,
+        method: String,
+        args: Vec<Expr>,
+    },
 }
 
 /// Parámetro de función con información de borrowing
@@ -72,6 +86,14 @@ pub struct MatchArm {
     pub body: Box<Expr>,
 }
 
+/// Campo de struct (Fase 1.2 - O3)
+#[derive(Debug, Clone, PartialEq)]
+pub struct StructField {
+    pub mutable: bool,  // true = mut field, false = inmutable (por defecto)
+    pub name: String,
+    pub ty: Option<String>,  // Tipo opcional (None = inferido)
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum BinOp {
     Add,
@@ -107,6 +129,11 @@ pub enum Stmt {
         name: String,
         params: Vec<FnParam>,  // Cambiado para soportar borrowing
         body: Vec<Stmt>,
+    },
+    // Structs/Clases (Fase 1.2 - O1)
+    Struct {
+        name: String,
+        fields: Vec<StructField>,
     },
     Expr(Expr),
     Return(Option<Expr>),
@@ -253,6 +280,41 @@ fn stmt_parser() -> impl Parser<char, Stmt, Error = Simple<char>> + Clone {
                 body,
             });
 
+        // Struct definition (Fase 1.2 - O1)
+        let struct_field = just("mut")
+            .padded()
+            .or_not()
+            .then(ident.clone())
+            .then(
+                just(":")
+                    .padded()
+                    .ignore_then(text::ident())
+                    .or_not(),
+            )
+            .map(|((mutable, name), ty)| StructField {
+                mutable: mutable.is_some(),
+                name,
+                ty,
+            });
+
+        let struct_stmt = just("struct")
+            .padded()
+            .ignore_then(ident.clone())
+            .then(
+                just("{")
+                    .padded()
+                    .ignore_then(
+                        struct_field
+                            .separated_by(just(",").padded())
+                            .allow_trailing(),
+                    )
+                    .then_ignore(just("}").padded()),
+            )
+            .map(|(name, fields)| Stmt::Struct {
+                name,
+                fields,
+            });
+
         // Assignment: ident = expr (as statement)
         let assign_stmt = ident
             .clone()
@@ -270,6 +332,7 @@ fn stmt_parser() -> impl Parser<char, Stmt, Error = Simple<char>> + Clone {
             .or(if_stmt)
             .or(while_stmt)
             .or(fn_stmt)
+            .or(struct_stmt)
             .or(return_stmt)
             .or(assign_stmt)
             .or(expr_stmt)
@@ -344,6 +407,30 @@ fn expr_parser() -> impl Parser<char, Expr, Error = Simple<char>> + Clone {
             .map(|e| Expr::Err(Box::new(e)))
             .labelled("Err");
 
+        // Struct literal (Fase 1.2 - O1)
+        // StructName { field1: value1, field2: value2 }
+        let struct_literal = text::ident()
+            .then(
+                just("{")
+                    .padded()
+                    .ignore_then(
+                        text::ident()
+                            .then_ignore(just(":").padded())
+                            .then(expr.clone())
+                            .map(|(field_name, value)| (field_name, value))
+                            .separated_by(just(",").padded())
+                            .allow_trailing(),
+                    )
+                    .then_ignore(just("}").padded()),
+            )
+            .map(|(struct_name, fields)| {
+                Expr::StructLiteral {
+                    name: struct_name,
+                    fields,
+                }
+            })
+            .labelled("struct literal");
+
         let atom = number
             .or(string)
             .or(borrow)  // Borrow debe ir ANTES de ident para que &x se parse como Borrow, no como Call
@@ -352,6 +439,7 @@ fn expr_parser() -> impl Parser<char, Expr, Error = Simple<char>> + Clone {
             .or(none.clone())
             .or(ok.clone())
             .or(err.clone())
+            .or(struct_literal)
             .or(ident.clone())
             .or(expr
                 .clone()
@@ -437,13 +525,49 @@ fn expr_parser() -> impl Parser<char, Expr, Error = Simple<char>> + Clone {
         let unary = call
             .or(match_expr);
 
-        let product = unary
+        // Aplicar field/method access después de call/match (Fase 1.2 - O1, O4)
+        let with_access = unary
+            .then(
+                just(".")
+                    .padded()
+                    .ignore_then(text::ident())
+                    .then(
+                        just("(")
+                            .padded()
+                            .ignore_then(
+                                expr.clone()
+                                    .separated_by(just(",").padded())
+                                    .allow_trailing(),
+                            )
+                            .then_ignore(just(")").padded())
+                            .or_not(),
+                    )
+                    .repeated(),
+            )
+            .foldl(|obj, (name, args)| {
+                if let Some(args) = args {
+                    // Method call
+                    Expr::MethodCall {
+                        object: Box::new(obj),
+                        method: name,
+                        args,
+                    }
+                } else {
+                    // Field access
+                    Expr::FieldAccess {
+                        object: Box::new(obj),
+                        field: name,
+                    }
+                }
+            });
+
+        let product = with_access
             .clone()
             .then(
                 just("*")
                     .to(BinOp::Mul)
                     .or(just("/").to(BinOp::Div))
-                    .then(unary.clone())
+                    .then(with_access.clone())
                     .repeated(),
             )
             .foldl(|l, (op, r)| Expr::BinaryOp {
@@ -718,6 +842,118 @@ mod tests {
             assert!(matches!(value, Expr::Some(_)));
             if let Expr::Some(inner) = value {
                 assert!(matches!(inner.as_ref(), Expr::Some(_)));
+            }
+        } else {
+            panic!("Expected Let statement");
+        }
+    }
+
+    // ========== Tests para Structs (Fase 1.2) ==========
+    
+    #[test]
+    fn test_parse_struct_definition() {
+        let src = r#"
+            struct Persona {
+                nombre: string,
+                edad: int64
+            }
+        "#;
+        let program = parse(src).unwrap();
+        if let Stmt::Struct { name, fields } = &program.statements[0] {
+            assert_eq!(name, "Persona");
+            assert_eq!(fields.len(), 2);
+            assert_eq!(fields[0].name, "nombre");
+            assert_eq!(fields[0].mutable, false);  // Inmutable por defecto
+            assert_eq!(fields[1].name, "edad");
+        } else {
+            panic!("Expected Struct statement");
+        }
+    }
+
+    #[test]
+    fn test_parse_struct_with_mutable_fields() {
+        let src = r#"
+            struct Contador {
+                mut valor: int64
+            }
+        "#;
+        let program = parse(src).unwrap();
+        if let Stmt::Struct { fields, .. } = &program.statements[0] {
+            assert_eq!(fields[0].mutable, true);  // Campo mutable
+        } else {
+            panic!("Expected Struct statement");
+        }
+    }
+
+    #[test]
+    fn test_parse_struct_literal() {
+        let src = r#"
+            let p = Persona {
+                nombre: "Juan",
+                edad: 25
+            }
+        "#;
+        let program = parse(src).unwrap();
+        if let Stmt::Let { value, .. } = &program.statements[0] {
+            assert!(matches!(value, Expr::StructLiteral { .. }));
+            if let Expr::StructLiteral { name, fields } = value {
+                assert_eq!(name, "Persona");
+                assert_eq!(fields.len(), 2);
+                assert_eq!(fields[0].0, "nombre");
+                assert_eq!(fields[1].0, "edad");
+            }
+        } else {
+            panic!("Expected Let statement");
+        }
+    }
+
+    #[test]
+    fn test_parse_field_access() {
+        let src = r#"
+            let nombre = p.nombre
+        "#;
+        let program = parse(src).unwrap();
+        if let Stmt::Let { value, .. } = &program.statements[0] {
+            assert!(matches!(value, Expr::FieldAccess { .. }));
+            if let Expr::FieldAccess { object, field } = value {
+                assert!(matches!(object.as_ref(), Expr::Ident(_)));
+                assert_eq!(field, "nombre");
+            }
+        } else {
+            panic!("Expected Let statement");
+        }
+    }
+
+    #[test]
+    fn test_parse_method_call() {
+        let src = r#"
+            let resultado = objeto.metodo(10, 20)
+        "#;
+        let program = parse(src).unwrap();
+        if let Stmt::Let { value, .. } = &program.statements[0] {
+            assert!(matches!(value, Expr::MethodCall { .. }));
+            if let Expr::MethodCall { object, method, args } = value {
+                assert!(matches!(object.as_ref(), Expr::Ident(_)));
+                assert_eq!(method, "metodo");
+                assert_eq!(args.len(), 2);
+            }
+        } else {
+            panic!("Expected Let statement");
+        }
+    }
+
+    #[test]
+    fn test_parse_chained_field_access() {
+        let src = r#"
+            let valor = objeto.campo.subcampo
+        "#;
+        let program = parse(src).unwrap();
+        if let Stmt::Let { value, .. } = &program.statements[0] {
+            assert!(matches!(value, Expr::FieldAccess { .. }));
+            if let Expr::FieldAccess { object, field } = value {
+                assert_eq!(field, "subcampo");
+                // El object debería ser otro FieldAccess
+                assert!(matches!(object.as_ref(), Expr::FieldAccess { .. }));
             }
         } else {
             panic!("Expected Let statement");

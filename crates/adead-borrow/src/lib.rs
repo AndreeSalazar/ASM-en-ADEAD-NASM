@@ -118,6 +118,11 @@ impl BorrowChecker {
                 self.pop_scope();
                 Ok(())
             }
+            Stmt::Struct { name: _, fields: _ } => {
+                // Structs se registran pero no necesitan verificación especial aquí
+                // Los campos se verifican cuando se usan
+                Ok(())
+            }
             Stmt::Fn { name: _, params, body } => {
                 // Registrar función (los parámetros se verifican cuando se llama)
                 // Por ahora, solo verificamos el cuerpo
@@ -260,6 +265,27 @@ impl BorrowChecker {
                 }
                 Ok(())
             }
+            // Structs (Fase 1.2)
+            Expr::StructLiteral { fields, .. } => {
+                // Verificar todos los valores de los campos
+                for (_, value) in fields {
+                    self.check_expr(value)?;
+                }
+                Ok(())
+            }
+            Expr::FieldAccess { object, .. } => {
+                // Verificar que el objeto puede ser accedido
+                self.check_expr(object)?;
+                Ok(())
+            }
+            Expr::MethodCall { object, args, .. } => {
+                // Verificar objeto y argumentos
+                self.check_expr(object)?;
+                for arg in args {
+                    self.check_expr(arg)?;
+                }
+                Ok(())
+            }
         }
     }
 
@@ -346,6 +372,23 @@ impl BorrowChecker {
                 self.check_expr_borrowing(expr)?;
                 for arm in arms {
                     self.check_expr_borrowing(&arm.body)?;
+                }
+                Ok(())
+            }
+            Expr::StructLiteral { fields, .. } => {
+                for (_, value) in fields {
+                    self.check_expr_borrowing(value)?;
+                }
+                Ok(())
+            }
+            Expr::FieldAccess { object, .. } => {
+                self.check_expr_borrowing(object)?;
+                Ok(())
+            }
+            Expr::MethodCall { object, args, .. } => {
+                self.check_expr_borrowing(object)?;
+                for arg in args {
+                    self.check_expr_borrowing(arg)?;
                 }
                 Ok(())
             }

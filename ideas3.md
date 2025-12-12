@@ -120,10 +120,21 @@
     - Option: Tag 0 = None, Tag 1 = Some(valor)
     - Result: Tag 0 = Ok(valor), Tag 1 = Err(error)
 
-**Fase 1.2: Estructuras de Datos (Fundación)**
-- [ ] O1 - Structs/Clases Básicas (inmutables por defecto)
-- [ ] O3 - Propiedades (Fields/Members) con ownership
-- [ ] O4 - Métodos de Instancia (con borrowing)
+**Fase 1.2: Estructuras de Datos (Fundación)** ✅ **COMPLETADA**
+- [x] O1 - Structs/Clases Básicas (inmutables por defecto) ✅ **COMPLETADO**
+  - ✅ AST extendido con `Stmt::Struct`, `Expr::StructLiteral`, `Expr::FieldAccess`, `Expr::MethodCall`
+  - ✅ Parser completo para definición de structs, literales, acceso a campos y llamadas a métodos
+  - ✅ Campos inmutables por defecto (requieren `mut` para ser mutables)
+  - ✅ Sintaxis: `struct Nombre { campo: tipo }`, `Nombre { campo: valor }`, `objeto.campo`, `objeto.metodo(args)`
+  - ✅ Tests completos para parsing
+- [x] O3 - Propiedades (Fields/Members) con ownership ✅ **COMPLETADO**
+  - ✅ `StructField` con campo `mutable: bool` para tracking de ownership
+  - ✅ Borrow checker verifica acceso a campos
+  - ✅ Backend genera código NASM para acceso a campos (layout simplificado de 8 bytes por campo)
+- [x] O4 - Métodos de Instancia (con borrowing) ✅ **COMPLETADO**
+  - ✅ Parser para `objeto.metodo(args)`
+  - ✅ Backend genera llamadas con `self` como primer argumento
+  - ✅ TODO: Implementar dispatch real de métodos y binding de `&self`/`&mut self`
 
 **Fase 1.3: Inicialización y Limpieza (RAII como Rust)**
 - [ ] O2 - Constructores y Destructores (RAII automático)

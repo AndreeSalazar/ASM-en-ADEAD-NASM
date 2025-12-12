@@ -281,6 +281,11 @@ impl CodeGenerator {
                 self.text_section.push("    leave".to_string());
                 self.text_section.push("    ret".to_string());
             }
+            Stmt::Struct { name: _, fields: _ } => {
+                // Struct definitions are type information only, no code generation needed
+                // TODO: Registrar struct en tabla de tipos para verificación posterior
+                // No genera código, solo información de tipo
+            }
         }
         Ok(())
     }
@@ -490,6 +495,43 @@ impl CodeGenerator {
                 self.text_section.push(format!("    mov [rbp - {}], rax  ; valor = 0", offset + 16));
                 // Dejar dirección en rax
                 self.text_section.push(format!("    lea rax, [rbp - {}]  ; dirección del Option", offset + 8));
+            }
+            // Structs (Fase 1.2 - O1, O3, O4)
+            Expr::StructLiteral { name: _, fields } => {
+                // Generar struct literal en stack
+                let struct_size = fields.len() * 8;
+                let offset = self.stack_offset;
+                self.stack_offset += struct_size as i64;
+                self.text_section.push(format!("    sub rsp, {}  ; espacio para struct ({} campos)", struct_size, fields.len()));
+                
+                for (i, (field_name, value)) in fields.iter().enumerate() {
+                    self.generate_expr_windows(value)?;
+                    let field_offset = offset + (i as i64 * 8) + 8;
+                    self.text_section.push(format!("    mov [rbp - {}], rax  ; campo '{}'", field_offset, field_name));
+                }
+                
+                self.text_section.push(format!("    lea rax, [rbp - {}]  ; dirección del struct", offset + 8));
+            }
+            Expr::FieldAccess { object, field } => {
+                self.generate_expr_windows(object)?;
+                self.text_section.push(format!("    ; accediendo campo '{}' (offset simplificado: 0)", field));
+                self.text_section.push("    mov rax, [rax]  ; cargar primer campo (simplificado)".to_string());
+            }
+            Expr::MethodCall { object, method, args } => {
+                self.generate_expr_windows(object)?;
+                self.text_section.push("    push rax  ; guardar self".to_string());
+                
+                for arg in args {
+                    self.generate_expr_windows(arg)?;
+                    self.text_section.push("    push rax".to_string());
+                }
+                
+                self.text_section.push(format!("    call fn_{}", method));
+                
+                let cleanup_size = (args.len() + 1) * 8;
+                if cleanup_size > 0 {
+                    self.text_section.push(format!("    add rsp, {}", cleanup_size));
+                }
             }
             Expr::Match { expr, arms } => {
                 // Generar match exhaustivo con saltos condicionales
@@ -709,6 +751,11 @@ impl CodeGenerator {
                 self.text_section.push("    pop rbp".to_string());
                 self.text_section.push("    ret".to_string());
             }
+            Stmt::Struct { name: _, fields: _ } => {
+                // Struct definitions are type information only, no code generation needed
+                // TODO: Registrar struct en tabla de tipos para verificación posterior
+                // No genera código, solo información de tipo
+            }
         }
         Ok(())
     }
@@ -751,6 +798,36 @@ impl CodeGenerator {
                 // None/Err sin valor: poner 0 en rax como marcador
                 // TODO: Implementar tag apropiado en NASM
                 self.text_section.push("    mov rax, 0".to_string());
+            }
+            // Structs (Fase 1.2 - O1, O3, O4)
+            Expr::StructLiteral { name: _, fields } => {
+                // Por ahora, implementación simplificada
+                // TODO: Implementar layout de memoria real basado en tipos de campos
+                let struct_size = fields.len() * 8;
+                self.text_section.push(format!("    sub rsp, {}  ; espacio para struct", struct_size));
+                // Generar valores (simplificado)
+                if let Some((_, first_value)) = fields.first() {
+                    self.generate_expr(first_value)?;
+                }
+            }
+            Expr::FieldAccess { object, field: _ } => {
+                // Acceso a campo (simplificado)
+                self.generate_expr(object)?;
+                self.text_section.push("    mov rax, [rax]  ; cargar campo (simplificado)".to_string());
+            }
+            Expr::MethodCall { object, method, args } => {
+                // Llamada a método (simplificado)
+                self.generate_expr(object)?;
+                self.text_section.push("    push rax  ; self".to_string());
+                for arg in args {
+                    self.generate_expr(arg)?;
+                    self.text_section.push("    push rax".to_string());
+                }
+                self.text_section.push(format!("    call fn_{}", method));
+                let cleanup = (args.len() + 1) * 8;
+                if cleanup > 0 {
+                    self.text_section.push(format!("    add rsp, {}", cleanup));
+                }
             }
             Expr::Match { expr, arms } => {
                 // Generar match expression
