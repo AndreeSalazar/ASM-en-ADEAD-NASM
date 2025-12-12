@@ -18,11 +18,32 @@ Crea un archivo `hello.ad`:
 print "Hello, ADead!"
 ```
 
-Compila y ejecuta:
+### Forma más directa (recomendada):
 
 ```bash
-adeadc compile hello.ad -o hello.asm --run
+# Compila, ensambla, enlaza y ejecuta en un solo paso
+adeadc run hello.ad
+```
+
+### Forma tradicional:
+
+```bash
+# Compilar a ASM
+adeadc compile hello.ad -o hello.asm
+
+# Ensamblar y enlazar
+nasm -felf64 hello.asm -o hello.o
+ld hello.o -o hello
+
+# Ejecutar
 ./hello
+```
+
+### Opciones avanzadas:
+
+```bash
+# Mantener archivos temporales (asm, o, exe)
+adeadc run hello.ad --keep-temp
 ```
 
 ## Variables

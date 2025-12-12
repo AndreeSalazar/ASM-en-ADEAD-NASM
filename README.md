@@ -15,10 +15,18 @@
 
 ### Requisitos
 
+**Linux (recomendado):**
 - Rust (última versión estable)
 - NASM (`nasm` en PATH)
 - binutils (`ld` en PATH)
-- Linux x86_64
+
+**Windows:**
+- Rust (última versión estable)
+- NASM (`nasm` en PATH)
+- MinGW/MSYS2 con `gcc` o binutils con `ld`
+- ⚠️ **Nota importante:** El código generado usa syscalls de Linux. Para ejecutar en Windows necesitas:
+  - WSL (Windows Subsystem for Linux) - **Recomendado**
+  - O usar herramientas de Linux (MSYS2 puede funcionar con algunas limitaciones)
 
 ### Instalación
 
@@ -35,16 +43,50 @@ cargo build --release
 
 ### Uso
 
-```bash
-# Compilar a ASM
-./target/release/adeadc compile examples/hello.ad -o hello.asm
+#### 🚀 Método Simple: Un Solo Comando
 
-# Compilar, ensamblar y enlazar
-./target/release/adeadc compile examples/hello.ad -o hello.asm --run
+**Desde cualquier lugar:**
+```powershell
+# Windows - Genera .exe y ejecuta automáticamente
+.\target\release\adeadc.exe run Ejemplos-Reales\hello.ad
 
-# Ejecutar
-./hello
+# Linux/Mac - Genera ejecutable y ejecuta
+./target/release/adeadc run examples/hello.ad
 ```
+
+El comando `run` automáticamente:
+1. ✅ Compila el `.ad` a `.asm`
+2. ✅ Ensambla a `.obj` (Windows) o `.o` (Linux)
+3. ✅ Enlaza a `.exe` (Windows) o ejecutable (Linux)
+4. ✅ Ejecuta el programa
+5. ✅ Limpia archivos temporales (a menos que uses `--keep-temp`)
+
+**El `.exe` se genera en la misma carpeta que el archivo `.ad`**
+
+#### Opciones Avanzadas
+
+```powershell
+# Mantener archivos temporales para debugging
+.\target\release\adeadc.exe run Ejemplos-Reales\hello.ad --keep-temp
+
+# Solo compilar a ASM (sin ejecutar)
+.\target\release\adeadc.exe compile Ejemplos-Reales\hello.ad -o hello.asm
+```
+
+#### Ejemplos Reales
+
+Los ejemplos funcionales están en la carpeta `Ejemplos-Reales/`:
+
+```powershell
+# Ejecutar desde la raíz
+.\run.ps1 Ejemplos-Reales\hello.ad
+
+# O desde la carpeta Ejemplos-Reales
+cd Ejemplos-Reales
+.\ejecutar.ps1 hello.ad
+```
+
+Ver [Ejemplos-Reales/README.md](Ejemplos-Reales/README.md) para más detalles.
 
 ## 📝 Ejemplos
 
