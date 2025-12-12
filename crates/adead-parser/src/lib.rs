@@ -94,6 +94,13 @@ pub struct StructField {
     pub ty: Option<String>,  // Tipo opcional (None = inferido)
 }
 
+/// Método de struct (O2 - Constructores y Destructores)
+#[derive(Debug, Clone, PartialEq)]
+pub struct StructMethod {
+    pub params: Vec<FnParam>,  // Parámetros del método
+    pub body: Vec<Stmt>,        // Cuerpo del método
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum BinOp {
     Add,
@@ -130,10 +137,12 @@ pub enum Stmt {
         params: Vec<FnParam>,  // Cambiado para soportar borrowing
         body: Vec<Stmt>,
     },
-    // Structs/Clases (Fase 1.2 - O1)
+    // Structs/Clases (Fase 1.2 - O1, O2 - RAII)
     Struct {
         name: String,
         fields: Vec<StructField>,
+        init: Option<StructMethod>,      // Constructor (O2)
+        destroy: Option<StructMethod>,    // Destructor (O2.1 - Drop Trait)
     },
     Expr(Expr),
     Return(Option<Expr>),
@@ -297,6 +306,31 @@ fn stmt_parser() -> impl Parser<char, Stmt, Error = Simple<char>> + Clone {
                 ty,
             });
 
+        // Parser para métodos de struct (init, destroy)
+        let struct_method = just("init")
+            .padded()
+            .map(|_| "init".to_string())
+            .or(just("destroy")
+                .padded()
+                .map(|_| "destroy".to_string()))
+            .then(
+                just("(")
+                    .padded()
+                    .ignore_then(
+                        fn_param
+                            .separated_by(just(",").padded())
+                            .allow_trailing(),
+                    )
+                    .then_ignore(just(")").padded()),
+            )
+            .then(
+                just("{")
+                    .padded()
+                    .ignore_then(stmt.clone().repeated())
+                    .then_ignore(just("}").padded()),
+            )
+            .map(|((method_name, params), body)| (method_name, StructMethod { params, body }));
+
         let struct_stmt = just("struct")
             .padded()
             .ignore_then(ident.clone())
@@ -310,9 +344,29 @@ fn stmt_parser() -> impl Parser<char, Stmt, Error = Simple<char>> + Clone {
                     )
                     .then_ignore(just("}").padded()),
             )
-            .map(|(name, fields)| Stmt::Struct {
-                name,
-                fields,
+            .then(
+                struct_method
+                    .repeated()
+                    .collect::<Vec<_>>(),
+            )
+            .map(|((name, fields), methods)| {
+                let mut init = None;
+                let mut destroy = None;
+                
+                for (method_name, method) in methods {
+                    if method_name == "init" {
+                        init = Some(method);
+                    } else if method_name == "destroy" {
+                        destroy = Some(method);
+                    }
+                }
+                
+                Stmt::Struct {
+                    name,
+                    fields,
+                    init,
+                    destroy,
+                }
             });
 
         // Assignment: ident = expr (as statement)
@@ -859,12 +913,14 @@ mod tests {
             }
         "#;
         let program = parse(src).unwrap();
-        if let Stmt::Struct { name, fields } = &program.statements[0] {
+        if let Stmt::Struct { name, fields, init, destroy } = &program.statements[0] {
             assert_eq!(name, "Persona");
             assert_eq!(fields.len(), 2);
             assert_eq!(fields[0].name, "nombre");
             assert_eq!(fields[0].mutable, false);  // Inmutable por defecto
             assert_eq!(fields[1].name, "edad");
+            assert!(init.is_none());  // Sin constructor
+            assert!(destroy.is_none());  // Sin destructor
         } else {
             panic!("Expected Struct statement");
         }
@@ -878,8 +934,10 @@ mod tests {
             }
         "#;
         let program = parse(src).unwrap();
-        if let Stmt::Struct { fields, .. } = &program.statements[0] {
+        if let Stmt::Struct { fields, init, destroy, .. } = &program.statements[0] {
             assert_eq!(fields[0].mutable, true);  // Campo mutable
+            assert!(init.is_none());  // Sin constructor
+            assert!(destroy.is_none());  // Sin destructor
         } else {
             panic!("Expected Struct statement");
         }

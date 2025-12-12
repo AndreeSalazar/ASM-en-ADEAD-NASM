@@ -9,6 +9,8 @@ pub struct CodeGenerator {
     label_counter: usize,
     variables: HashMap<String, i64>, // simple: track stack offsets
     stack_offset: i64,
+    structs_with_destroy: HashMap<String, bool>, // Track structs that have destroy methods (O2.1)
+    variables_to_destroy: Vec<(String, String)>, // (variable_name, struct_name) - RAII tracking
 }
 
 impl CodeGenerator {
@@ -20,6 +22,8 @@ impl CodeGenerator {
             label_counter: 0,
             variables: HashMap::new(),
             stack_offset: 0,
+            structs_with_destroy: HashMap::new(),
+            variables_to_destroy: Vec::new(),
         }
     }
 
@@ -89,6 +93,20 @@ impl CodeGenerator {
 
         for stmt in &program.statements {
             self.generate_stmt_windows(stmt)?;
+        }
+
+        // RAII: Llamar destructores antes de salir (O2.1 - Drop Trait)
+        // Llamar destructores en orden inverso (LIFO - Last In First Out)
+        for (var_name, struct_name) in self.variables_to_destroy.iter().rev() {
+            if let Some(&offset) = self.variables.get(var_name) {
+                self.text_section.push(format!("    ; RAII: destruyendo {} (tipo {})", var_name, struct_name));
+                // Cargar dirección del struct
+                self.text_section.push(format!("    mov rcx, [rbp - {}]  ; cargar dirección de {}", offset + 8, var_name));
+                // Llamar destructor
+                self.text_section.push("    sub rsp, 32  ; shadow space".to_string());
+                self.text_section.push(format!("    call {}_destroy", struct_name));
+                self.text_section.push("    add rsp, 32  ; restaurar shadow space".to_string());
+            }
         }
 
         // Exit process with code 0 (success)
@@ -165,7 +183,21 @@ impl CodeGenerator {
                 }
             }
             Stmt::Let { mutable, name, value } => {
+                // Si el valor es un StructLiteral, registrar para destrucción RAII si tiene destroy
+                let struct_name = if let Expr::StructLiteral { name: struct_name, .. } = value {
+                    if self.structs_with_destroy.contains_key(struct_name) {
+                        self.variables_to_destroy.push((name.clone(), struct_name.clone()));
+                    }
+                    Some(struct_name.clone())
+                } else {
+                    None
+                };
+                
                 self.generate_expr_windows(value)?;
+                
+                // Si es un struct con constructor, llamarlo aquí
+                // Por ahora, solo guardamos la dirección del struct
+                
                 // Store in stack (simplified: just track as variable)
                 // Note: mutability is tracked but NASM code is the same (difference is in borrow checker)
                 let offset = if let Some(&existing_offset) = self.variables.get(name) {
@@ -281,10 +313,47 @@ impl CodeGenerator {
                 self.text_section.push("    leave".to_string());
                 self.text_section.push("    ret".to_string());
             }
-            Stmt::Struct { name: _, fields: _ } => {
-                // Struct definitions are type information only, no code generation needed
-                // TODO: Registrar struct en tabla de tipos para verificación posterior
-                // No genera código, solo información de tipo
+            Stmt::Struct { name, fields: _, init, destroy: _ } => {
+                // Registrar struct y generar código para constructor si existe
+                if let Some(init_method) = init {
+                    // Generar función de constructor: StructName_init
+                    let init_label = format!("{}_init", name);
+                    self.text_section.push(format!("    jmp {}_end", init_label));
+                    self.text_section.push(format!("{}:", init_label));
+                    self.text_section.push("    push rbp".to_string());
+                    self.text_section.push("    mov rbp, rsp".to_string());
+                    
+                    // Guardar parámetros en stack (Windows x64 calling convention)
+                    for (i, param) in init_method.params.iter().enumerate() {
+                        let offset = self.stack_offset;
+                        self.stack_offset += 8;
+                        self.variables.insert(param.name.clone(), offset);
+                        
+                        let reg = match i {
+                            0 => "rcx",
+                            1 => "rdx",
+                            2 => "r8",
+                            3 => "r9",
+                            _ => {
+                                let stack_offset = 16 + (i - 4) * 8;
+                                self.text_section.push(format!("    mov rax, [rbp + {}]", stack_offset));
+                                self.text_section.push(format!("    mov [rbp - {}], rax", offset + 8));
+                                continue;
+                            }
+                        };
+                        self.text_section.push(format!("    mov [rbp - {}], {}", offset + 8, reg));
+                    }
+                    
+                    // Generar cuerpo del constructor
+                    for s in &init_method.body {
+                        self.generate_stmt_windows(s)?;
+                    }
+                    
+                    self.text_section.push("    leave".to_string());
+                    self.text_section.push("    ret".to_string());
+                    self.text_section.push(format!("{}_end:", init_label));
+                }
+                // Struct definitions are type information only, no code generation needed for the struct itself
             }
         }
         Ok(())
@@ -499,18 +568,26 @@ impl CodeGenerator {
                 self.text_section.push(format!("    lea rax, [rbp - {}]  ; dirección del Option", offset + 8));
             }
             // Structs (Fase 1.2 - O1, O3, O4)
-            Expr::StructLiteral { name: _, fields } => {
+            Expr::StructLiteral { name, fields } => {
                 // Generar struct literal en stack
                 let struct_size = fields.len() * 8;
                 let offset = self.stack_offset;
                 self.stack_offset += struct_size as i64;
                 self.text_section.push(format!("    sub rsp, {}  ; espacio para struct ({} campos)", struct_size, fields.len()));
                 
+                // Preparar argumentos para constructor si existe
+                // Por ahora, asumimos que el constructor toma los campos como parámetros
+                // TODO: Mejorar para manejar constructores con diferentes firmas
+                
+                // Generar valores de campos primero
                 for (i, (field_name, value)) in fields.iter().enumerate() {
                     self.generate_expr_windows(value)?;
                     let field_offset = offset + (i as i64 * 8) + 8;
                     self.text_section.push(format!("    mov [rbp - {}], rax  ; campo '{}'", field_offset, field_name));
                 }
+                
+                // Si hay constructor, llamarlo (por ahora, solo guardamos la dirección)
+                // TODO: Implementar llamada real al constructor cuando se use StructLiteral en Let
                 
                 self.text_section.push(format!("    lea rax, [rbp - {}]  ; dirección del struct", offset + 8));
             }
@@ -642,7 +719,21 @@ impl CodeGenerator {
                 }
             }
             Stmt::Let { mutable, name, value } => {
-                self.generate_expr(value)?;
+                // Si el valor es un StructLiteral, registrar para destrucción RAII si tiene destroy
+                let struct_name = if let Expr::StructLiteral { name: struct_name, .. } = value {
+                    if self.structs_with_destroy.contains_key(struct_name) {
+                        self.variables_to_destroy.push((name.clone(), struct_name.clone()));
+                    }
+                    Some(struct_name.clone())
+                } else {
+                    None
+                };
+                
+                self.generate_expr_windows(value)?;
+                
+                // Si es un struct con constructor, llamarlo aquí
+                // Por ahora, solo guardamos la dirección del struct
+                
                 // Store in stack (simplified: just track as variable)
                 // Note: mutability is tracked but NASM code is the same (difference is in borrow checker)
                 let offset = if let Some(&existing_offset) = self.variables.get(name) {
@@ -753,10 +844,47 @@ impl CodeGenerator {
                 self.text_section.push("    pop rbp".to_string());
                 self.text_section.push("    ret".to_string());
             }
-            Stmt::Struct { name: _, fields: _ } => {
-                // Struct definitions are type information only, no code generation needed
-                // TODO: Registrar struct en tabla de tipos para verificación posterior
-                // No genera código, solo información de tipo
+            Stmt::Struct { name, fields: _, init, destroy: _ } => {
+                // Registrar struct y generar código para constructor si existe
+                if let Some(init_method) = init {
+                    // Generar función de constructor: StructName_init
+                    let init_label = format!("{}_init", name);
+                    self.text_section.push(format!("    jmp {}_end", init_label));
+                    self.text_section.push(format!("{}:", init_label));
+                    self.text_section.push("    push rbp".to_string());
+                    self.text_section.push("    mov rbp, rsp".to_string());
+                    
+                    // Guardar parámetros en stack (Windows x64 calling convention)
+                    for (i, param) in init_method.params.iter().enumerate() {
+                        let offset = self.stack_offset;
+                        self.stack_offset += 8;
+                        self.variables.insert(param.name.clone(), offset);
+                        
+                        let reg = match i {
+                            0 => "rcx",
+                            1 => "rdx",
+                            2 => "r8",
+                            3 => "r9",
+                            _ => {
+                                let stack_offset = 16 + (i - 4) * 8;
+                                self.text_section.push(format!("    mov rax, [rbp + {}]", stack_offset));
+                                self.text_section.push(format!("    mov [rbp - {}], rax", offset + 8));
+                                continue;
+                            }
+                        };
+                        self.text_section.push(format!("    mov [rbp - {}], {}", offset + 8, reg));
+                    }
+                    
+                    // Generar cuerpo del constructor
+                    for s in &init_method.body {
+                        self.generate_stmt_windows(s)?;
+                    }
+                    
+                    self.text_section.push("    leave".to_string());
+                    self.text_section.push("    ret".to_string());
+                    self.text_section.push(format!("{}_end:", init_label));
+                }
+                // Struct definitions are type information only, no code generation needed for the struct itself
             }
         }
         Ok(())

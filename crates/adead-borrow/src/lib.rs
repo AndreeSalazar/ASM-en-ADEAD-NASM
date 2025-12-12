@@ -118,9 +118,10 @@ impl BorrowChecker {
                 self.pop_scope();
                 Ok(())
             }
-            Stmt::Struct { name: _, fields: _ } => {
+            Stmt::Struct { name: _, fields: _, init: _, destroy: _ } => {
                 // Structs se registran pero no necesitan verificación especial aquí
                 // Los campos se verifican cuando se usan
+                // Constructores y destructores se verifican como funciones normales
                 Ok(())
             }
             Stmt::Fn { name: _, params, body } => {
