@@ -88,12 +88,34 @@ Si quieres ver los archivos `.asm` y `.obj` generados:
 
 ---
 
-## 📚 Documentación
+## 📚 Documentación Completa
 
 Revisa la carpeta `documentacion/` para:
-- **README.md** - Información general
-- **COMANDOS.md** - Comandos detallados
-- **EJEMPLOS.md** - Ejemplos de código
+
+### Para Usuarios (Aprender ADead)
+
+**Nivel Básico:**
+- [01-Basico-Tipos.md](documentacion/01-Basico-Tipos.md) - Sistema de tipos
+- [02-Basico-Variables.md](documentacion/02-Basico-Variables.md) - Variables e inmutabilidad
+- [03-Basico-Funciones.md](documentacion/03-Basico-Funciones.md) - Funciones (pendiente)
+- [04-Basico-Control.md](documentacion/04-Basico-Control.md) - Control de flujo (pendiente)
+
+**Nivel Intermedio:**
+- [05-Intermedio-Ownership.md](documentacion/05-Intermedio-Ownership.md) - Ownership y Borrowing
+- [06-Intermedio-Option-Result.md](documentacion/06-Intermedio-Option-Result.md) - Option y Result types
+- [07-Intermedio-Arrays.md](documentacion/07-Intermedio-Arrays.md) - Arrays (pendiente)
+
+**Nivel Avanzado:**
+- Ver [documentacion/README.md](documentacion/README.md) para lista completa
+
+### Para Desarrolladores
+
+- [IMPLEMENTACION-Fase-1.1.md](documentacion/IMPLEMENTACION-Fase-1.1.md) - Implementar Fase 1.1
+- [IMPLEMENTACION-Guia-Desarrollo.md](documentacion/IMPLEMENTACION-Guia-Desarrollo.md) - Guía general
+- [COMENZAR-Fase-1.1.md](documentacion/COMENZAR-Fase-1.1.md) - Inicio rápido Fase 1.1
+- [ESTADO-PROYECTO.md](documentacion/ESTADO-PROYECTO.md) - Estado actual
+
+**Ver [documentacion/README.md](documentacion/README.md) para índice completo.**
 
 ---
 

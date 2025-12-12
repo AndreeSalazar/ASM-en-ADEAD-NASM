@@ -1,13 +1,15 @@
 <div align="center">
 
-# 🇵🇪 ADead — ASM is dead (but powerful)
+# 🇵🇪 .ad — ADead
 
-**ADead** es un lenguaje de alto nivel con sintaxis simple estilo Python que compila directamente a **NASM (x86_64 Linux)** sin overhead. El toolchain está escrito en Rust.
+**ASM is dead (but powerful)**
+
+Simple sintaxis estilo Python • Rendimiento nativo
+
+🎨 **Icono personalizado para archivos `.ad`** - Identidad visual única en Windows
 
 **Desarrollado por:** Eddi Andreé Salazar Matos  
 **Fecha:** 11 de Diciembre de 2025
-
-🇵🇪 *Hecho con orgullo en Perú* 🇵🇪
 
 </div>
 
@@ -42,6 +44,10 @@ cargo build --release
 ```
 
 ### Uso
+
+#### 🎨 Icono Personalizado (Windows)
+
+Los archivos `.ad` incluyen un icono personalizado en Windows Explorer. El icono se aplica automáticamente al instalar o mediante scripts de configuración.
 
 #### 🚀 Método Simple: Un Solo Comando
 
@@ -137,14 +143,38 @@ let result = add(5, 3)
 
 ## 🏗️ Arquitectura
 
+### Proceso de Compilación Modular
+
 ```
 Source (.ad) 
   → Lexer (tokens)
   → Parser (AST)
   → Code Generator (NASM)
-  → nasm -felf64
-  → ld
-  → Ejecutable
+  → compile → .asm (Assembly)
+  → assemble → .obj/.o (Object file)
+  → link → .exe (Ejecutable)
+  → run → Ejecutar programa
+```
+
+### Comandos Modulares
+
+Puedes ejecutar cada paso por separado para mayor control:
+
+```powershell
+# 1. Compilar a Assembly
+.\target\release\adeadc.exe compile Ejemplos-Reales\hello.ad
+
+# 2. Ensamblar a objeto
+.\target\release\adeadc.exe assemble Ejemplos-Reales\hello.asm
+
+# 3. Enlazar a ejecutable
+.\target\release\adeadc.exe link Ejemplos-Reales\hello.obj
+
+# 4. Ejecutar
+.\target\release\adeadc.exe run Ejemplos-Reales\hello.exe
+
+# O todo en uno:
+.\target\release\adeadc.exe run Ejemplos-Reales\hello.ad
 ```
 
 ## 📚 Documentación
@@ -152,6 +182,9 @@ Source (.ad)
 - [Gramática](docs/grammar.md)
 - [Tutorial](docs/tutorial.md)
 - [Diseño Técnico](docs/design.md)
+- [Uso Rápido](USO-RAPIDO.md) - Guía rápida de comandos
+- [Comandos Fáciles](Fácil_Comando.md) - Comandos simplificados
+- [Ideas Futuras](ideas2.md) - Roadmap e ideas de desarrollo
 - [Contribuir](CONTRIBUTING.md)
 - [Autores](AUTHORS.md)
 - [Changelog](CHANGELOG.md)
@@ -161,9 +194,18 @@ Source (.ad)
 **MVP Funcional** ✅
 
 - ✅ Parser completo (print, let, if, while, funciones)
-- ✅ Generación NASM para x86_64 Linux
-- ✅ CLI tool
+- ✅ Generación NASM para x86_64 Windows/Linux
+- ✅ CLI tool modular (compile, assemble, link, run)
 - ✅ Ejemplos básicos
+- ✅ Icono personalizado para archivos `.ad` en Windows
+- ✅ Compilación completa funcional en Windows con MinGW/MSYS2
+
+**Mejoras Recientes:**
+
+- ✅ Proceso de compilación modularizado
+- ✅ Mejor manejo de errores y diagnósticos
+- ✅ Soporte robusto para Windows con MinGW64
+- ✅ Identidad visual con iconos personalizados
 
 **En desarrollo:**
 
@@ -172,6 +214,8 @@ Source (.ad)
 - [ ] Registro allocation mejorado
 - [ ] Arrays y strings
 - [ ] Interoperabilidad con C
+- [ ] Syntax highlighting para editores
+- [ ] LSP (Language Server Protocol) para IDEs
 
 ## 🧪 Testing
 
@@ -188,7 +232,7 @@ cargo test --workspace
 **Eddi Andreé Salazar Matos**
 
 - Proyecto iniciado: 11 de Diciembre de 2025
-- 🇵🇪 Perú
+- ⚡ Lenguaje .ad - Simple y poderoso
 
 Para más información, ver [AUTHORS.md](AUTHORS.md)
 
@@ -214,7 +258,9 @@ Copyright (c) 2025 Eddi Andreé Salazar Matos
 
 **Hecho con ❤️ en Rust por Eddi Andreé Salazar Matos**
 
-🇵🇪 *Perú, 11 de Diciembre de 2025* 🇵🇪
+⚡ *ADead - Simple syntax, powerful performance* ⚡
+
+*11 de Diciembre de 2025*
 
 </div>
 
