@@ -164,9 +164,10 @@ impl CodeGenerator {
                     }
                 }
             }
-            Stmt::Let { name, value } => {
+            Stmt::Let { mutable, name, value } => {
                 self.generate_expr_windows(value)?;
                 // Store in stack (simplified: just track as variable)
+                // Note: mutability is tracked but NASM code is the same (difference is in borrow checker)
                 let offset = if let Some(&existing_offset) = self.variables.get(name) {
                     existing_offset
                 } else {
@@ -176,7 +177,8 @@ impl CodeGenerator {
                     offset
                 };
                 self.text_section
-                    .push(format!("    mov [rbp - {}], rax", offset + 8));
+                    .push(format!("    mov [rbp - {}], rax  ; variable {} ({})", 
+                        offset + 8, name, if *mutable { "mutable" } else { "immutable" }));
             }
             Stmt::Expr(expr) => {
                 self.generate_expr_windows(expr)?;
@@ -242,7 +244,7 @@ impl CodeGenerator {
                 for (i, param) in params.iter().enumerate() {
                     let offset = self.stack_offset;
                     self.stack_offset += 8;
-                    self.variables.insert(param.clone(), offset);
+                    self.variables.insert(param.name.clone(), offset);
                     
                     let reg = match i {
                         0 => "rcx",
@@ -293,6 +295,18 @@ impl CodeGenerator {
                 return Err(adead_common::ADeadError::RuntimeError {
                     message: "strings cannot be used as expressions yet".to_string(),
                 });
+            }
+            Expr::Borrow { expr, .. } => {
+                // Borrowing: generar dirección de la expresión
+                // Por ahora, solo soportamos borrowing de variables
+                self.generate_expr_windows(expr)?;
+                // TODO: Generar código para obtener dirección (lea)
+            }
+            Expr::Deref(expr) => {
+                // Dereferenciar: cargar valor desde la dirección
+                self.generate_expr_windows(expr)?;
+                // Si el valor está en rax (dirección), cargar desde esa dirección
+                self.text_section.push("    mov rax, [rax]".to_string());
             }
             Expr::Ident(name) => {
                 if let Some(&offset) = self.variables.get(name) {
@@ -437,10 +451,10 @@ impl CodeGenerator {
                     }
                 }
             }
-            Stmt::Let { name, value } => {
+            Stmt::Let { mutable, name, value } => {
                 self.generate_expr(value)?;
                 // Store in stack (simplified: just track as variable)
-                // Check if variable already exists (for reassignment)
+                // Note: mutability is tracked but NASM code is the same (difference is in borrow checker)
                 let offset = if let Some(&existing_offset) = self.variables.get(name) {
                     existing_offset
                 } else {
@@ -450,7 +464,8 @@ impl CodeGenerator {
                     offset
                 };
                 self.text_section
-                    .push(format!("    mov [rbp - {}], rax", offset + 8));
+                    .push(format!("    mov [rbp - {}], rax  ; variable {} ({})", 
+                        offset + 8, name, if *mutable { "mutable" } else { "immutable" }));
             }
             Stmt::Expr(expr) => {
                 self.generate_expr(expr)?;
@@ -524,7 +539,7 @@ impl CodeGenerator {
                     };
                     let offset = self.stack_offset;
                     self.stack_offset += 8;
-                    self.variables.insert(param.clone(), offset);
+                    self.variables.insert(param.name.clone(), offset);
                     self.text_section
                         .push(format!("    mov [rbp - {}], {}", offset + 8, reg));
                 }
@@ -562,6 +577,18 @@ impl CodeGenerator {
                 return Err(adead_common::ADeadError::RuntimeError {
                     message: "cannot use string in expression yet".to_string(),
                 });
+            }
+            Expr::Borrow { expr, .. } => {
+                // Borrowing: generar dirección de la expresión
+                // Por ahora, solo soportamos borrowing de variables
+                self.generate_expr(expr)?;
+                // TODO: Generar código para obtener dirección (lea)
+            }
+            Expr::Deref(expr) => {
+                // Dereferenciar: cargar valor desde la dirección
+                self.generate_expr(expr)?;
+                // Si el valor está en rax (dirección), cargar desde esa dirección
+                self.text_section.push("    mov rax, [rax]".to_string());
             }
             Expr::Ident(name) => {
                 if let Some(&offset) = self.variables.get(name) {

@@ -81,17 +81,25 @@
   - ⏳ Pendiente: Módulo `adead-typecheck` para type checking/inference
   - 📝 Archivos: `crates/adead-common/src/lib.rs` ✅ COMPLETADO
   
-- [ ] **O0.2** - Ownership y Borrowing Básico
-  - ❌ Estado: NO implementado
-  - 📋 Actual: No hay borrowing, no hay `&` o `&mut` en AST
-  - 🎯 Necesita: Extender AST con `Borrow`, `Deref`, crear módulo `adead-borrow`
-  - 📝 Archivos: `crates/adead-parser/src/lib.rs` (AST), crear `crates/adead-borrow/`
+- [x] **O0.2** - Ownership y Borrowing Básico ⚠️ **PARCIAL**
+  - ✅ Estado: AST extendido, parser funcional, módulo borrow creado
+  - ✅ Actual: `Borrow` y `Deref` en AST, parser para `&` y `&mut`, parámetros con borrowing
+  - ✅ Módulo `adead-borrow` creado con borrow checker básico
+  - ⏳ Pendiente: Verificación completa de reglas (no aliasing mutable, moves), lifetime tracking
+  - 📝 Archivos: 
+    - `crates/adead-parser/src/lib.rs` ✅ (AST extendido)
+    - `crates/adead-borrow/src/lib.rs` ✅ (Borrow checker básico)
+    - `crates/adead-backend/src/lib.rs` ✅ (Compatibilidad NASM agregada)
   
-- [ ] **O0.3** - Inmutabilidad por Defecto
-  - ❌ Estado: NO implementado
-  - 📋 Actual: `Stmt::Let` no tiene campo `mutable`, parser no reconoce `let mut`
-  - 🎯 Necesita: Agregar campo `mutable: bool` a `Stmt::Let`, parser para `let mut`
-  - 📝 Archivos: `crates/adead-parser/src/lib.rs` (línea 41-44)
+- [x] **O0.3** - Inmutabilidad por Defecto ✅ **COMPLETADO**
+  - ✅ Estado: Implementado completamente
+  - ✅ Actual: `Stmt::Let` tiene campo `mutable: bool`, parser reconoce `let mut`
+  - ✅ Verificación: Borrow checker verifica que variables inmutables no pueden ser modificadas
+  - ✅ Tests: Tests completos para parser y verificación de mutabilidad
+  - 📝 Archivos: 
+    - `crates/adead-parser/src/lib.rs` ✅ (parser actualizado)
+    - `crates/adead-borrow/src/lib.rs` ✅ (verificación de mutabilidad)
+    - `crates/adead-backend/src/lib.rs` ✅ (compatibilidad NASM)
   
 - [ ] **O0.4** - Option y Result Types (estilo Rust)
   - ❌ Estado: NO implementado

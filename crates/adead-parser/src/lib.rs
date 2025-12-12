@@ -19,6 +19,27 @@ pub enum Expr {
         name: String,
         args: Vec<Expr>,
     },
+    // Ownership y Borrowing (O0.2)
+    Borrow {
+        expr: Box<Expr>,
+        mutable: bool,  // false = &T, true = &mut T
+    },
+    Deref(Box<Expr>),  // *expr para dereferenciar
+}
+
+/// Parámetro de función con información de borrowing
+#[derive(Debug, Clone, PartialEq)]
+pub struct FnParam {
+    pub name: String,
+    pub borrow_type: BorrowType,  // Tipo de borrowing del parámetro
+}
+
+/// Tipo de borrowing para parámetros de función
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum BorrowType {
+    Owned,      // Valor owned (por defecto)
+    Borrowed,   // &T - referencia inmutable
+    MutBorrowed, // &mut T - referencia mutable
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -39,6 +60,7 @@ pub enum BinOp {
 pub enum Stmt {
     Print(Expr),
     Let {
+        mutable: bool,  // true = let mut, false = let (inmutable)
         name: String,
         value: Expr,
     },
@@ -53,7 +75,7 @@ pub enum Stmt {
     },
     Fn {
         name: String,
-        params: Vec<String>,
+        params: Vec<FnParam>,  // Cambiado para soportar borrowing
         body: Vec<Stmt>,
     },
     Expr(Expr),
@@ -103,10 +125,15 @@ fn stmt_parser() -> impl Parser<char, Stmt, Error = Simple<char>> + Clone {
 
         let let_stmt = just("let")
             .padded()
-            .ignore_then(ident.clone())
+            .then(just("mut").padded().or_not())  // Opcional "mut"
+            .then(ident.clone())
             .then_ignore(just("=").padded())
             .then(expr.clone())
-            .map(|(name, value)| Stmt::Let { name, value });
+            .map(|(((_, mutable), name), value)| Stmt::Let {
+                mutable: mutable.is_some(),  // true si hay "mut", false si no
+                name,
+                value,
+            });
 
         let return_stmt = just("return")
             .padded()
@@ -153,6 +180,24 @@ fn stmt_parser() -> impl Parser<char, Stmt, Error = Simple<char>> + Clone {
                 body,
             });
 
+        // Parser para parámetros de función (soporta borrowing)
+        let fn_param = just("&")
+            .padded()
+            .then(just("mut").padded().or_not())
+            .then(ident.clone())
+            .map(|((_, mutable), name)| FnParam {
+                name,
+                borrow_type: if mutable.is_some() {
+                    BorrowType::MutBorrowed
+                } else {
+                    BorrowType::Borrowed
+                },
+            })
+            .or(ident.clone().map(|name| FnParam {
+                name,
+                borrow_type: BorrowType::Owned,
+            }));
+
         let fn_stmt = just("fn")
             .padded()
             .ignore_then(ident.clone())
@@ -160,8 +205,7 @@ fn stmt_parser() -> impl Parser<char, Stmt, Error = Simple<char>> + Clone {
                 just("(")
                     .padded()
                     .ignore_then(
-                        ident
-                            .clone()
+                        fn_param
                             .separated_by(just(",").padded())
                             .allow_trailing(),
                     )
@@ -219,8 +263,28 @@ fn expr_parser() -> impl Parser<char, Expr, Error = Simple<char>> + Clone {
 
         let ident = text::ident().map(Expr::Ident).labelled("identifier");
 
+        // Borrowing: &expr o &mut expr
+        let borrow = just("&")
+            .padded()
+            .then(just("mut").padded().or_not())
+            .then(expr.clone())
+            .map(|((_, mutable), expr)| Expr::Borrow {
+                expr: Box::new(expr),
+                mutable: mutable.is_some(),
+            })
+            .labelled("borrow");
+
+        // Dereferencing: *expr
+        let deref = just("*")
+            .padded()
+            .ignore_then(expr.clone())
+            .map(|e| Expr::Deref(Box::new(e)))
+            .labelled("deref");
+
         let atom = number
             .or(string)
+            .or(borrow)  // Borrow debe ir ANTES de ident para que &x se parse como Borrow, no como Call
+            .or(deref)
             .or(ident.clone())
             .or(expr
                 .clone()
@@ -236,13 +300,12 @@ fn expr_parser() -> impl Parser<char, Expr, Error = Simple<char>> + Clone {
                             .separated_by(just(",").padded())
                             .allow_trailing(),
                     )
-                    .then_ignore(just(")").padded())
-                    .or_not(),
+                    .then_ignore(just(")").padded()),
             )
             .map(|(callee, args)| match callee {
                 Expr::Ident(name) => Expr::Call {
                     name,
-                    args: args.unwrap_or_default(),
+                    args,
                 },
                 _ => unreachable!(),
             })
@@ -324,6 +387,7 @@ mod tests {
         assert_eq!(
             program.statements,
             vec![Stmt::Let {
+                mutable: false,  // Inmutable por defecto
                 name: "x".to_string(),
                 value: Expr::Number(42)
             }]
@@ -339,6 +403,73 @@ mod tests {
         "#;
         let program = parse(src).unwrap();
         assert!(matches!(&program.statements[0], Stmt::If { .. }));
+    }
+
+    #[test]
+    fn test_parse_borrow() {
+        let src = r#"let r = &x"#;
+        let program = parse(src).unwrap();
+        if let Stmt::Let { value, .. } = &program.statements[0] {
+            assert!(matches!(value, Expr::Borrow { mutable: false, .. }));
+        } else {
+            panic!("Expected Let statement");
+        }
+    }
+
+    #[test]
+    fn test_parse_mut_borrow() {
+        let src = r#"let r = &mut x"#;
+        let program = parse(src).unwrap();
+        if let Stmt::Let { value, .. } = &program.statements[0] {
+            assert!(matches!(value, Expr::Borrow { mutable: true, .. }));
+        } else {
+            panic!("Expected Let statement");
+        }
+    }
+
+    #[test]
+    fn test_parse_deref() {
+        let src = r#"let val = *ptr"#;
+        let program = parse(src).unwrap();
+        if let Stmt::Let { value, .. } = &program.statements[0] {
+            assert!(matches!(value, Expr::Deref(_)));
+        } else {
+            panic!("Expected Let statement");
+        }
+    }
+
+    #[test]
+    fn test_parse_fn_with_borrow_param() {
+        let src = r#"
+            fn imprimir(&texto) {
+                print texto
+            }
+        "#;
+        let program = parse(src).unwrap();
+        if let Stmt::Fn { params, .. } = &program.statements[0] {
+            assert_eq!(params.len(), 1);
+            assert_eq!(params[0].name, "texto");
+            assert_eq!(params[0].borrow_type, BorrowType::Borrowed);
+        } else {
+            panic!("Expected Fn statement");
+        }
+    }
+
+    #[test]
+    fn test_parse_fn_with_mut_borrow_param() {
+        let src = r#"
+            fn modificar(&mut valor) {
+                valor = 10
+            }
+        "#;
+        let program = parse(src).unwrap();
+        if let Stmt::Fn { params, .. } = &program.statements[0] {
+            assert_eq!(params.len(), 1);
+            assert_eq!(params[0].name, "valor");
+            assert_eq!(params[0].borrow_type, BorrowType::MutBorrowed);
+        } else {
+            panic!("Expected Fn statement");
+        }
     }
 }
 
