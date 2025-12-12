@@ -143,17 +143,30 @@ let result = add(5, 3)
 
 ## 🏗️ Arquitectura
 
-### Proceso de Compilación Modular
+### Arquitectura Híbrida Zig + Rust
+
+**Filosofía:** Cada lenguaje hace lo que mejor sabe
+- **Zig:** Parsing eficiente y directo (compensa debilidades de Rust en parsing complejo)
+- **Rust:** Validación de memoria, borrow checking y generación de código NASM (fortalezas de Rust)
+
+### Proceso de Compilación Completo
 
 ```
 Source (.ad) 
-  → Lexer (tokens)
-  → Parser (AST)
-  → Code Generator (NASM)
+  → Zig Parser (parsing de structs complejos) ⚡
+  → Rust Parser (resto del lenguaje)
+  → Rust Validator (borrow checker, type checking)
+  → Rust Code Generator (NASM)
   → compile → .asm (Assembly)
   → assemble → .obj/.o (Object file)
   → link → .exe (Ejecutable)
   → run → Ejecutar programa
+```
+
+**Flujo Detallado:**
+```
+.ad → Zig (Parsing structs) + Rust (Parsing resto + Validación + Codegen) 
+  → .asm (NASM) → NASM → .obj → link → .exe → ✅ Ejecución
 ```
 
 ### Comandos Modulares
@@ -179,12 +192,21 @@ Puedes ejecutar cada paso por separado para mayor control:
 
 ## 📚 Documentación
 
+### Guías Principales
+- [Comandos Fáciles](Fácil_Comando.md) - ⚡ Guía rápida para empezar
+- [Roadmap Profesional](docs/ROADMAP-PROFESIONAL.md) - 🎯 Plan completo para hacer ADead profesional
+
+### Documentación Técnica
+- [Arquitectura](docs/ARQUITECTURA.md) - Zig + Rust integrados
+- [Flujo de Compilación](docs/FLUJO-COMPILACION.md) - Proceso completo
+- [Ideas OOP](ideas3.md) - Programación Orientada a Objetos
+- [Ideas Futuras](ideas2.md) - Roadmap e ideas de desarrollo
+
+### Referencias
 - [Gramática](docs/grammar.md)
 - [Tutorial](docs/tutorial.md)
 - [Diseño Técnico](docs/design.md)
-- [Uso Rápido](USO-RAPIDO.md) - Guía rápida de comandos
-- [Comandos Fáciles](Fácil_Comando.md) - Comandos simplificados
-- [Ideas Futuras](ideas2.md) - Roadmap e ideas de desarrollo
+- [Uso Rápido](USO-RAPIDO.md)
 - [Contribuir](CONTRIBUTING.md)
 - [Autores](AUTHORS.md)
 - [Changelog](CHANGELOG.md)
@@ -193,12 +215,16 @@ Puedes ejecutar cada paso por separado para mayor control:
 
 **MVP Funcional** ✅
 
-- ✅ Parser completo (print, let, if, while, funciones)
+- ✅ **Parser completo:** Zig + Rust integrados
+  - Zig: Parsing eficiente de structs complejos
+  - Rust: Parsing del resto + validación + codegen
+- ✅ **OOP Básico:** Structs, métodos, `init`/`destroy`, encapsulación (`pub`/`private`)
 - ✅ Generación NASM para x86_64 Windows/Linux
 - ✅ CLI tool modular (compile, assemble, link, run)
-- ✅ Ejemplos básicos
+- ✅ Ejemplos funcionales (hello, factorial, conditional, loop, structs, encapsulación, RAII)
 - ✅ Icono personalizado para archivos `.ad` en Windows
 - ✅ Compilación completa funcional en Windows con MinGW/MSYS2
+- ✅ **Flujo completo:** `.ad → Zig/Rust → ASM → NASM → .exe` funcionando
 
 **Mejoras Recientes:**
 
@@ -207,15 +233,34 @@ Puedes ejecutar cada paso por separado para mayor control:
 - ✅ Soporte robusto para Windows con MinGW64
 - ✅ Identidad visual con iconos personalizados
 
-**En desarrollo:**
+**Completado Recientemente:**
 
-- [ ] Sistema de tipos más robusto
-- [ ] Optimizaciones (const folding, dead code elimination)
-- [ ] Registro allocation mejorado
-- [ ] Arrays y strings
-- [ ] Interoperabilidad con C
-- [ ] Syntax highlighting para editores
-- [ ] LSP (Language Server Protocol) para IDEs
+- ✅ Parsing híbrido Zig + Rust (Zig compensa parsing complejo de structs)
+- ✅ Encapsulación (public/private) - O5 completado
+- ✅ RAII (init/destroy) - O2 completado
+- ✅ Structs con campos y métodos
+- ✅ Codegen de strings en struct literals
+- ✅ Flujo completo funcionando: `.ad → Zig + Rust → ASM → .exe`
+
+**🚀 Próximos Pasos (Roadmap Profesional):**
+
+**Críticos (Sprint 1 - Mes 1):**
+- [ ] Manejo de errores completo (Option/Result funcionales)
+- [ ] Arrays básicos
+- [ ] Import básico (módulos simples)
+
+**Esenciales (Sprint 2-3 - Mes 2-3):**
+- [ ] Librería estándar mínima (`std.string`, `std.math`, `std.array`)
+- [ ] Sistema de módulos completo
+- [ ] Tipos nativos: Bool, Float
+
+**Profesionales (Sprint 4-6 - Mes 4-6):**
+- [ ] Package Manager
+- [ ] Interoperabilidad C/Rust
+- [ ] Pipeline optimizado (caching, incremental)
+- [ ] Documentación oficial completa
+
+📖 **Ver [docs/ROADMAP-PROFESIONAL.md](docs/ROADMAP-PROFESIONAL.md) para detalles completos.**
 
 ## 🧪 Testing
 
@@ -244,13 +289,23 @@ Copyright (c) 2025 Eddi Andreé Salazar Matos
 
 ## 🎯 Roadmap
 
+### ✅ Completado (MVP)
 1. ✅ **MVP**: print/let/if/while/func + tests
-2. 🔄 **Reg Alloc**: mejor asignación de registros
-3. 📅 **IR y optimizaciones**: const-fold, dead-code
-4. 📅 **Calls & extern**: interoperabilidad con C
-5. 📅 **SIMD/intrinsics**: operaciones optimizadas
-6. 📅 **Multi-target**: Windows/Mac
-7. 📅 **Tooling**: LSP, formatter, playground web
+2. ✅ **OOP Básico**: Structs, métodos, RAII, encapsulación
+3. ✅ **Arquitectura**: Zig + Rust integrados para parsing y codegen
+4. ✅ **Flujo completo**: `.ad → Zig + Rust → ASM → .exe` funcionando
+
+### 🚀 Próximos Pasos (Roadmap Profesional)
+1. 🔴 **Manejo de errores completo**: Option/Result funcionales
+2. 🔴 **Arrays y tipos básicos**: Arrays, Bool, Float nativos
+3. 🔴 **Sistema de módulos**: Import/export, proyectos multi-archivo
+4. 🔴 **Librería estándar**: `std.string`, `std.math`, `std.array`
+5. 🟡 **Package Manager**: Ecosistema distribuido
+6. 🟡 **Interoperabilidad**: C/Rust FFI
+7. 🟡 **Optimizaciones**: Compilación incremental, caching, flags
+8. 🟡 **Documentación**: Guías oficiales completas
+
+📖 **Ver [docs/ROADMAP-PROFESIONAL.md](docs/ROADMAP-PROFESIONAL.md) para el plan detallado de 6 meses.**
 
 ---
 

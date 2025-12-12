@@ -1,14 +1,14 @@
-struct Banco {
-    saldo: int64,
-    pub nombre: string,
-    pub init(nombre: string) {
+struct Banco
+    saldo: int64
+    pub nombre: string
+    pub init(nombre: string)
         self.nombre = nombre
         self.saldo = 0
-    },
-    destroy() {
+    end
+    destroy()
         print "Cerrando cuenta del banco"
-    }
-}
+    end
+end
 
 print "Creando banco..."
 let mut banco = Banco {

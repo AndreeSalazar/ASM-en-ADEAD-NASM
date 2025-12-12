@@ -1,0 +1,25 @@
+[workspace]
+members = [
+    "crates/adead-cli",
+    "crates/adead-common",
+    "crates/adead-parser",
+    "crates/adead-backend",
+    "crates/adead-borrow",
+]
+resolver = "2"
+
+[workspace.package]
+version = "0.9.0"
+edition = "2021"
+authors = ["Eddi Andreé Salazar Matos <eddi.andre.salazar.matos@gmail.com>"]
+license = "MIT"
+description = "ADead: Python-like language that compiles to NASM (x86_64 Linux)"
+repository = "https://github.com/eddiandre/adead"
+
+[workspace.dependencies]
+anyhow = "1.0"
+thiserror = "1.0"
+clap = { version = "4.5", features = ["derive"] }
+chumsky = "0.9"
+logos = "0.14"
+pretty_assertions = "1.4"

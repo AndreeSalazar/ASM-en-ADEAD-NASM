@@ -1,13 +1,13 @@
-struct Recurso {
+struct Recurso
     valor: int64
-    init(valor: int64) {
+    init(valor: int64)
         self.valor = valor
-    }
-    destroy() {
+    end
+    destroy()
         print "Destruyendo recurso con valor:"
         print "RAII funcionando correctamente"
-    }
-}
+    end
+end
 
 print "Creando recurso1..."
 let recurso1 = Recurso {

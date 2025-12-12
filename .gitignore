@@ -3,23 +3,28 @@
 **/*.rs.bk
 Cargo.lock
 
+# Zig
+zig/zig-out/
+zig/zig-cache/
+
+# Build artifacts
+*.exe
+*.obj
+*.o
+*.asm
+*.pdb
+
 # IDE
-.idea/
 .vscode/
+.idea/
 *.swp
 *.swo
 *~
-
-# Build artifacts
-*.o
-*.asm
-out
-build/
-*.exe
-*.so
-*.dylib
 
 # OS
 .DS_Store
 Thumbs.db
 
+# Temporary files
+*.tmp
+*.log

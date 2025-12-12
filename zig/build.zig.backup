@@ -1,0 +1,23 @@
+// build.zig - Build system de Zig para compilar los módulos Zig
+// Compatible con Zig 0.16.0-dev y versiones anteriores
+
+const std = @import("std");
+
+pub fn build(b: *std.Build) void {
+    const target = b.standardTargetOptions(.{});
+    const optimize = b.standardOptimizeOption(.{});
+
+    // Crear biblioteca estática de Zig
+    // Intentar múltiples formas según la versión de Zig
+    
+    // Método 1: API estándar (Zig 0.13-0.15)
+    const lib = b.addStaticLibrary(.{
+        .name = "adead_zig",
+        .root_source_file = .{ .path = "src/main.zig" },
+        .target = target,
+        .optimize = optimize,
+    });
+
+    // Instalar la biblioteca en zig-out/lib
+    b.installArtifact(lib);
+}
