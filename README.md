@@ -146,28 +146,44 @@ let result = add(5, 3)
 ### Arquitectura Híbrida Zig + Rust
 
 **Filosofía:** Cada lenguaje hace lo que mejor sabe
-- **Zig:** Parsing eficiente y directo (compensa debilidades de Rust en parsing complejo)
-- **Rust:** Validación de memoria, borrow checking y generación de código NASM (fortalezas de Rust)
+- **Zig:** Parsing eficiente y directo (expresiones aritméticas, structs complejos) ⚡
+- **Rust:** Seguridad de memoria, borrow checking, validación y generación de código NASM 🔒
 
 ### Proceso de Compilación Completo
 
 ```
-Source (.ad) 
-  → Zig Parser (parsing de structs complejos) ⚡
-  → Rust Parser (resto del lenguaje)
-  → Rust Validator (borrow checker, type checking)
-  → Rust Code Generator (NASM)
-  → compile → .asm (Assembly)
-  → assemble → .obj/.o (Object file)
-  → link → .exe (Ejecutable)
-  → run → Ejecutar programa
+ADead Source (.ad)
+  ↓
+Zig Parser (parsing eficiente)
+  ├─ Expresiones aritméticas (2 + 5, etc.)
+  ├─ Structs complejos
+  └─ Operadores con precedencia correcta
+  ↓
+Rust (seguridad y validación)
+  ├─ Validación de memoria (borrow checker)
+  ├─ Type checking
+  ├─ Validación de seguridad
+  └─ Code Generator (NASM)
+  ↓
+NASM (Assembly x86_64)
+  ↓
+Object File (.obj/.o)
+  ↓
+Ejecutable (.exe)
+  ↓
+✅ Ejecución
 ```
 
 **Flujo Detallado:**
 ```
-.ad → Zig (Parsing structs) + Rust (Parsing resto + Validación + Codegen) 
-  → .asm (NASM) → NASM → .obj → link → .exe → ✅ Ejecución
+.ad → Zig (Parsea) → Rust (Seguridad de Memoria) → NASM (ASM) → .exe → ✅ Ejecución
 ```
+
+**Ventajas de esta Arquitectura:**
+- ✅ **Zig parsea:** Más eficiente para expresiones y estructuras complejas
+- ✅ **Rust valida:** Garantiza seguridad de memoria y corrección de tipos
+- ✅ **NASM compila:** Genera código assembly optimizado
+- ✅ **Rendimiento nativo:** Ejecutable final sin dependencias
 
 ### Comandos Modulares
 
@@ -216,15 +232,15 @@ Puedes ejecutar cada paso por separado para mayor control:
 **MVP Funcional** ✅
 
 - ✅ **Parser completo:** Zig + Rust integrados
-  - Zig: Parsing eficiente de structs complejos
-  - Rust: Parsing del resto + validación + codegen
+  - **Zig:** Parsea expresiones aritméticas y structs complejos de forma eficiente
+  - **Rust:** Seguridad de memoria (borrow checker), validación y generación de código NASM
 - ✅ **OOP Básico:** Structs, métodos, `init`/`destroy`, encapsulación (`pub`/`private`)
 - ✅ Generación NASM para x86_64 Windows/Linux
 - ✅ CLI tool modular (compile, assemble, link, run)
 - ✅ Ejemplos funcionales (hello, factorial, conditional, loop, structs, encapsulación, RAII)
 - ✅ Icono personalizado para archivos `.ad` en Windows
 - ✅ Compilación completa funcional en Windows con MinGW/MSYS2
-- ✅ **Flujo completo:** `.ad → Zig/Rust → ASM → NASM → .exe` funcionando
+- ✅ **Flujo completo:** `ADead → Zig (parsea) → Rust (seguridad) → NASM (ASM) → .exe` funcionando
 
 **Mejoras Recientes:**
 
@@ -235,12 +251,13 @@ Puedes ejecutar cada paso por separado para mayor control:
 
 **Completado Recientemente:**
 
-- ✅ Parsing híbrido Zig + Rust (Zig compensa parsing complejo de structs)
+- ✅ Parsing híbrido Zig + Rust (Zig parsea expresiones y structs complejos)
+- ✅ Integración completa: `ADead → Zig (parsea) → Rust (seguridad de memoria) → NASM → .exe`
 - ✅ Encapsulación (public/private) - O5 completado
 - ✅ RAII (init/destroy) - O2 completado
 - ✅ Structs con campos y métodos
 - ✅ Codegen de strings en struct literals
-- ✅ Flujo completo funcionando: `.ad → Zig + Rust → ASM → .exe`
+- ✅ Expresiones aritméticas parseadas con Zig (precedencia correcta garantizada)
 
 **🚀 Próximos Pasos (Roadmap Profesional):**
 
@@ -292,8 +309,8 @@ Copyright (c) 2025 Eddi Andreé Salazar Matos
 ### ✅ Completado (MVP)
 1. ✅ **MVP**: print/let/if/while/func + tests
 2. ✅ **OOP Básico**: Structs, métodos, RAII, encapsulación
-3. ✅ **Arquitectura**: Zig + Rust integrados para parsing y codegen
-4. ✅ **Flujo completo**: `.ad → Zig + Rust → ASM → .exe` funcionando
+3. ✅ **Arquitectura Híbrida**: Zig (parsea) + Rust (seguridad de memoria) integrados
+4. ✅ **Flujo completo**: `ADead → Zig (parsea) → Rust (seguridad) → NASM (ASM) → .exe` funcionando
 
 ### 🚀 Próximos Pasos (Roadmap Profesional)
 1. 🔴 **Manejo de errores completo**: Option/Result funcionales

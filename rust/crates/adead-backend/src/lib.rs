@@ -175,6 +175,21 @@ impl CodeGenerator {
                         self.text_section.push("    call WriteFile".to_string());
                         self.text_section.push("    ; WriteFile result in RAX (BOOL), but we ignore it for now".to_string());
                     }
+                    Expr::Number(n) => {
+                        // Print número: simplificado - crear string en tiempo de compilación (Sprint 2.1)
+                        // Estrategia simple: convertir número a string y usar como string literal
+                        let num_str = format!("{}", n);
+                        let label = self.add_string_data(&num_str);
+                        
+                        // Preparar WriteFile call (igual que Expr::String)
+                        self.text_section.push("    ; Prepare WriteFile call for number".to_string());
+                        self.text_section.push("    mov rcx, [rbp+16]  ; stdout handle".to_string());
+                        self.text_section.push(format!("    lea rdx, [rel {}]  ; buffer pointer", label));
+                        self.text_section.push(format!("    mov r8, {}_len  ; number of bytes to write", label));
+                        self.text_section.push("    lea r9, [rbp+24]  ; lpNumberOfBytesWritten (local var)".to_string());
+                        self.text_section.push("    mov qword [rsp+32], 0  ; lpOverlapped = NULL (5th param in shadow space)".to_string());
+                        self.text_section.push("    call WriteFile".to_string());
+                    }
                     Expr::Ident(name) => {
                         // Variable que contiene string: cargar la dirección del string desde la variable
                         if let Some(&offset) = self.variables.get(name) {
@@ -199,9 +214,138 @@ impl CodeGenerator {
                         self.text_section.push("    call WriteFile".to_string());
                     }
                     _ => {
-                        return Err(adead_common::ADeadError::RuntimeError {
-                            message: "print only supports strings or string variables for now".to_string(),
-                        });
+                        // Evaluar expresión numérica (ej: 2 + 5) y convertir a string en runtime
+                        // RAX contendrá el resultado numérico después de generate_expr_windows
+                        self.generate_expr_windows(expr)?;
+                        // RAX ahora contiene el resultado numérico
+                        
+                        // Reservar espacio para buffer en stack (20 bytes es suficiente para int64)
+                        let buffer_offset = self.stack_offset;
+                        self.stack_offset += 24; // Buffer + align
+                        
+                        // Guardar resultado en rbx temporalmente
+                        self.text_section.push("    mov rbx, rax  ; guardar resultado".to_string());
+                        
+                        // Convertir número en RBX a string en buffer [rbp - buffer_offset]
+                        // Función helper inline para convertir int64 a string
+                        let conv_label = self.new_label("int_to_str_runtime");
+                        self.text_section.push(format!("    lea rdx, [rbp - {}]  ; dirección del buffer", buffer_offset + 8));
+                        self.text_section.push("    mov rax, rbx  ; número a convertir".to_string());
+                        self.text_section.push("    push rbx  ; guardar resultado".to_string());
+                        self.text_section.push("    push rdx  ; guardar dirección buffer".to_string());
+                        self.text_section.push(format!("    call {}", conv_label));
+                        // RAX ahora contiene la longitud del string
+                        // RDX tiene la dirección del buffer (preservada por la función helper usando r8)
+                        
+                        // IMPORTANTE: Guardar RAX (longitud) inmediatamente después del call
+                        self.text_section.push("    push rax  ; guardar longitud (resultado del call)".to_string());
+                        // RDX debe tener la dirección del buffer (función helper la preserva en r8 y la copia a rdx)
+                        
+                        // Preparar WriteFile call
+                        self.text_section.push("    ; Prepare WriteFile call for numeric expression".to_string());
+                        self.text_section.push("    mov rcx, [rbp+16]  ; stdout handle (primer parámetro)".to_string());
+                        // RDX ya tiene la dirección del buffer (segundo parámetro) - preservado por helper
+                        self.text_section.push("    pop r8  ; longitud del string (tercer parámetro)".to_string());
+                        self.text_section.push("    lea r9, [rbp+24]  ; lpNumberOfBytesWritten (cuarto parámetro)".to_string());
+                        self.text_section.push("    mov qword [r9], 0  ; inicializar lpNumberOfBytesWritten".to_string());
+                        self.text_section.push("    mov qword [rsp+32], 0  ; lpOverlapped = NULL (quinto parámetro en shadow space)".to_string());
+                        self.text_section.push("    call WriteFile".to_string());
+                        
+                        // Generar función helper para convertir int64 a string (runtime)
+                        self.text_section.push(format!("    jmp {}_end", conv_label));
+                        self.text_section.push(format!("{}:", conv_label));
+                        self.text_section.push("    ; Función helper: convertir int64 a string decimal (runtime)".to_string());
+                        self.text_section.push("    ; Entrada: RAX = número, RDX = dirección del buffer".to_string());
+                        self.text_section.push("    ; Salida: RAX = longitud del string".to_string());
+                        self.text_section.push("    push rbp".to_string());
+                        self.text_section.push("    mov rbp, rsp".to_string());
+                        self.text_section.push("    push rbx".to_string());
+                        self.text_section.push("    push rcx".to_string());
+                        // CRÍTICO: Guardar dirección buffer original en r8 (registro no volátil) ANTES de cualquier modificación
+                        self.text_section.push("    mov r8, rdx  ; guardar dirección buffer en r8 (preservar para retorno)".to_string());
+                        // Guardar también en stack para restaurar después
+                        self.text_section.push("    push rdx  ; guardar dirección buffer original en stack también".to_string());
+                        // Usar rsi como registro de trabajo durante procesamiento
+                        self.text_section.push("    mov rsi, rdx  ; copiar a rsi para usar durante procesamiento".to_string());
+                        
+                        // Manejar negativo
+                        let pos_label = self.new_label("num_pos_rt");
+                        let end_label = self.new_label("num_end_rt");
+                        self.text_section.push("    cmp rax, 0".to_string());
+                        self.text_section.push(format!("    jge {}", pos_label));
+                        self.text_section.push("    mov byte [rdx], '-'".to_string());
+                        self.text_section.push("    inc rdx".to_string());
+                        self.text_section.push("    neg rax".to_string());
+                        self.text_section.push(format!("{}:", pos_label));
+                        
+                        self.text_section.push("    mov rbx, rdx  ; inicio buffer".to_string());
+                        self.text_section.push("    mov rcx, 10  ; divisor".to_string());
+                        
+                        // Caso especial: 0
+                        let not_zero_label = self.new_label("not_zero_rt");
+                        self.text_section.push("    cmp rax, 0".to_string());
+                        self.text_section.push(format!("    jne {}", not_zero_label));
+                        self.text_section.push("    mov byte [rsi], '0'".to_string());
+                        self.text_section.push("    inc rsi".to_string());
+                        self.text_section.push(format!("    jmp {}", end_label));
+                        self.text_section.push(format!("{}:", not_zero_label));
+                        
+                        // Loop: dividir y obtener dígitos
+                        let loop_label = self.new_label("digit_loop_rt");
+                        self.text_section.push(format!("{}:", loop_label));
+                        self.text_section.push("    xor rdx, rdx  ; limpiar para división".to_string());
+                        self.text_section.push("    div rcx  ; rax = rax/10, rdx = rax%10".to_string());
+                        self.text_section.push("    add dl, '0'  ; convertir a ASCII".to_string());
+                        self.text_section.push("    mov [rbx], dl  ; guardar dígito".to_string());
+                        self.text_section.push("    inc rbx".to_string());
+                        self.text_section.push("    cmp rax, 0".to_string());
+                        self.text_section.push(format!("    jne {}", loop_label));
+                        
+                        self.text_section.push(format!("{}:", end_label));
+                        self.text_section.push("    mov byte [rbx], 0xA  ; newline".to_string());
+                        self.text_section.push("    inc rbx".to_string());
+                        
+                        // Revertir string (dígitos están al revés)
+                        let rev_start = self.new_label("rev_start_rt");
+                        let rev_loop = self.new_label("rev_loop_rt");
+                        let rev_done = self.new_label("rev_done_rt");
+                        self.text_section.push(format!("{}:", rev_start));
+                        // Usar r8 que tiene la dirección original del buffer (guardada al inicio, nunca modificado)
+                        self.text_section.push("    mov rcx, r8  ; inicio para el loop de reverso (r8 tiene dirección original)".to_string());
+                        self.text_section.push("    mov rdx, rbx  ; fin para el loop de reverso".to_string());
+                        self.text_section.push("    dec rdx  ; excluir newline del reverso".to_string());
+                        self.text_section.push("    cmp rcx, rdx".to_string());
+                        self.text_section.push(format!("    jge {}", rev_done));
+                        self.text_section.push(format!("{}:", rev_loop));
+                        self.text_section.push("    mov al, [rcx]".to_string());
+                        self.text_section.push("    mov bl, [rdx]".to_string());
+                        self.text_section.push("    mov [rcx], bl".to_string());
+                        self.text_section.push("    mov [rdx], al".to_string());
+                        self.text_section.push("    inc rcx".to_string());
+                        self.text_section.push("    dec rdx".to_string());
+                        self.text_section.push("    cmp rcx, rdx".to_string());
+                        self.text_section.push(format!("    jl {}", rev_loop));
+                        self.text_section.push(format!("{}:", rev_done));
+                        
+                        // Calcular longitud: rbx (fin) - dirección inicial del buffer
+                        self.text_section.push("    mov rax, rbx  ; fin del string (incluye newline)".to_string());
+                        self.text_section.push("    sub rax, r8  ; longitud = fin - inicio (r8 tiene la dirección original)".to_string());
+                        
+                        // Restaurar registros (en orden inverso del push)
+                        // Stack tiene: [rbp] [rbx] [rcx] [rdx_buffer] <- top
+                        // Hacer pop rdx para balancear el stack primero
+                        self.text_section.push("    pop rdx  ; balancear stack (descartar valor del stack)".to_string());
+                        self.text_section.push("    pop rcx  ; restaurar rcx original".to_string());
+                        self.text_section.push("    pop rbx".to_string());
+                        self.text_section.push("    pop rbp".to_string());
+                        
+                        // CRÍTICO: Restaurar la dirección del buffer en RDX DESPUÉS de todos los pop
+                        // El caller necesita RDX con la dirección del buffer para WriteFile
+                        self.text_section.push("    mov rdx, r8  ; restaurar dirección buffer en rdx para el caller (r8 nunca se modificó)".to_string());
+                        
+                        // RAX tiene la longitud, RDX tiene la dirección del buffer - ambos para el caller
+                        self.text_section.push("    ret".to_string());
+                        self.text_section.push(format!("{}_end:", conv_label));
                     }
                 }
             }
@@ -234,6 +378,12 @@ impl CodeGenerator {
                 self.text_section
                     .push(format!("    mov [rbp - {}], rax  ; variable {} ({})", 
                         offset + 8, name, if *mutable { "mutable" } else { "immutable" }));
+            }
+            Stmt::Import(_module_name) => {
+                // Import statements son procesados en tiempo de compilación
+                // No generan código directamente, solo información de módulos
+                // TODO: Implementar resolución de módulos
+                self.text_section.push(format!("    ; import {} (pendiente resolución)", _module_name));
             }
             Stmt::Expr(expr) => {
                 self.generate_expr_windows(expr)?;
@@ -285,8 +435,9 @@ impl CodeGenerator {
                 self.text_section.push(format!("    jmp {}", loop_start));
                 self.text_section.push(format!("{}:", loop_end));
             }
-            Stmt::Fn { name, params, body } => {
+            Stmt::Fn { visibility: _, name, params, body } => {
                 // Generate function with Windows x64 calling convention
+                // Visibility no afecta la generación de código (Sprint 1.3)
                 let func_label = format!("fn_{}", name);
                 self.text_section.push(format!("    jmp {}_end", func_label));
                 self.text_section.push(format!("{}:", func_label));
@@ -393,6 +544,34 @@ impl CodeGenerator {
                 // Retornar dirección del string en rax
                 self.text_section.push(format!("    lea rax, [rel {}]  ; dirección del string", label));
             }
+            Expr::ArrayLiteral(elements) => {
+                // Array literal: [1, 2, 3]
+                // Estrategia: stack-allocated array
+                // 1. Reservar espacio en stack para todos los elementos
+                // 2. Calcular offset base
+                // 3. Generar cada elemento y almacenarlo
+                
+                let array_size = elements.len() * 8; // 8 bytes por elemento (int64)
+                let base_offset = self.stack_offset;
+                
+                // Reservar espacio en stack
+                self.stack_offset += array_size as i64;
+                self.text_section.push(format!("    ; Array literal: {} elementos ({} bytes)", elements.len(), array_size));
+                self.text_section.push(format!("    sub rsp, {}  ; reservar espacio para array", array_size));
+                
+                // Generar y almacenar cada elemento
+                for (i, element) in elements.iter().enumerate() {
+                    self.generate_expr_windows(element)?;
+                    // Almacenar en la posición correcta del array
+                    // [rbp - base_offset - (i * 8)] donde i va de 0 a len-1
+                    let element_offset = base_offset + (i as i64 * 8);
+                    self.text_section.push(format!("    mov [rbp - {}], rax  ; array[{}]", element_offset + 8, i));
+                }
+                
+                // Retornar dirección base del array (offset desde rbp)
+                // Usamos LEA para calcular la dirección
+                self.text_section.push(format!("    lea rax, [rbp - {}]  ; dirección base del array", base_offset + 8));
+            }
             Expr::Borrow { expr, .. } => {
                 // Borrowing: generar dirección de la expresión
                 // Por ahora, solo soportamos borrowing de variables
@@ -472,7 +651,7 @@ impl CodeGenerator {
                     }
                 }
             }
-            Expr::Call { name, args } => {
+            Expr::Call { module, name, args } => {
                 // Windows x64 calling convention
                 let mut stack_args = Vec::new();
                 for (i, arg) in args.iter().enumerate() {
@@ -500,8 +679,15 @@ impl CodeGenerator {
                     }
                 }
                 
+                // Llamar función (con namespace si existe) (Sprint 1.3)
+                let function_name = if let Some(module_name) = module {
+                    format!("fn_{}_{}", module_name, name)
+                } else {
+                    format!("fn_{}", name)
+                };
+                
                 self.text_section.push("    sub rsp, 32  ; shadow space".to_string());
-                self.text_section.push(format!("    call fn_{}", name));
+                self.text_section.push(format!("    call {}", function_name));
                 if !stack_args.is_empty() {
                     self.text_section.push(format!("    add rsp, {}", (stack_args.len() * 8) + 32));
                 } else {
@@ -618,6 +804,32 @@ impl CodeGenerator {
                 self.generate_expr_windows(object)?;
                 self.text_section.push(format!("    ; accediendo campo '{}' (offset simplificado: 0)", field));
                 self.text_section.push("    mov rax, [rax]  ; cargar primer campo (simplificado)".to_string());
+            }
+            Expr::Index { array, index } => {
+                // Indexación: arr[0]
+                // Estrategia:
+                // 1. Generar expresión del array (dirección base en rax)
+                // 2. Generar expresión del índice
+                // 3. Calcular dirección: base + (index * 8) 
+                // 4. Cargar valor desde esa dirección
+                
+                self.generate_expr_windows(array)?;
+                // Guardar dirección base en stack
+                self.text_section.push("    push rax  ; guardar dirección base del array".to_string());
+                
+                self.generate_expr_windows(index)?;
+                // rax contiene el índice
+                // Multiplicar por 8 (tamaño de int64)
+                self.text_section.push("    mov rcx, rax  ; rcx = índice".to_string());
+                self.text_section.push("    mov rax, 8".to_string());
+                self.text_section.push("    imul rax, rcx  ; rax = índice * 8 (offset en bytes)".to_string());
+                
+                // Restaurar dirección base y sumar offset
+                self.text_section.push("    pop rbx  ; restaurar dirección base".to_string());
+                self.text_section.push("    add rax, rbx  ; rax = dirección base + offset".to_string());
+                
+                // Cargar valor desde la dirección calculada
+                self.text_section.push("    mov rax, [rax]  ; cargar array[index]".to_string());
             }
             Expr::MethodCall { object, method, args } => {
                 self.generate_expr_windows(object)?;
@@ -771,12 +983,12 @@ impl CodeGenerator {
                         self.text_section.push(format!("    syscall",));
                     }
                     _ => {
-                        // Evaluate expression and print as number
+                        // Intentar evaluar expresión numérica
                         self.generate_expr(expr)?;
-                        // Result is in rax, convert to string (simplified: just print as-is for now)
-                        // For MVP, we'll handle string printing only
+                        // RAX ahora contiene el resultado numérico
+                        // Por ahora, solo soportamos literales. Expresiones complejas se asignan a variable
                         return Err(adead_common::ADeadError::RuntimeError {
-                            message: "print only supports strings for now".to_string(),
+                            message: "print supports strings and number literals. For expressions, assign to a variable first: let x = expr; print x".to_string(),
                         });
                     }
                 }
@@ -810,6 +1022,12 @@ impl CodeGenerator {
                 self.text_section
                     .push(format!("    mov [rbp - {}], rax  ; variable {} ({})", 
                         offset + 8, name, if *mutable { "mutable" } else { "immutable" }));
+            }
+            Stmt::Import(_module_name) => {
+                // Import statements son procesados en tiempo de compilación
+                // No generan código directamente, solo información de módulos
+                // TODO: Implementar resolución de módulos
+                self.text_section.push(format!("    ; import {} (pendiente resolución)", _module_name));
             }
             Stmt::Expr(expr) => {
                 self.generate_expr(expr)?;
@@ -861,8 +1079,9 @@ impl CodeGenerator {
                 self.text_section.push(format!("    jmp {}", loop_start));
                 self.text_section.push(format!("{}:", loop_end));
             }
-            Stmt::Fn { name, params, body } => {
+            Stmt::Fn { visibility: _, name, params, body } => {
                 // Generate function
+                // Visibility no afecta la generación de código (Sprint 1.3)
                 let func_label = format!("fn_{}", name);
                 self.text_section.push(format!("    jmp {}_end", func_label));
                 self.text_section.push(format!("{}:", func_label));
@@ -964,6 +1183,24 @@ impl CodeGenerator {
                     message: "cannot use string in expression yet".to_string(),
                 });
             }
+            Expr::ArrayLiteral(elements) => {
+                // Array literal: [1, 2, 3] (Linux)
+                // Similar a Windows pero con convenciones de System V
+                let array_size = elements.len() * 8; // 8 bytes por elemento (int64)
+                let base_offset = self.stack_offset;
+                
+                self.stack_offset += array_size as i64;
+                self.text_section.push(format!("    ; Array literal: {} elementos ({} bytes)", elements.len(), array_size));
+                self.text_section.push(format!("    sub rsp, {}  ; reservar espacio para array", array_size));
+                
+                for (i, element) in elements.iter().enumerate() {
+                    self.generate_expr(element)?;
+                    let element_offset = base_offset + (i as i64 * 8);
+                    self.text_section.push(format!("    mov [rbp - {}], rax  ; array[{}]", element_offset + 8, i));
+                }
+                
+                self.text_section.push(format!("    lea rax, [rbp - {}]  ; dirección base del array", base_offset + 8));
+            }
             Expr::Borrow { expr, .. } => {
                 // Borrowing: generar dirección de la expresión
                 // Por ahora, solo soportamos borrowing de variables
@@ -1007,6 +1244,21 @@ impl CodeGenerator {
                 // Acceso a campo (simplificado)
                 self.generate_expr(object)?;
                 self.text_section.push("    mov rax, [rax]  ; cargar campo (simplificado)".to_string());
+            }
+            Expr::Index { array, index } => {
+                // Indexación: arr[0] (Linux)
+                self.generate_expr(array)?;
+                self.text_section.push("    push rax  ; guardar dirección base del array".to_string());
+                
+                self.generate_expr(index)?;
+                self.text_section.push("    mov rcx, rax  ; rcx = índice".to_string());
+                self.text_section.push("    mov rax, 8".to_string());
+                self.text_section.push("    imul rax, rcx  ; rax = índice * 8 (offset en bytes)".to_string());
+                
+                self.text_section.push("    pop rbx  ; restaurar dirección base".to_string());
+                self.text_section.push("    add rax, rbx  ; rax = dirección base + offset".to_string());
+                
+                self.text_section.push("    mov rax, [rax]  ; cargar array[index]".to_string());
             }
             Expr::MethodCall { object, method, args } => {
                 // Llamada a método (simplificado)
@@ -1150,7 +1402,7 @@ impl CodeGenerator {
                     }
                 }
             }
-            Expr::Call { name, args } => {
+            Expr::Call { module, name, args } => {
                 // Generate args in reverse order (for System V: rdi, rsi, rdx, ...)
                 for (i, arg) in args.iter().enumerate().rev() {
                     self.generate_expr(arg)?;
@@ -1170,7 +1422,14 @@ impl CodeGenerator {
                     self.text_section.push(format!("    mov {}, rax", reg));
                 }
                 
-                self.text_section.push(format!("    call fn_{}", name));
+                // Llamar función (con namespace si existe) (Sprint 1.3)
+                let function_name = if let Some(module_name) = module {
+                    format!("fn_{}_{}", module_name, name)
+                } else {
+                    format!("fn_{}", name)
+                };
+                
+                self.text_section.push(format!("    call {}", function_name));
                 // Return value is in rax
             }
         }
@@ -1181,17 +1440,29 @@ impl CodeGenerator {
         let label = format!("msg{}", self.string_counter);
         self.string_counter += 1;
         
-        // Escape string for NASM
+        // Escape string for NASM (pero preservar \n como 0xA)
         let escaped = s
             .replace('\\', "\\\\")
-            .replace('\n', "\\n")
+            .replace('\n', "\\n")  // Convertir \n a \\n para NASM
             .replace('\t', "\\t")
             .replace('"', "\\\"");
         
-        self.data_section.push(format!(
-            "{}: db \"{}\", 0xA",
-            label, escaped
-        ));
+        // Si el string no termina en \n, agregar 0xA al final
+        let needs_newline = !s.ends_with('\n');
+        
+        if needs_newline {
+            self.data_section.push(format!(
+                "{}: db \"{}\", 0xA",
+                label, escaped
+            ));
+        } else {
+            // Ya tiene \n, solo usar el string escapado
+            self.data_section.push(format!(
+                "{}: db \"{}\"",
+                label, escaped
+            ));
+        }
+        
         self.data_section.push(format!(
             "{}_len: equ $ - {}",
             label, label

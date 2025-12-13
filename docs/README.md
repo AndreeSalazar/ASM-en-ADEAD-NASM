@@ -9,6 +9,9 @@ docs/
 ├── roadmap/          # Roadmap y progreso del proyecto
 ├── testing/          # Documentación de testing
 ├── windows/           # Documentación específica de Windows
+├── casos-de-uso/     # Casos de uso por dominio
+├── avances/          # Capacidades y avances técnicos
+├── aplicaciones/     # Aplicaciones posibles
 └── README.md         # Este archivo
 ```
 
@@ -58,6 +61,56 @@ Documentación específica para Windows:
 - Configuración de build system
 - Troubleshooting
 - Compatibilidad Windows x64
+
+---
+
+### 🎯 Casos de Uso (`casos-de-uso/`)
+
+Documentación completa de casos de uso organizados por dominio:
+
+- **`01-CIENCIAS-DATOS.md`** - Análisis de datos, estadísticas, ML
+- **`02-SISTEMAS-EMBEDDED.md`** - Sistemas embebidos, drivers, IoT
+- **`03-VIDEOJUEGOS-GRAFICOS.md`** - Game engines, renderizado, gráficos
+- **`04-COMUNICACIONES-REDES.md`** - Protocolos, servidores, networking
+- **`05-SEGURIDAD-CRIPTOGRAFIA.md`** - Encriptación, hashing, seguridad
+- **`06-CIENCIA-INVESTIGACION.md`** - Simulaciones, física, matemáticas
+- **`07-EDUCACION-APRENDIZAJE.md`** - Enseñanza, compiladores educativos
+- **`08-HERRAMIENTAS-UTILIDADES.md`** - CLI tools, procesadores, parsers
+
+**Contenido:**
+- Casos de uso específicos por dominio
+- Ejemplos de código
+- Requisitos de features
+- Estado de viabilidad
+
+---
+
+### 🚀 Avances (`avances/`)
+
+Documentación de capacidades técnicas y avances:
+
+- **`CAPACIDADES-ACTUALES.md`** - Features implementadas y funcionales
+- **`ARQUITECTURA-HIBRIDA.md`** - Arquitectura Zig + Rust
+
+**Contenido:**
+- Features disponibles actualmente
+- Estado de implementación
+- Arquitectura técnica
+- Métricas de progreso
+
+---
+
+### 🌟 Aplicaciones (`aplicaciones/`)
+
+Lista exhaustiva de aplicaciones posibles:
+
+- **`APLICACIONES-POSIBLES.md`** - Catálogo completo de aplicaciones
+
+**Contenido:**
+- Aplicaciones por categoría
+- Aplicaciones por complejidad
+- Priorización
+- Casos de uso específicos
 
 ---
 

@@ -68,7 +68,11 @@ fn main() -> Result<()> {
             let source = fs::read_to_string(&input)
                 .with_context(|| format!("Failed to read input file: {}", input))?;
 
-            let program = adead_parser::parse(&source)
+            // Pasar directorio del archivo de entrada para resolución de imports (Sprint 1.3)
+            let input_path = Path::new(&input);
+            let current_dir = input_path.parent();
+            
+            let program = adead_parser::parse_with_dir(&source, current_dir)
                 .map_err(|e| anyhow::anyhow!("Parse error: {}", e))?;
 
             let mut generator = adead_backend::CodeGenerator::new();
@@ -776,7 +780,11 @@ fn run_program(input_file: &str, keep_temp: bool) -> Result<()> {
     let source = fs::read_to_string(input_file)
         .with_context(|| format!("Failed to read input file: {}", input_file))?;
 
-    let program = adead_parser::parse(&source)
+    // Pasar directorio del archivo de entrada para resolución de imports (Sprint 1.3)
+    let input_path = Path::new(input_file);
+    let current_dir = input_path.parent();
+
+    let program = adead_parser::parse_with_dir(&source, current_dir)
         .map_err(|e| anyhow::anyhow!("Parse error: {}", e))?;
 
     let mut generator = adead_backend::CodeGenerator::new();

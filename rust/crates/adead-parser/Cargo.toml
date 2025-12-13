@@ -9,3 +9,6 @@ chumsky = { workspace = true }
 adead-common = { path = "../adead-common" }
 anyhow = { workspace = true }
 
+[build-dependencies]
+# Build script para linkear con biblioteca Zig
+

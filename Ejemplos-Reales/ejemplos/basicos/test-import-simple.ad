@@ -1,0 +1,6 @@
+import utils
+
+print "Test de import simple"
+utils.saludar()
+print "Import funciona!"
+

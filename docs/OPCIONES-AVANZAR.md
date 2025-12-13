@@ -1,0 +1,1058 @@
+# 🚀 Opciones para Avanzar - ADead
+
+Guía completa de qué falta por hacer y cómo seguir mejorando ADead.
+
+## 📊 Estado Actual
+
+**Sprint 1:** 🟢 **100% COMPLETADO** ✅
+- ✅ Manejo de errores (Option/Result/Match): 100%
+- ✅ Arrays básicos: 100%
+- ✅ Import básico: 100% + Testing profundo
+
+**Quick Wins:**
+- ✅ Print de números: 100% COMPLETADO
+
+**Features implementadas:** ~77% del MVP completo
+
+**Próximo hito:** Sprint 2 - Librería Estándar
+
+---
+
+## 🎯 OPCIÓN 1: Quick Wins (MEJORAS RÁPIDAS - Prioridad Alta)
+
+### 1.1 Print de Números (3 horas) ⚡ RÁPIDO
+
+**Estado:** 🟢 **IMPLEMENTADO** ✅  
+**Por qué:** Muy solicitado, muy simple, mejora UX inmediatamente
+
+**Implementación:**
+```rust
+// En generate_stmt_windows() y generate_stmt() para print
+match expr {
+    Expr::Number(n) => {
+        // Simplificado: convertir número a string en tiempo de compilación
+        let num_str = format!("{}{}", n, "\n");
+        let label = self.add_string_data(&num_str);
+        // Usar WriteFile/sys_write como string normal
+    }
+}
+```
+
+**Archivos modificados:**
+- ✅ `rust/crates/adead-backend/src/lib.rs` - `generate_stmt_windows()` y `generate_stmt()`
+- ✅ Soporta números literales positivos y cero
+- ✅ Windows y Linux funcionando
+
+**Funcionalidad:**
+- ✅ `print 42` - Funciona
+- ✅ `print 0` - Funciona
+- ✅ `print 1234567890` - Funciona
+- ⏳ Variables numéricas: asignar a variable primero (`let x = 42; print x`)
+
+**Impacto:** 🟡 MEDIO - Mejora UX inmediatamente ✅  
+**Desbloquea:** Debugging más fácil, programas más informativos
+
+---
+
+### 1.2 Operadores Lógicos (4 horas)
+
+**Estado:** 🔴 NO IMPLEMENTADO  
+**Por qué:** Necesarios para lógica compleja, muy común
+
+**Implementación:**
+```adead
+// AST: Agregar a BinOp
+And,    // &&
+Or,     // ||
+Not,    // ! (unario)
+
+// Parser: Agregar precedencia
+// Backend: Generar código NASM para operaciones booleanas
+```
+
+**Archivos a modificar:**
+- `rust/crates/adead-parser/src/lib.rs` - `BinOp` enum y parser
+- `rust/crates/adead-backend/src/lib.rs` - Codegen para &&, ||, !
+
+**Impacto:** 🟡 MEDIO - Expresiones booleanas más claras  
+**Desbloquea:** Lógica condicional compleja
+
+---
+
+### 1.3 Break y Continue (5 horas)
+
+**Estado:** 🔴 NO IMPLEMENTADO  
+**Por qué:** Control de loops esencial, sintaxis estándar
+
+**Implementación:**
+```rust
+// AST: Agregar a Stmt
+Break,
+Continue,
+
+// Parser: Palabras clave simples
+// Backend: Jump a label de fin/inicio de loop
+```
+
+**Archivos a modificar:**
+- `rust/crates/adead-parser/src/lib.rs` - `Stmt` enum y parser
+- `rust/crates/adead-backend/src/lib.rs` - Manejo de labels en loops
+
+**Impacto:** 🟡 MEDIO - Control de flujo mejorado  
+**Desbloquea:** Loops más expresivos
+
+---
+
+### 1.4 Asignación a Array Index (6 horas)
+
+**Estado:** 🔴 NO IMPLEMENTADO  
+**Por qué:** Arrays son read-only actualmente, muy limitante
+
+**Implementación:**
+```rust
+// Modificar Stmt::Assign para soportar Expr::Index
+Stmt::Assign {
+    target: Expr,  // Puede ser Ident o Index
+    value: Expr,
+}
+
+// Backend: Calcular dirección y almacenar
+```
+
+**Archivos a modificar:**
+- `rust/crates/adead-parser/src/lib.rs` - Parser de asignación
+- `rust/crates/adead-backend/src/lib.rs` - Codegen para `arr[i] = valor`
+
+**Impacto:** 🟡 MEDIO - Arrays mutables, mucho más útiles  
+**Desbloquea:** Algoritmos de ordenamiento, estructuras de datos
+
+---
+
+### 1.5 Tipos Nativos Bool (5 horas)
+
+**Estado:** 🔴 NO IMPLEMENTADO (actualmente bool = int64)  
+**Por qué:** Claridad semántica, mejor type safety
+
+**Implementación:**
+```rust
+// AST: Agregar Type::Bool
+// Parser: Reconocer `bool` como tipo
+// Backend: Optimizar código (usar registros de flags)
+```
+
+**Archivos a modificar:**
+- `rust/crates/adead-common/src/lib.rs` - `Type` enum
+- `rust/crates/adead-parser/src/lib.rs` - Parser de tipos
+- `rust/crates/adead-backend/src/lib.rs` - Optimizaciones
+
+**Impacto:** 🟡 MEDIO - Mejor type safety, código más claro  
+**Desbloquea:** Validaciones de tipo más estrictas
+
+---
+
+## 🎯 OPCIÓN 2: Sprint 2 - Librería Estándar (ALTA PRIORIDAD)
+
+### 2.1 Tipos Float64 y Float32 (15 horas)
+
+**Estado:** 🔴 NO IMPLEMENTADO  
+**Por qué:** CRÍTICO - Necesario para matemáticas, ciencias, gráficos
+
+**Implementación detallada:**
+```rust
+// AST: Agregar
+Expr::Float(f64),
+Type::Float64,
+Type::Float32,
+
+// Parser: Reconocer literales 3.14, 2.5e10
+// Backend: Usar registros xmm0-xmm15 (SSE/AVX)
+// Operaciones: +, -, *, /, sqrt, pow
+```
+
+**Fases:**
+1. **Parser (5h):** Literales float, tipos float
+2. **Backend Windows (5h):** Codegen con SSE (xmm0-xmm7)
+3. **Backend Linux (3h):** Codegen con System V ABI
+4. **Tests (2h):** Operaciones básicas, conversiones
+
+**Archivos:**
+- `rust/crates/adead-common/src/lib.rs` - Tipos
+- `rust/crates/adead-parser/src/lib.rs` - Parser
+- `rust/crates/adead-backend/src/lib.rs` - Codegen SSE
+
+**Impacto:** 🔴 CRÍTICO - Base para todo avanzado  
+**Desbloquea:** Matemáticas, ciencias, gráficos, ML básico
+
+---
+
+### 2.2 Strings Completos (25 horas)
+
+**Estado:** 🟡 PARCIAL (solo literales básicos)  
+**Por qué:** ALTO - Necesario para casi todo
+
+**Implementación:**
+
+#### Fase 1: Operaciones Básicas (10h)
+```adead
+// Concatenación
+let resultado = "hola" + " mundo"
+
+// Longitud
+let len = str.len()
+
+// Acceso a caracteres
+let char = str[0]  // Similar a arrays
+```
+
+#### Fase 2: Funciones Utiles (10h)
+```adead
+// Búsqueda
+let pos = str.find("substring")
+let contains = str.contains("text")
+
+// Manipulación
+let upper = str.to_upper()
+let lower = str.to_lower()
+let trimmed = str.trim()
+
+// Conversión
+let num_str = num.to_string()
+let num = str.parse_int()
+```
+
+#### Fase 3: Interpolación (5h)
+```adead
+let nombre = "Juan"
+let mensaje = "Hola {nombre}, tienes {edad} años"
+```
+
+**Archivos:**
+- `rust/crates/adead-parser/src/lib.rs` - Operadores, métodos
+- `rust/crates/adead-backend/src/lib.rs` - Funciones helper
+- `rust/crates/adead-stdlib/` (NUEVO) - Implementación runtime
+
+**Impacto:** 🔴 ALTO - Desbloquea procesamiento de texto, parsers, I/O  
+**Dependencias:** Arrays (✅ completo)
+
+---
+
+### 2.3 std.math - Funciones Matemáticas (20 horas)
+
+**Estado:** 🔴 NO IMPLEMENTADO  
+**Por qué:** ALTO - Necesario para ciencias de datos, gráficos
+
+**Funciones a implementar:**
+
+#### Básicas (5h)
+```adead
+import std.math
+
+let raiz = math.sqrt(25.0)
+let potencia = math.pow(2.0, 10.0)
+let absoluto = math.abs(-5.0)
+let maximo = math.max(a, b)
+let minimo = math.min(a, b)
+```
+
+#### Trigonométricas (8h)
+```adead
+let seno = math.sin(angle)
+let coseno = math.cos(angle)
+let tangente = math.tan(angle)
+let arcoseno = math.asin(x)
+let arcocoseno = math.acos(x)
+let arcotangente = math.atan2(y, x)
+```
+
+#### Logarítmicas y Exponenciales (5h)
+```adead
+let exponencial = math.exp(x)
+let logaritmo = math.log(x)  // ln
+let log10 = math.log10(x)
+let log2 = math.log2(x)
+```
+
+#### Constantes (2h)
+```adead
+let pi = math.PI
+let e = math.E
+```
+
+**Implementación:**
+- Usar libm (biblioteca matemática estándar C)
+- FFI con funciones C: `sqrt`, `sin`, `cos`, etc.
+- Wrapper en módulo `std/math.ad`
+
+**Archivos:**
+- `std/math.ad` - Wrappers ADead
+- `rust/crates/adead-backend/src/lib.rs` - FFI helpers
+- `docs/stdlib/MATH.md` - Documentación
+
+**Impacto:** 🔴 ALTO - Desbloquea ciencias, gráficos, ML básico  
+**Dependencias:** Float64 (2.1)
+
+---
+
+### 2.4 std.array - Funciones de Array (18 horas)
+
+**Estado:** 🟡 PARCIAL (arrays básicos ✅, funciones ❌)  
+**Por qué:** MEDIO-ALTO - Hace arrays realmente útiles
+
+**Funciones a implementar:**
+
+#### Básicas (5h)
+```adead
+import std.array
+
+let longitud = array.len(arr)
+let vacio = array.is_empty(arr)
+
+// Mutación
+array.push(arr, item)
+let ultimo = array.pop(arr)
+array.insert(arr, index, item)
+array.remove(arr, index)
+```
+
+#### Funcionales (8h)
+```adead
+// Map: Transformar cada elemento
+let cuadrados = array.map([1, 2, 3], fn(x) { return x * x })
+
+// Filter: Filtrar elementos
+let pares = array.filter([1, 2, 3, 4], fn(x) { return x % 2 == 0 })
+
+// Reduce: Reducir a un valor
+let suma = array.reduce([1, 2, 3], fn(acc, x) { return acc + x }, 0)
+
+// ForEach: Ejecutar acción
+array.forEach(arr, fn(item) { print item })
+```
+
+#### Búsqueda y Orden (5h)
+```adead
+let indice = array.find(arr, valor)
+let contiene = array.contains(arr, valor)
+let index_of = array.indexOf(arr, valor)
+
+array.sort(arr)  // Ordenar in-place
+let sorted = array.sorted(arr)  // Nueva copia ordenada
+array.reverse(arr)
+```
+
+**Implementación:**
+- Funciones en módulo `std/array.ad`
+- Usar funciones de bajo nivel (comparaciones, swaps)
+- Closures como parámetros (requiere mejoras en funciones)
+
+**Archivos:**
+- `std/array.ad` - Implementación
+- `rust/crates/adead-backend/src/lib.rs` - Optimizaciones
+- `docs/stdlib/ARRAY.md` - Documentación
+
+**Impacto:** 🟡 MEDIO-ALTO - Arrays realmente prácticos  
+**Dependencias:** Arrays básicos (✅), Funciones como valores (futuro)
+
+---
+
+## 🎯 OPCIÓN 3: Mejoras de Lenguaje
+
+### 3.1 For Loops (10 horas)
+
+**Estado:** 🔴 NO IMPLEMENTADO  
+**Por qué:** MEDIO - Más intuitivo que while, sintaxis estándar
+
+**Implementación:**
+```adead
+// For con rango
+for i in 0..10 {
+    print i
+}
+
+// For con array
+for item in [1, 2, 3] {
+    print item
+}
+
+// For con índice y valor
+for (i, item) in array.enumerate() {
+    print "{i}: {item}"
+}
+```
+
+**Fases:**
+1. **Parser (4h):** Sintaxis for, rangos `0..10`, iteradores
+2. **Backend (5h):** Generar loops optimizados
+3. **Tests (1h):** Varios casos de uso
+
+**Archivos:**
+- `rust/crates/adead-parser/src/lib.rs` - Parser for
+- `rust/crates/adead-backend/src/lib.rs` - Codegen loops
+
+**Impacto:** 🟡 MEDIO - Sintaxis más limpia y expresiva  
+**Desbloquea:** Código más legible, patrones comunes
+
+---
+
+### 3.2 Closures / Funciones Anónimas (20 horas)
+
+**Estado:** 🔴 NO IMPLEMENTADO  
+**Por qué:** ALTO - Necesario para funciones de orden superior
+
+**Implementación:**
+```adead
+// Funciones anónimas
+let add = fn(a: int64, b: int64) -> int64 { return a + b }
+
+// Closures (capturan variables)
+let x = 10
+let add_x = fn(n: int64) -> int64 { return n + x }
+
+// Uso con arrays
+let cuadrados = array.map([1, 2, 3], fn(x) { return x * x })
+```
+
+**Fases:**
+1. **AST (3h):** `Expr::Closure` o funciones como valores
+2. **Parser (5h):** Sintaxis `fn(...) { ... }`
+3. **Backend (10h):** Captura de variables, trampolines si necesario
+4. **Tests (2h):** Closures simples y complejos
+
+**Archivos:**
+- `rust/crates/adead-parser/src/lib.rs` - Parser closures
+- `rust/crates/adead-backend/src/lib.rs` - Codegen
+- `rust/crates/adead-borrow/src/lib.rs` - Análisis de capturas
+
+**Impacto:** 🔴 ALTO - Desbloquea programación funcional  
+**Desbloquea:** `map`, `filter`, `reduce` realmente útiles
+
+---
+
+### 3.3 Pattern Matching Avanzado (15 horas)
+
+**Estado:** 🟡 PARCIAL (match básico ✅)  
+**Por qué:** MEDIO - Más expresivo que if/else
+
+**Mejoras:**
+```adead
+// Destructuring
+match resultado {
+    Ok(valor) => print valor
+    Err(FileError { path, message }) => print "Error en {path}: {message}"
+    _ => print "Otro error"
+}
+
+// Guards
+match numero {
+    x if x < 0 => print "Negativo"
+    x if x > 0 => print "Positivo"
+    _ => print "Cero"
+}
+
+// Matching en asignaciones
+let Ok(valor) = resultado  // Desempaquetar directamente
+```
+
+**Fases:**
+1. **Parser (6h):** Destructuring, guards, pattern matching en let
+2. **Backend (8h):** Generar código eficiente
+3. **Tests (1h):** Casos complejos
+
+**Archivos:**
+- `rust/crates/adead-parser/src/lib.rs` - Pattern matching avanzado
+- `rust/crates/adead-backend/src/lib.rs` - Codegen
+
+**Impacto:** 🟡 MEDIO - Código más expresivo y seguro  
+**Desbloquea:** Manejo de errores más elegante
+
+---
+
+### 3.4 Generics / Templates (30 horas)
+
+**Estado:** 🔴 NO IMPLEMENTADO  
+**Por qué:** MEDIO - Reutilización de código, type safety
+
+**Implementación:**
+```adead
+// Funciones genéricas
+fn max<T>(a: T, b: T) -> T {
+    if a > b { return a }
+    return b
+}
+
+// Structs genéricos
+struct Option<T> {
+    Some(T),
+    None,
+}
+
+// Uso
+let max_num = max(5, 10)
+let max_str = max("a", "b")
+```
+
+**Fases:**
+1. **AST (5h):** Parámetros de tipo, tipos genéricos
+2. **Parser (8h):** Sintaxis `<T>`, inferencia de tipos
+3. **Type checker (10h):** Validación de tipos genéricos
+4. **Backend (5h):** Monomorfización (generar código específico)
+5. **Tests (2h):** Generics simples y complejos
+
+**Archivos:**
+- `rust/crates/adead-common/src/lib.rs` - Tipos genéricos
+- `rust/crates/adead-parser/src/lib.rs` - Parser
+- `rust/crates/adead-borrow/src/lib.rs` - Type checking
+- `rust/crates/adead-backend/src/lib.rs` - Monomorfización
+
+**Impacto:** 🟡 MEDIO - Código más reutilizable  
+**Desbloquea:** Librerías genéricas, containers
+
+---
+
+## 🎯 OPCIÓN 4: Sistema de Módulos Avanzado
+
+### 4.1 Sistema de Módulos Completo (35 horas)
+
+**Estado:** 🟡 PARCIAL (import básico ✅)  
+**Por qué:** MEDIO - Importante para proyectos grandes
+
+**Mejoras:**
+
+#### Re-exports (5h)
+```adead
+// math/addition.ad
+pub fn add(a: int64, b: int64) -> int64 { return a + b }
+
+// math.ad
+pub use addition.add  // Re-exportar
+
+// main.ad
+import math
+math.add(5, 3)  // Funciona sin conocer estructura interna
+```
+
+#### Namespaces Jerárquicos (10h)
+```adead
+import std.collections.hashmap
+import std.io.file
+
+// O
+import std
+
+let map = std.collections.hashmap.new()
+let file = std.io.file.open("test.txt")
+```
+
+#### Módulos Anidados (8h)
+```adead
+// math/number.ad
+module math.number {
+    pub fn factorial(n: int64) -> int64 { ... }
+}
+
+// main.ad
+import math.number
+let result = math.number.factorial(5)
+```
+
+#### Compilación Incremental (12h)
+- Cache de módulos parseados
+- Re-compilar solo módulos modificados
+- Dependency tracking
+
+**Archivos:**
+- `rust/crates/adead-parser/src/module_resolver.rs` - Mejoras
+- `rust/crates/adead-cli/src/main.rs` - Compilación incremental
+- `docs/modules/MODULES.md` - Documentación
+
+**Impacto:** 🟡 MEDIO - Proyectos profesionales  
+**Desbloquea:** Organización de código a gran escala
+
+---
+
+### 4.2 Package Manager (60 horas)
+
+**Estado:** 🔴 NO IMPLEMENTADO  
+**Por qué:** ALTO - Facilita distribución y reutilización
+
+**Funcionalidades:**
+```bash
+# Instalar paquete
+adeadpm install math
+
+# Usar en código
+import math
+
+# Crear paquete
+adeadpm init mi-paquete
+adeadpm publish
+
+# Gestión de dependencias
+# adead.toml
+[dependencies]
+math = "1.0.0"
+utils = "2.1.0"
+```
+
+**Implementación:**
+- Repositorio de paquetes (simple, Git-based inicialmente)
+- Resolución de dependencias
+- Versionado semántico
+- Lock file
+
+**Fases:**
+1. **CLI (15h):** Comandos básicos
+2. **Resolución (20h):** Dependency resolution
+3. **Instalación (15h):** Descargar y organizar
+4. **Publicación (10h):** Subir paquetes
+
+**Impacto:** 🔴 ALTO - Ecosistema completo  
+**Desbloquea:** Comunidad, librerías compartidas
+
+---
+
+## 🎯 OPCIÓN 5: Interoperabilidad (FFI)
+
+### 5.1 FFI con C (35 horas)
+
+**Estado:** 🔴 NO IMPLEMENTADO  
+**Por qué:** CRÍTICO - Acceso a ecosistema C completo
+
+**Implementación:**
+```adead
+// Declarar función externa
+extern fn printf(format: *const char, ...) -> int32
+
+// Usar
+printf("Hello %s\n", name)
+
+// Structs C
+extern struct FILE {
+    // Campos...
+}
+
+// Llamar funciones C
+extern fn fopen(path: *const char, mode: *const char) -> *FILE
+```
+
+**Fases:**
+1. **Parser (8h):** `extern fn`, `extern struct`, tipos C
+2. **Backend (20h):** Generar código compatible con ABI C
+3. **Linking (5h):** Enlazar con librerías C
+4. **Tests (2h):** Funciones simples y complejas
+
+**Archivos:**
+- `rust/crates/adead-parser/src/lib.rs` - Parser extern
+- `rust/crates/adead-backend/src/lib.rs` - ABI C
+- `docs/ffi/C-FFI.md` - Guía
+
+**Impacto:** 🔴 CRÍTICO - Todo el ecosistema C  
+**Desbloquea:** OpenGL, SDL, SQLite, etc.
+
+---
+
+### 5.2 FFI con Rust (25 horas)
+
+**Estado:** 🔴 NO IMPLEMENTADO  
+**Por qué:** ALTO - Usar crates de Rust
+
+**Implementación:**
+```rust
+// En Rust (crate)
+#[no_mangle]
+pub extern "C" fn rust_function(x: i64) -> i64 {
+    x * 2
+}
+```
+
+```adead
+// En ADead
+extern fn rust_function(x: int64) -> int64
+
+let result = rust_function(5)
+```
+
+**Fases:**
+1. **Interfaz Rust (10h):** Macros helper, wrappers
+2. **Linking (10h):** Compilar y enlazar crates Rust
+3. **Tests (5h):** Ejemplos completos
+
+**Impacto:** 🔴 ALTO - Ecosistema Rust  
+**Desbloquea:** Todas las crates de Rust
+
+---
+
+## 🎯 OPCIÓN 6: Optimizaciones del Compilador
+
+### 6.1 Optimizaciones Básicas (25 horas)
+
+**Estado:** 🔴 NO IMPLEMENTADO  
+**Por qué:** MEDIO - Mejora performance generada
+
+**Optimizaciones:**
+
+#### Dead Code Elimination (5h)
+- Eliminar código no alcanzable
+- Eliminar variables no usadas
+
+#### Constant Folding (5h)
+```adead
+let x = 2 + 3  // → let x = 5
+if false { ... }  // → Eliminar
+```
+
+#### Simple Inlining (8h)
+```adead
+fn add(a: int64, b: int64) -> int64 { return a + b }
+let x = add(5, 3)  // → let x = 5 + 3
+```
+
+#### Register Allocation (7h)
+- Mejor uso de registros
+- Menos movimientos innecesarios
+
+**Archivos:**
+- `rust/crates/adead-optimizer/` (NUEVO)
+- `docs/optimizations/OPTIMIZATIONS.md`
+
+**Impacto:** 🟡 MEDIO - Código más eficiente  
+**Desbloquea:** Performance competitiva
+
+---
+
+### 6.2 Mejoras de Compilación (20 horas)
+
+**Estado:** 🟡 PARCIAL  
+**Por qué:** MEDIO - Mejor experiencia de desarrollo
+
+**Mejoras:**
+- Caching de compilación
+- Compilación paralela de módulos
+- Flags: `-O0`, `-O1`, `-O2`, `-O3`
+- Debug info: `-g`
+- Warnings: `-W`
+- Verbose: `-v`
+
+**Implementación:**
+- Sistema de cache basado en hashes
+- Paralelización con Rayon
+- Flags en CLI
+
+**Impacto:** 🟡 MEDIO - Desarrollo más rápido  
+**Desbloquea:** Iteración rápida
+
+---
+
+## 🎯 OPCIÓN 7: Herramientas de Desarrollo
+
+### 7.1 Language Server Protocol (LSP) (40 horas)
+
+**Estado:** 🔴 NO IMPLEMENTADO  
+**Por qué:** ALTO - Integración con IDEs
+
+**Funcionalidades:**
+- Autocompletado
+- Go to definition
+- Hover information
+- Error highlighting
+- Format on save
+
+**Implementación:**
+- Server LSP en Rust
+- Protocolo estándar
+- Integración con VS Code, Vim, etc.
+
+**Impacto:** 🔴 ALTO - Desarrollo profesional  
+**Desbloquea:** IDE support completo
+
+---
+
+### 7.2 Debugger (50 horas)
+
+**Estado:** 🔴 NO IMPLEMENTADO  
+**Por qué:** MEDIO - Debugging es esencial
+
+**Funcionalidades:**
+- Breakpoints
+- Step over/into/out
+- Inspect variables
+- Call stack
+- Watch expressions
+
+**Implementación:**
+- Integración con GDB/LLDB
+- Debug info generation
+- Protocolo DAP (Debug Adapter Protocol)
+
+**Impacto:** 🟡 MEDIO - Debugging más fácil  
+**Desbloquea:** Desarrollo eficiente
+
+---
+
+### 7.3 Formatter (15 horas)
+
+**Estado:** 🔴 NO IMPLEMENTADO  
+**Por qué:** MEDIO - Consistencia de código
+
+**Implementación:**
+```bash
+adeadfmt archivo.ad  # Formatear archivo
+adeadfmt --check .   # Verificar formato
+```
+
+- Reglas de formato consistentes
+- Preservar comentarios
+- Configurable
+
+**Impacto:** 🟡 MEDIO - Código consistente  
+**Desbloquea:** Mejor legibilidad
+
+---
+
+## 📊 Tabla Comparativa Completa
+
+| Opción | Esfuerzo | Impacto | Prioridad | Dependencias | Desbloquea |
+|--------|----------|---------|-----------|--------------|------------|
+| **1.1 Print números** | 3h | 🟡 MEDIO | ⭐⭐⭐⭐⭐ | - | Debugging |
+| **1.2 Operadores lógicos** | 4h | 🟡 MEDIO | ⭐⭐⭐⭐ | - | Lógica compleja |
+| **1.3 Break/Continue** | 5h | 🟡 MEDIO | ⭐⭐⭐⭐ | - | Control loops |
+| **1.4 Asignación arrays** | 6h | 🟡 MEDIO | ⭐⭐⭐⭐ | Arrays ✅ | Arrays mutables |
+| **1.5 Bool nativo** | 5h | 🟡 MEDIO | ⭐⭐⭐ | - | Type safety |
+| **2.1 Float64/Float32** | 15h | 🔴 CRÍTICO | ⭐⭐⭐⭐⭐ | - | Matemáticas |
+| **2.2 Strings completos** | 25h | 🔴 ALTO | ⭐⭐⭐⭐⭐ | Arrays ✅ | Texto, I/O |
+| **2.3 std.math** | 20h | 🔴 ALTO | ⭐⭐⭐⭐ | Float64 (2.1) | Ciencias |
+| **2.4 std.array** | 18h | 🟡 MEDIO-ALTO | ⭐⭐⭐⭐ | Arrays ✅ | Arrays útiles |
+| **3.1 For loops** | 10h | 🟡 MEDIO | ⭐⭐⭐ | - | Sintaxis |
+| **3.2 Closures** | 20h | 🔴 ALTO | ⭐⭐⭐⭐ | - | Funcional |
+| **3.3 Pattern matching** | 15h | 🟡 MEDIO | ⭐⭐⭐ | Match ✅ | Expresivo |
+| **3.4 Generics** | 30h | 🟡 MEDIO | ⭐⭐⭐ | - | Reutilización |
+| **4.1 Módulos avanzado** | 35h | 🟡 MEDIO | ⭐⭐⭐ | Import ✅ | Proyectos grandes |
+| **4.2 Package manager** | 60h | 🔴 ALTO | ⭐⭐⭐⭐ | Módulos (4.1) | Ecosistema |
+| **5.1 FFI C** | 35h | 🔴 CRÍTICO | ⭐⭐⭐⭐⭐ | - | Ecosistema C |
+| **5.2 FFI Rust** | 25h | 🔴 ALTO | ⭐⭐⭐⭐ | FFI C (5.1) | Ecosistema Rust |
+| **6.1 Optimizaciones** | 25h | 🟡 MEDIO | ⭐⭐⭐ | - | Performance |
+| **6.2 Compilación** | 20h | 🟡 MEDIO | ⭐⭐⭐ | - | Desarrollo rápido |
+| **7.1 LSP** | 40h | 🔴 ALTO | ⭐⭐⭐⭐ | - | IDE support |
+| **7.2 Debugger** | 50h | 🟡 MEDIO | ⭐⭐⭐ | - | Debugging |
+| **7.3 Formatter** | 15h | 🟡 MEDIO | ⭐⭐⭐ | - | Consistencia |
+
+---
+
+## 🎯 Plan de Acción Recomendado (Actualizado)
+
+### Fase 1: Quick Wins (1 semana) - 23 horas
+
+1. **Print de números** (3h) - ⚡ Más rápido, impacto inmediato
+2. **Operadores lógicos** (4h) - Fácil, útil
+3. **Break/Continue** (5h) - Simple, mejora loops
+4. **Asignación arrays** (6h) - Arrays mutables
+5. **Bool nativo** (5h) - Base importante
+
+**Resultado:** Mejoras inmediatas, UX mejorada
+
+---
+
+### Fase 2: Fundación Crítica (2-3 semanas) - 55 horas
+
+6. **Float64/Float32** (15h) - 🔴 CRÍTICO - Base para todo
+7. **Strings completos** (25h) - 🔴 ALTO - Necesario para casi todo
+8. **std.math básico** (15h) - Funciones esenciales
+
+**Resultado:** Base sólida para librería estándar
+
+---
+
+### Fase 3: Librería Estándar (2-3 semanas) - 38 horas
+
+9. **std.math completo** (5h restantes) - Funciones avanzadas
+10. **std.array** (18h) - Funciones útiles para arrays
+11. **Closures** (15h) - Necesario para funciones de orden superior
+
+**Resultado:** Stdlib funcional y completa
+
+---
+
+### Fase 4: Mejoras de Lenguaje (1-2 semanas) - 25 horas
+
+12. **For loops** (10h)
+13. **Pattern matching avanzado** (15h)
+
+**Resultado:** Sintaxis más completa y expresiva
+
+---
+
+### Fase 5: Interoperabilidad (3-4 semanas) - 60 horas
+
+14. **FFI con C** (35h) - 🔴 CRÍTICO
+15. **FFI con Rust** (25h)
+
+**Resultado:** Acceso a ecosistemas completos
+
+---
+
+### Fase 6: Herramientas (2-3 semanas) - 90 horas
+
+16. **LSP** (40h)
+17. **Debugger** (50h)
+
+**Resultado:** Desarrollo profesional
+
+---
+
+### Fase 7: Optimizaciones y Polish (2 semanas) - 45 horas
+
+18. **Optimizaciones básicas** (25h)
+19. **Mejoras de compilación** (20h)
+
+**Resultado:** Performance y desarrollo rápido
+
+---
+
+## 💡 Quick Wins Prioritarios
+
+Si quieres resultados rápidos con máximo impacto:
+
+1. **Print de números** (3h) - ⚡ Más rápido
+2. **Operadores lógicos** (4h) - Muy útil
+3. **Asignación arrays** (6h) - Desbloquea algoritmos
+4. **Break/Continue** (5h) - Control esencial
+
+**Total:** ~18 horas, transforman la experiencia
+
+---
+
+## 🔮 Vision: Roadmap a 6 Meses
+
+### Mes 1: Fundación Sólida
+- ✅ Sprint 1 completo
+- ✅ Quick wins (print, operadores, arrays)
+- ✅ Float64 implementado
+- ✅ Strings básicos
+
+**Resultado:** Lenguaje útil para proyectos pequeños
+
+---
+
+### Mes 2: Librería Estándar
+- ✅ Strings completos
+- ✅ std.math completo
+- ✅ std.array
+- ✅ Closures
+
+**Resultado:** Stdlib funcional
+
+---
+
+### Mes 3: Mejoras de Lenguaje
+- ✅ For loops
+- ✅ Pattern matching avanzado
+- ✅ Generics básicos
+- ✅ Sistema de módulos avanzado
+
+**Resultado:** Sintaxis completa y moderna
+
+---
+
+### Mes 4: Interoperabilidad
+- ✅ FFI con C
+- ✅ FFI con Rust
+- ✅ Ejemplos de uso
+
+**Resultado:** Acceso a ecosistemas
+
+---
+
+### Mes 5: Herramientas
+- ✅ LSP
+- ✅ Debugger básico
+- ✅ Formatter
+
+**Resultado:** Desarrollo profesional
+
+---
+
+### Mes 6: Polish y Optimizaciones
+- ✅ Optimizaciones
+- ✅ Package manager
+- ✅ Documentación completa
+- ✅ Ejemplos y tutoriales
+
+**Resultado:** Lenguaje listo para público
+
+---
+____________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________
+
+
+
+
+
+
+## 📋 Checklist de Prioridades Actualizado
+
+### 🔴 CRÍTICO (Hacer ahora)
+- [x] Import básico (15h) ✅ **COMPLETADO**
+- [x] Print de números (3h) ✅ **COMPLETADO** (2h reales)
+- [ ] Float64/Float32 (15h)
+- [ ] Strings completos (25h)
+- [ ] FFI con C (35h)
+
+### 🟡 ALTA PRIORIDAD (Próximas 2-3 semanas)
+- [ ] Operadores lógicos (4h)
+- [ ] Asignación arrays (6h)
+- [ ] std.math (20h)
+- [ ] std.array (18h)
+- [ ] Closures (20h)
+
+### 🟢 MEDIA PRIORIDAD (Próximas 4-6 semanas)
+- [ ] For loops (10h)
+- [ ] Break/Continue (5h)
+- [ ] Pattern matching avanzado (15h)
+- [ ] Bool nativo (5h)
+- [ ] Sistema módulos avanzado (35h)
+
+### 🔵 BAJA PRIORIDAD (Más adelante)
+- [ ] Generics (30h)
+- [ ] Package manager (60h)
+- [ ] LSP (40h)
+- [ ] Debugger (50h)
+- [ ] Optimizaciones (45h)
+
+---
+
+## 🎯 Siguiente Paso Recomendado
+
+**OPCIÓN A: Quick Wins (Máximo impacto rápido)**
+```
+→ Print números (3h) + Operadores lógicos (4h) + Break/Continue (5h)
+→ Resultado: Mejoras inmediatas en UX (12h total)
+→ Impacto: Alto, tiempo: Bajo
+```
+
+**OPCIÓN B: Fundación Crítica (Largo plazo)**
+```
+→ Float64 (15h) + Strings completos (25h)
+→ Resultado: Base sólida para todo (40h total)
+→ Impacto: Crítico, tiempo: Medio
+```
+
+**OPCIÓN C: Interoperabilidad (Desbloquea ecosistemas)**
+```
+→ FFI con C (35h)
+→ Resultado: Acceso a todo el ecosistema C
+→ Impacto: Crítico, tiempo: Alto
+```
+
+---
+
+## 📚 Documentación Relacionada
+
+- `docs/roadmap/PROGRESO-SPRINT1.md` - Estado actual Sprint 1
+- `docs/roadmap/ROADMAP-PROFESIONAL.md` - Plan completo 6 meses
+- `docs/testing/TESTING-IMPORTS.md` - Guía de testing
+- `docs/stdlib/` - Documentación de librería estándar (futuro)
+
+---
+
+**Última actualización:** Diciembre 2025  
+**Sprint 1:** ✅ 100% Completado  
+**Recomendación:** Empezar con Quick Wins (OPCIÓN A) para máximo impacto rápido

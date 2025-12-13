@@ -1,0 +1,13 @@
+// Test de manejo de errores con imports
+import math
+
+print "Test de error handling"
+
+let resultado = math.calcular("10")
+match resultado {
+    Ok(valor) => print "Éxito"
+    Err(error) => print "Error capturado"
+}
+
+print "Fin del test"
+

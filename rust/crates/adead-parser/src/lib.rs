@@ -8,6 +8,12 @@ mod zig_ffi_parser;
 // Parser Rust solo como último recurso si Zig falla
 mod zig_struct_parser;
 
+// Parser de expresiones aritméticas usando Zig
+mod zig_expr_parser;
+
+// Resolución de módulos (Sprint 1.3 - Import básico)
+pub mod module_resolver;
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Expr {
     Number(i64),
@@ -23,6 +29,7 @@ pub enum Expr {
         value: Box<Expr>,
     },
     Call {
+        module: Option<String>,  // None = función local, Some("math") = math.factorial (Sprint 1.3)
         name: String,
         args: Vec<Expr>,
     },
@@ -162,6 +169,7 @@ pub enum Stmt {
         body: Vec<Stmt>,
     },
     Fn {
+        visibility: Visibility,  // Sprint 1.3 - Import básico: pub fn o fn (privada)
         name: String,
         params: Vec<FnParam>,  // Cambiado para soportar borrowing
         body: Vec<Stmt>,
@@ -175,6 +183,8 @@ pub enum Stmt {
     },
     Expr(Expr),
     Return(Option<Expr>),
+    // Import básico (Sprint 1.3)
+    Import(String),  // import nombre_modulo
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -183,6 +193,11 @@ pub struct Program {
 }
 
 pub fn parse(source: &str) -> Result<Program> {
+    parse_with_dir(source, None)
+}
+
+/// Parsear con directorio base para resolución de imports
+pub fn parse_with_dir(source: &str, current_dir: Option<&std::path::Path>) -> Result<Program> {
     // PRE-PROCESADOR: Extraer structs del input antes del parsing principal
     // Esto evita problemas con take_until que no funciona correctamente dentro del parser
     
@@ -195,6 +210,10 @@ pub fn parse(source: &str) -> Result<Program> {
             for stmt in extracted_structs {
                 program.statements.insert(0, stmt);
             }
+            
+            // POST-PROCESADOR: Resolver imports (Sprint 1.3)
+            resolve_imports(&mut program, current_dir)?;
+            
             Ok(program)
         }
         Err(errs) => {
@@ -208,6 +227,95 @@ pub fn parse(source: &str) -> Result<Program> {
             })
         }
     }
+}
+
+/// Resolver imports en un programa parseado (Sprint 1.3)
+/// 
+/// Procesa todos los `Stmt::Import` y:
+/// 1. Resuelve la ruta del módulo
+/// 2. Parsea el módulo
+/// 3. Filtra solo funciones públicas
+/// 4. Combina statements en el programa principal
+fn resolve_imports(program: &mut Program, current_dir: Option<&std::path::Path>) -> Result<()> {
+    use std::collections::{HashSet, HashMap};
+    
+    // Extraer imports y parsear módulos
+    let mut imports_to_resolve = Vec::new();
+    let mut new_statements = Vec::new();
+    let mut module_functions: HashMap<String, Vec<String>> = HashMap::new(); // Para detectar colisiones
+    
+    for stmt in &program.statements {
+        if let Stmt::Import(module_name) = stmt {
+            imports_to_resolve.push(module_name.clone());
+        }
+    }
+    
+    // Resolver cada import (sin duplicados)
+    let mut resolved_modules = HashSet::new();
+    for module_name in imports_to_resolve {
+        if resolved_modules.contains(&module_name) {
+            continue; // Ya procesado - evitar imports duplicados
+        }
+        resolved_modules.insert(module_name.clone());
+        
+        // Parsear el módulo
+        let module_program = module_resolver::resolve_and_parse(&module_name, current_dir)?;
+        
+        // Agregar statements del módulo al programa
+        // Filtrar solo funciones públicas (Sprint 1.3 - Import básico)
+        let mut module_funcs = Vec::new();
+        for stmt in module_program.statements {
+            match &stmt {
+                Stmt::Fn { visibility, name, .. } => {
+                    // Solo agregar funciones públicas
+                    if *visibility == Visibility::Public {
+                        new_statements.push(stmt.clone());
+                        module_funcs.push(name.clone());
+                    }
+                }
+                // Otros statements (structs, etc.) se agregan siempre
+                _ => {
+                    new_statements.push(stmt);
+                }
+            }
+        }
+        
+        // Registrar funciones del módulo para detección de colisiones
+        if !module_funcs.is_empty() {
+            module_functions.insert(module_name.clone(), module_funcs);
+        }
+    }
+    
+    // Verificar colisiones de nombres (opcional - warning, no error)
+    // Por ahora solo verificamos, pero no bloqueamos
+    let all_function_names: Vec<String> = program.statements
+        .iter()
+        .filter_map(|s| {
+            if let Stmt::Fn { name, .. } = s {
+                Some(name.clone())
+            } else {
+                None
+            }
+        })
+        .collect();
+    
+    for (module_name, funcs) in &module_functions {
+        for func_name in funcs {
+            if all_function_names.contains(func_name) {
+                // Función local con mismo nombre que una importada
+                // Esto está bien si se usa namespace, pero es un warning
+                // Por ahora no hacemos nada, pero se podría agregar warning
+            }
+        }
+    }
+    
+    // Insertar statements de módulos al inicio (después de structs)
+    // Mantener orden: structs primero, luego funciones importadas, luego código local
+    for stmt in new_statements.into_iter().rev() {
+        program.statements.insert(0, stmt);
+    }
+    
+    Ok(())
 }
 
 /// Pre-procesador: Extrae structs del input y los reemplaza con marcadores
@@ -391,7 +499,7 @@ fn extract_struct(source: &str, start_byte_pos: usize) -> Result<(Stmt, String, 
 fn program_parser() -> impl Parser<char, Program, Error = Simple<char>> {
     stmt_parser()
         .repeated()
-        .then_ignore(end())
+        .then_ignore(end().or_not())  // Permitir trailing whitespace/newlines (corregido para print expr)
         .map(|stmts| Program {
             statements: stmts,
         })
@@ -402,10 +510,31 @@ fn stmt_parser() -> impl Parser<char, Stmt, Error = Simple<char>> + Clone {
         let ident = text::ident().padded();
         let expr = expr_parser();
 
+        // Print statement: intentar usar Zig parser primero para expresiones aritméticas
+        // Print statement: usar parser Rust normal (Zig se integra a nivel de expr_parser si es necesario)
+        // Print statement: intentar usar Zig parser primero para expresiones aritméticas
         let print = just("print")
             .padded()
-            .ignore_then(expr.clone())
-            .map(Stmt::Print);
+            .then(filter::<_, _, Simple<char>>::new(|c: &char, _| !c.is_whitespace()).repeated().at_least(1).collect::<String>())
+            .try_map(|(_, remaining), span| {
+                // Intentar parsear con Zig primero (más preciso para expresiones aritméticas)
+                if let Some(zig_expr) = zig_expr_parser::parse_expr_with_zig(&remaining) {
+                    Ok(Stmt::Print(zig_expr))
+                } else {
+                    // Fallback a parser Rust si Zig falla
+                    expr.clone()
+                        .parse_from(remaining.chars())
+                        .map(Stmt::Print)
+                        .map_err(|e| Simple::custom(span, format!("Parse error: {:?}", e)))
+                }
+            })
+            // Versión alternativa: usar expr normal directamente (por si falla el try_map)
+            .or(just("print")
+                .padded()
+                .ignore_then(expr.clone())
+                .map(Stmt::Print)
+            )
+            .labelled("print statement");
 
         let let_stmt = just("let")
             .padded()
@@ -482,26 +611,35 @@ fn stmt_parser() -> impl Parser<char, Stmt, Error = Simple<char>> + Clone {
                 borrow_type: BorrowType::Owned,
             }));
 
-        let fn_stmt = just("fn")
+        // Parser para funciones con visibilidad opcional (Sprint 1.3 - Import básico)
+        let fn_stmt = just("pub")
             .padded()
-            .ignore_then(ident.clone())
-            .then(
-                just("(")
-                    .padded()
-                    .ignore_then(
-                        fn_param
-                            .separated_by(just(",").padded())
-                            .allow_trailing(),
-                    )
-                    .then_ignore(just(")").padded()),
-            )
-            .then(
-                just("{")
-                    .padded()
-                    .ignore_then(stmt.clone().repeated())
-                    .then_ignore(just("}").padded()),
-            )
-            .map(|((name, params), body)| Stmt::Fn {
+            .or_not()
+            .then(just("fn")
+                .padded()
+                .ignore_then(ident.clone())
+                .then(
+                    just("(")
+                        .padded()
+                        .ignore_then(
+                            fn_param
+                                .separated_by(just(",").padded())
+                                .allow_trailing(),
+                        )
+                        .then_ignore(just(")").padded()),
+                )
+                .then(
+                    just("{")
+                        .padded()
+                        .ignore_then(stmt.clone().repeated())
+                        .then_ignore(just("}").padded()),
+                ))
+            .map(|(visibility, ((name, params), body))| Stmt::Fn {
+                visibility: if visibility.is_some() { 
+                    Visibility::Public 
+                } else { 
+                    Visibility::Private 
+                },
                 name,
                 params,
                 body,
@@ -667,9 +805,18 @@ fn stmt_parser() -> impl Parser<char, Stmt, Error = Simple<char>> + Clone {
 
         let expr_stmt = expr.map(Stmt::Expr);
 
+        // Import statement (Sprint 1.3)
+        let import_stmt = just("import")
+            .padded()
+            .ignore_then(text::ident())
+            .map(Stmt::Import)
+            .labelled("import statement");
+
         // IMPORTANTE: struct_stmt debe estar ANTES de expr_stmt para tener precedencia
         // Si expr_stmt está primero, intentará parsear "struct" como una expresión
+        // Import debe estar antes de expr_stmt también para evitar conflictos
         struct_stmt
+            .or(import_stmt)
             .or(print)
             .or(let_stmt)
             .or(if_stmt)
@@ -800,8 +947,25 @@ fn expr_parser() -> impl Parser<char, Expr, Error = Simple<char>> + Clone {
                 .clone()
                 .delimited_by(just("(").padded(), just(")").padded()));
 
-        let call = ident
-            .clone()
+        // Parser para nombres con namespace: modulo.funcion o solo funcion (Sprint 1.3)
+        let qualified_name = text::ident()
+            .then(
+                just(".")
+                    .padded()
+                    .ignore_then(text::ident())
+                    .or_not()
+            )
+            .map(|(first, second)| {
+                if let Some(second) = second {
+                    // modulo.funcion
+                    (Some(first), second)
+                } else {
+                    // solo funcion (sin módulo)
+                    (None, first)
+                }
+            });
+
+        let call = qualified_name
             .then(
                 just("(")
                     .padded()
@@ -812,12 +976,10 @@ fn expr_parser() -> impl Parser<char, Expr, Error = Simple<char>> + Clone {
                     )
                     .then_ignore(just(")").padded()),
             )
-            .map(|(callee, args)| match callee {
-                Expr::Ident(name) => Expr::Call {
-                    name,
-                    args,
-                },
-                _ => unreachable!(),
+            .map(|((module, name), args)| Expr::Call {
+                module,
+                name,
+                args,
             })
             .or(atom);
 
@@ -945,8 +1107,9 @@ fn expr_parser() -> impl Parser<char, Expr, Error = Simple<char>> + Clone {
             .clone()
             .then(
                 just("*")
+                    .padded()
                     .to(BinOp::Mul)
-                    .or(just("/").to(BinOp::Div))
+                    .or(just("/").padded().to(BinOp::Div))
                     .then(with_propagate.clone())
                     .repeated(),
             )
@@ -960,8 +1123,9 @@ fn expr_parser() -> impl Parser<char, Expr, Error = Simple<char>> + Clone {
             .clone()
             .then(
                 just("+")
+                    .padded()
                     .to(BinOp::Add)
-                    .or(just("-").to(BinOp::Sub))
+                    .or(just("-").padded().to(BinOp::Sub))
                     .then(product.clone())
                     .repeated(),
             )

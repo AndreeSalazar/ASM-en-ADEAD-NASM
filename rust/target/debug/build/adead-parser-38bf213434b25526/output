@@ -1,2 +1,3 @@
+cargo:warning=Zig library path not found, using default: ../../../zig/zig-out/lib
+cargo:warning=Compile Zig first with: cd zig && zig build
 cargo:rustc-link-search=native=../../../zig/zig-out/lib
-cargo:rerun-if-changed=../../../zig/zig-out/lib/adead_zig.lib

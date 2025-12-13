@@ -170,7 +170,7 @@ impl BorrowChecker {
                 // Constructores y destructores se verifican como funciones normales
                 Ok(())
             }
-            Stmt::Fn { name: _, params, body } => {
+            Stmt::Fn { visibility: _, name: _, params, body } => {
                 // Registrar función (los parámetros se verifican cuando se llama)
                 // Por ahora, solo verificamos el cuerpo
                 self.push_scope();
@@ -207,6 +207,12 @@ impl BorrowChecker {
                 if let Some(expr) = expr {
                     self.check_expr(expr)?;
                 }
+                Ok(())
+            }
+            Stmt::Import(_module_name) => {
+                // Los imports son procesados en tiempo de compilación
+                // Por ahora, solo los registramos sin verificar
+                // TODO: Verificar que el módulo existe y es accesible
                 Ok(())
             }
         }
@@ -261,7 +267,8 @@ impl BorrowChecker {
                 }
                 Ok(())
             }
-            Expr::Call { args, .. } => {
+            Expr::Call { module: _, name: _, args } => {
+                // Verificar argumentos (namespace se verifica en otro lugar)
                 for arg in args {
                     self.check_expr(arg)?;
                 }
@@ -339,6 +346,24 @@ impl BorrowChecker {
                 // O5 - Verificar acceso al método
                 self.check_method_access(object, method)?;
                 
+                Ok(())
+            }
+            Expr::PropagateError(expr) => {
+                // Verificar la expresión interna
+                self.check_expr(expr)?;
+                Ok(())
+            }
+            Expr::ArrayLiteral(elements) => {
+                // Verificar cada elemento del array
+                for element in elements {
+                    self.check_expr(element)?;
+                }
+                Ok(())
+            }
+            Expr::Index { array, index } => {
+                // Verificar array e índice
+                self.check_expr(array)?;
+                self.check_expr(index)?;
                 Ok(())
             }
         }
@@ -475,7 +500,8 @@ impl BorrowChecker {
                 self.check_expr_borrowing(value)?;
                 Ok(())
             }
-            Expr::Call { args, .. } => {
+            Expr::Call { module: _, name: _, args } => {
+                // Verificar borrowing en argumentos (namespace se verifica en otro lugar)
                 for arg in args {
                     self.check_expr_borrowing(arg)?;
                 }
@@ -512,6 +538,21 @@ impl BorrowChecker {
                 for arg in args {
                     self.check_expr_borrowing(arg)?;
                 }
+                Ok(())
+            }
+            Expr::PropagateError(expr) => {
+                self.check_expr_borrowing(expr)?;
+                Ok(())
+            }
+            Expr::ArrayLiteral(elements) => {
+                for element in elements {
+                    self.check_expr_borrowing(element)?;
+                }
+                Ok(())
+            }
+            Expr::Index { array, index } => {
+                self.check_expr_borrowing(array)?;
+                self.check_expr_borrowing(index)?;
                 Ok(())
             }
             _ => Ok(()), // Otros casos no necesitan verificación adicional

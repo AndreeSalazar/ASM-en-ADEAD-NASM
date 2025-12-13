@@ -216,3 +216,102 @@ fn test_generate_propagate_error_chained() {
     assert!(cmp_count >= 1 || je_count >= 1 || asm.contains("rbx"));
 }
 
+// ========== Tests para Arrays (Sprint 1.2) ==========
+
+#[test]
+fn test_generate_array_literal() {
+    let src = r#"
+        let arr = [1, 2, 3]
+    "#;
+    let program = parse(src).unwrap();
+    let mut gen = CodeGenerator::new();
+    let asm = gen.generate(&program).unwrap();
+    
+    // Verificar que se reserva espacio para el array
+    assert!(asm.contains("Array literal") || asm.contains("reservar espacio para array"));
+    // Verificar que se almacenan los valores
+    assert!(asm.contains("array[0]") || asm.contains("array[1]") || asm.contains("array[2]"));
+    // Verificar que se calcula la dirección base
+    assert!(asm.contains("dirección base del array") || asm.contains("lea rax"));
+}
+
+#[test]
+fn test_generate_array_literal_empty() {
+    let src = r#"
+        let arr = []
+    "#;
+    let program = parse(src).unwrap();
+    let mut gen = CodeGenerator::new();
+    let asm = gen.generate(&program).unwrap();
+    
+    // Array vacío debe generar código mínimo
+    assert!(asm.contains("Array literal") || asm.contains("0 elementos"));
+}
+
+#[test]
+fn test_generate_array_index() {
+    let src = r#"
+        let arr = [1, 2, 3]
+        let valor = arr[0]
+    "#;
+    let program = parse(src).unwrap();
+    let mut gen = CodeGenerator::new();
+    let asm = gen.generate(&program).unwrap();
+    
+    // Verificar que se genera código para indexación
+    // Debe guardar dirección base, calcular offset, y cargar valor
+    assert!(asm.contains("push rax") || asm.contains("guardar dirección base"));
+    // Verificar cálculo de offset (índice * 8)
+    assert!(asm.contains("imul") || asm.contains("índice * 8"));
+    // Verificar carga del valor
+    assert!(asm.contains("mov rax, [rax]") || asm.contains("cargar array[index]"));
+}
+
+#[test]
+fn test_generate_array_index_with_expression() {
+    let src = r#"
+        let arr = [10, 20, 30]
+        let i = 1
+        let valor = arr[i]
+    "#;
+    let program = parse(src).unwrap();
+    let mut gen = CodeGenerator::new();
+    let asm = gen.generate(&program).unwrap();
+    
+    // Verificar que se puede indexar con una variable
+    // Debe cargar la variable i primero, luego usarla como índice
+    assert!(asm.contains("cargar array[index]") || asm.contains("mov rax, [rax]"));
+    // Verificar que se calcula el offset dinámicamente
+    assert!(asm.contains("imul") || asm.contains("índice * 8"));
+}
+
+#[test]
+fn test_generate_array_index_nested() {
+    let src = r#"
+        let matriz = [[1, 2], [3, 4]]
+        let valor = matriz[0]
+    "#;
+    let program = parse(src).unwrap();
+    let mut gen = CodeGenerator::new();
+    let asm = gen.generate(&program).unwrap();
+    
+    // Verificar que se puede indexar arrays anidados
+    // Debe generar código para la primera indexación
+    assert!(asm.contains("cargar array[index]") || asm.contains("push rax"));
+}
+
+#[test]
+fn test_generate_array_literal_with_expressions() {
+    let src = r#"
+        let x = 5
+        let arr = [x, x + 1, x * 2]
+    "#;
+    let program = parse(src).unwrap();
+    let mut gen = CodeGenerator::new();
+    let asm = gen.generate(&program).unwrap();
+    
+    // Verificar que se pueden usar expresiones en literales
+    // Debe generar código para cada expresión
+    assert!(asm.contains("array[0]") || asm.contains("array[1]") || asm.contains("array[2]"));
+}
+

@@ -1,0 +1,9 @@
+print "Ejemplo completo de print numeros"
+print 10
+print 20
+print 30
+
+let suma = 30
+print suma
+
+print "Funciona correctamente"

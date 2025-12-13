@@ -1,0 +1,11 @@
+print "Test de print con expresiones"
+print "2 + 5 ="
+print 2 + 5
+print "10 * 3 ="
+print 10 * 3
+print "20 - 8 ="
+print 20 - 8
+print "100 / 5 ="
+print 100 / 5
+print "Test completado"
+
