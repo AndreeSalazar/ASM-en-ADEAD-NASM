@@ -7,8 +7,9 @@ use std::os::raw::{c_char, c_int};
 
 // FFI externo para llamar a Zig
 // Biblioteca Zig compilada y lista para usar
-#[link(name = "adead_zig")]
+#[link(name = "adead_zig", kind = "static")]
 extern "C" {
+    #[link_name = "parse_expr_ffi"]
     fn parse_expr_ffi(
         input_ptr: *const c_char,
         input_len: usize,

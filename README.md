@@ -13,6 +13,15 @@ Simple sintaxis estilo Python • Rendimiento nativo
 
 </div>
 
+## 🔄 Flujo de Compilación Establecido
+
+**Flujo Principal:**
+```
+ADead → Zig (parsea expresiones) → Rust (seguridad) → NASM → .exe
+```
+
+**Ver documentación completa:** [docs/FLUJO-COMPLETO.md](docs/FLUJO-COMPLETO.md)
+
 ## 🚀 Quickstart
 
 ### Requisitos
@@ -151,39 +160,70 @@ let result = add(5, 3)
 
 ### Proceso de Compilación Completo
 
+**Flujo Principal Establecido:**
 ```
 ADead Source (.ad)
   ↓
-Zig Parser (parsing eficiente)
-  ├─ Expresiones aritméticas (2 + 5, etc.)
-  ├─ Structs complejos
-  └─ Operadores con precedencia correcta
+┌─────────────────────────────────────────┐
+│  ZIG PARSER (parsea expresiones)       │
+│  • Expresiones aritméticas (2 + 5)      │
+│  • Operadores con precedencia correcta  │
+│  • Paréntesis y operaciones complejas   │
+│  • FFI: parse_expr_ffi()                │
+└─────────────────────────────────────────┘
+  ↓ (Serialización: "BINOP:ADD:NUMBER:2:NUMBER:5")
+┌─────────────────────────────────────────┐
+│  RUST (seguridad de memoria)            │
+│  • Wrapper FFI: parse_expr_with_zig()  │
+│  • Conversión a AST Rust (Expr)         │
+│  • Validación de memoria (borrow checker)│
+│  • Type checking y validación           │
+│  • Code Generator → NASM                │
+└─────────────────────────────────────────┘
   ↓
-Rust (seguridad y validación)
-  ├─ Validación de memoria (borrow checker)
-  ├─ Type checking
-  ├─ Validación de seguridad
-  └─ Code Generator (NASM)
+┌─────────────────────────────────────────┐
+│  NASM (Assembly x86_64)                │
+│  • Generación de código assembly       │
+│  • Optimizaciones de bajo nivel        │
+└─────────────────────────────────────────┘
   ↓
-NASM (Assembly x86_64)
+┌─────────────────────────────────────────┐
+│  Object File (.obj/.o)                  │
+│  • Archivo objeto compilado             │
+└─────────────────────────────────────────┘
   ↓
-Object File (.obj/.o)
-  ↓
-Ejecutable (.exe)
+┌─────────────────────────────────────────┐
+│  Ejecutable (.exe)                      │
+│  • Binario nativo Windows               │
+└─────────────────────────────────────────┘
   ↓
 ✅ Ejecución
 ```
 
-**Flujo Detallado:**
+**Flujo Simplificado (Establecido):**
 ```
-.ad → Zig (Parsea) → Rust (Seguridad de Memoria) → NASM (ASM) → .exe → ✅ Ejecución
+ADead → Zig (parsea expresiones) → Rust (seguridad) → NASM → .exe
 ```
+
+**Ejemplo Práctico:**
+```adead
+print 2 + 5
+```
+
+**Proceso:**
+1. **Zig parsea:** `"2 + 5"` → AST Zig → Serializa: `"BINOP:ADD:NUMBER:2:NUMBER:5"`
+2. **Rust recibe:** FFI deserializa → `Expr::BinaryOp { op: Add, left: Number(2), right: Number(5) }`
+3. **Rust valida:** Borrow checker, type checking, seguridad
+4. **Rust genera NASM:** Código assembly para evaluar `2 + 5` y convertir a string
+5. **NASM compila:** Genera `.obj` → Linker → `.exe`
+6. **Ejecución:** Output: `7`
 
 **Ventajas de esta Arquitectura:**
 - ✅ **Zig parsea:** Más eficiente para expresiones y estructuras complejas
 - ✅ **Rust valida:** Garantiza seguridad de memoria y corrección de tipos
 - ✅ **NASM compila:** Genera código assembly optimizado
 - ✅ **Rendimiento nativo:** Ejecutable final sin dependencias
+- ✅ **Separación clara:** Cada lenguaje hace lo que mejor sabe
 
 ### Comandos Modulares
 

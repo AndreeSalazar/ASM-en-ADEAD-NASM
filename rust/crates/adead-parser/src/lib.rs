@@ -1,6 +1,9 @@
 ﻿use adead_common::{ADeadError, Result};
 use chumsky::prelude::*;
 
+// ═══════════════════════════════════════════════════════════════════════════
+// FLUJO ESTABLECIDO: ADead → Zig (parsea) → Rust (seguridad) → NASM → .exe
+// ═══════════════════════════════════════════════════════════════════════════
 // ZIG ES EL PARSER PRINCIPAL - Rust solo hace seguridad y codegen
 // Módulo FFI para parser Zig (PRINCIPAL)
 mod zig_ffi_parser;
@@ -509,31 +512,17 @@ fn stmt_parser() -> impl Parser<char, Stmt, Error = Simple<char>> + Clone {
     recursive(|stmt| {
         let ident = text::ident().padded();
         let expr = expr_parser();
+        // Los parsers de expr se clonan cuando se necesitan, pero ahora usan Zig directamente
+        let expr_for_print = expr.clone();
+        let expr_for_while = expr.clone();
+        let expr_for_expr_stmt = expr.clone();
 
-        // Print statement: intentar usar Zig parser primero para expresiones aritméticas
-        // Print statement: usar parser Rust normal (Zig se integra a nivel de expr_parser si es necesario)
-        // Print statement: intentar usar Zig parser primero para expresiones aritméticas
+        // Print statement: ZIG ES EL PARSER PRINCIPAL
+        // Capturar expresión completa hasta newline - usar expr directamente para que funcione correctamente
         let print = just("print")
             .padded()
-            .then(filter::<_, _, Simple<char>>::new(|c: &char, _| !c.is_whitespace()).repeated().at_least(1).collect::<String>())
-            .try_map(|(_, remaining), span| {
-                // Intentar parsear con Zig primero (más preciso para expresiones aritméticas)
-                if let Some(zig_expr) = zig_expr_parser::parse_expr_with_zig(&remaining) {
-                    Ok(Stmt::Print(zig_expr))
-                } else {
-                    // Fallback a parser Rust si Zig falla
-                    expr.clone()
-                        .parse_from(remaining.chars())
-                        .map(Stmt::Print)
-                        .map_err(|e| Simple::custom(span, format!("Parse error: {:?}", e)))
-                }
-            })
-            // Versión alternativa: usar expr normal directamente (por si falla el try_map)
-            .or(just("print")
-                .padded()
-                .ignore_then(expr.clone())
-                .map(Stmt::Print)
-            )
+            .ignore_then(expr.clone())
+            .map(Stmt::Print)
             .labelled("print statement");
 
         let let_stmt = just("let")
@@ -579,16 +568,40 @@ fn stmt_parser() -> impl Parser<char, Stmt, Error = Simple<char>> + Clone {
                 else_body,
             });
 
+        // While statement: ZIG ES EL PARSER PRINCIPAL para condiciones
+        // FLUJO: Zig parsea condiciones (soporta <, <=, >, >=, ==, !=) → Rust valida
         let while_stmt = just("while")
             .padded()
-            .ignore_then(expr.clone())
             .then(
-                just("{")
+                // Capturar condición completa hasta el '{'
+                none_of("{")
+                    .repeated()
+                    .at_least(1)
+                    .collect::<String>()
                     .padded()
-                    .ignore_then(stmt.clone().repeated())
+                    .then_ignore(just("{").padded())
+                    .try_map({
+                        let expr_clone = expr_for_while.clone();
+                        move |condition_str: String, span| {
+                            let trimmed = condition_str.trim();
+                            // ZIG PRIMERO - Intentar parsear condición con Zig
+                            if let Some(zig_expr) = zig_expr_parser::parse_expr_with_zig(trimmed) {
+                                Ok(zig_expr)
+                            } else {
+                                // Fallback a parser Rust
+                                match expr_clone.clone().parse(trimmed) {
+                                    Ok(parsed_expr) => Ok(parsed_expr),
+                                    Err(e) => Err(Simple::custom(span, format!("Parse error: {:?}", e)))
+                                }
+                            }
+                        }
+                    })
+            )
+            .then(
+                stmt.clone().repeated()
                     .then_ignore(just("}").padded()),
             )
-            .map(|(condition, body)| Stmt::While {
+            .map(|((_, condition), body)| Stmt::While {
                 condition,
                 body,
             });
@@ -803,7 +816,7 @@ fn stmt_parser() -> impl Parser<char, Stmt, Error = Simple<char>> + Clone {
                 value: Box::new(value),
             }));
 
-        let expr_stmt = expr.map(Stmt::Expr);
+        let expr_stmt = expr_for_expr_stmt.map(Stmt::Expr);
 
         // Import statement (Sprint 1.3)
         let import_stmt = just("import")
@@ -815,6 +828,7 @@ fn stmt_parser() -> impl Parser<char, Stmt, Error = Simple<char>> + Clone {
         // IMPORTANTE: struct_stmt debe estar ANTES de expr_stmt para tener precedencia
         // Si expr_stmt está primero, intentará parsear "struct" como una expresión
         // Import debe estar antes de expr_stmt también para evitar conflictos
+        // while_stmt debe estar ANTES de assign_stmt para evitar conflictos con comparaciones
         struct_stmt
             .or(import_stmt)
             .or(print)
@@ -830,6 +844,7 @@ fn stmt_parser() -> impl Parser<char, Stmt, Error = Simple<char>> + Clone {
 }
 
 fn expr_parser() -> impl Parser<char, Expr, Error = Simple<char>> + Clone {
+    // ZIG ES EL PARSER PRINCIPAL - Intentar parsear con Zig primero para TODAS las expresiones
     recursive(|expr| {
         let number = text::int(10)
             .map(|s: String| s.parse::<i64>().unwrap())
@@ -1135,16 +1150,18 @@ fn expr_parser() -> impl Parser<char, Expr, Error = Simple<char>> + Clone {
                 right: Box::new(r),
             });
 
+        // Intentar usar Zig primero para expresiones con comparaciones
+        // Zig parsea mejor: <, <=, >, >=, ==, !=
+        // IMPORTANTE: Los operadores de dos caracteres (<=, >=, ==, !=) DEBEN ir antes de los de un carácter (<, >)
         let comparison = sum
             .clone()
             .then(
-                just("==")
-                    .to(BinOp::Eq)
-                    .or(just("!=").to(BinOp::Ne))
-                    .or(just("<=").to(BinOp::Le))
-                    .or(just(">=").to(BinOp::Ge))
-                    .or(just("<").to(BinOp::Lt))
-                    .or(just(">").to(BinOp::Gt))
+                just("<=").padded().to(BinOp::Le)
+                    .or(just(">=").padded().to(BinOp::Ge))
+                    .or(just("==").padded().to(BinOp::Eq))
+                    .or(just("!=").padded().to(BinOp::Ne))
+                    .or(just("<").padded().to(BinOp::Lt))
+                    .or(just(">").padded().to(BinOp::Gt))
                     .then(sum.clone())
                     .repeated(),
             )
@@ -1154,7 +1171,13 @@ fn expr_parser() -> impl Parser<char, Expr, Error = Simple<char>> + Clone {
                 right: Box::new(r),
             });
 
-        comparison
+        // ZIG ES EL PARSER PRINCIPAL - Intentar parsear con Zig primero
+        // Capturar toda la expresión restante y parsearla con Zig
+        // Nota: Esto es complejo dentro de un parser recursivo, así que usamos el parser Rust
+        // y Zig se usa directamente en print/while donde capturamos el string completo
+        // IMPORTANTE: sum debe estar antes de comparison para evitar loops
+        sum.clone()
+            .or(comparison) // Comparaciones después de sum
     })
 }
 

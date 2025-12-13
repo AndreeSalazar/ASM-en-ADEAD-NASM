@@ -2,6 +2,13 @@
 // Zig es el parser PRINCIPAL - esto asegura que Rust pueda usar Zig
 
 fn main() {
+    // En Windows, linkear con librerías del sistema necesarias para Zig
+    if cfg!(target_os = "windows") {
+        // Los símbolos de stack checking están en las librerías estándar de MSVC
+        // Rust ya las incluye automáticamente, pero podemos forzarlas si es necesario
+        println!("cargo:rustc-link-lib=msvcrt");
+    }
+    
     // Buscar librería Zig compilada
     if let Ok(zig_lib_path) = std::env::var("ZIG_LIB_PATH") {
         println!("cargo:rustc-link-search=native={}", zig_lib_path);

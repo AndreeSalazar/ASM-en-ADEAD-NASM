@@ -1,0 +1,13 @@
+print "Iniciando suma hasta 1 billon..."
+print ""
+
+let suma = 1
+let limite = 1000000000
+
+while suma <= limite {
+    print suma
+    suma = suma + 1
+}
+
+print ""
+print "Llegamos a 1 billon!"

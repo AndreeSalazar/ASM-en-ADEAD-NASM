@@ -982,13 +982,25 @@ impl CodeGenerator {
                         self.text_section.push(format!("    mov rdx, {}_len", label));
                         self.text_section.push(format!("    syscall",));
                     }
+                    Expr::Number(n) => {
+                        // Print número: convertir a string en tiempo de compilación
+                        let num_str = format!("{}", n);
+                        let label = self.add_string_data(&num_str);
+                        self.text_section.push(format!("    mov rax, 1  ; sys_write"));
+                        self.text_section.push(format!("    mov rdi, 1  ; stdout"));
+                        self.text_section.push(format!("    lea rsi, [rel {}]", label));
+                        self.text_section.push(format!("    mov rdx, {}_len", label));
+                        self.text_section.push(format!("    syscall"));
+                    }
                     _ => {
-                        // Intentar evaluar expresión numérica
+                        // Evaluar expresión numérica (ej: 2 + 5) y convertir a string
+                        // Para Linux, usar generate_expr (método genérico)
                         self.generate_expr(expr)?;
                         // RAX ahora contiene el resultado numérico
-                        // Por ahora, solo soportamos literales. Expresiones complejas se asignan a variable
+                        // TODO: Implementar conversión runtime completa para Linux
+                        // Por ahora, solo soportamos literales y variables
                         return Err(adead_common::ADeadError::RuntimeError {
-                            message: "print supports strings and number literals. For expressions, assign to a variable first: let x = expr; print x".to_string(),
+                            message: "Complex expressions in print not yet fully supported on Linux. Use Windows target or assign to variable first: let x = expr; print x".to_string(),
                         });
                     }
                 }

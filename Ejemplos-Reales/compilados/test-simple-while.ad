@@ -1,0 +1,5 @@
+let suma = 1
+while suma <= 10 {
+    print suma
+}
+
