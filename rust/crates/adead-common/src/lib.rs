@@ -68,6 +68,52 @@ pub enum ADeadError {
     IoError(#[from] std::io::Error),
 }
 
+/// Errores estándar para usar en programas ADead
+/// Estos son tipos que los usuarios pueden usar con Result<T, E>
+#[derive(Debug, Clone, PartialEq)]
+pub enum StdError {
+    FileError {
+        path: String,
+        message: String,
+    },
+    ParseError {
+        message: String,
+    },
+    MathError {
+        operation: String,
+        message: String,
+    },
+    ValueError {
+        message: String,
+    },
+    IOError {
+        message: String,
+    },
+}
+
+impl StdError {
+    /// Convertir error a string para imprimir
+    pub fn to_string(&self) -> String {
+        match self {
+            StdError::FileError { path, message } => {
+                format!("FileError: {} - {}", path, message)
+            }
+            StdError::ParseError { message } => {
+                format!("ParseError: {}", message)
+            }
+            StdError::MathError { operation, message } => {
+                format!("MathError in {}: {}", operation, message)
+            }
+            StdError::ValueError { message } => {
+                format!("ValueError: {}", message)
+            }
+            StdError::IOError { message } => {
+                format!("IOError: {}", message)
+            }
+        }
+    }
+}
+
 pub type Result<T> = std::result::Result<T, ADeadError>;
 
 impl Type {

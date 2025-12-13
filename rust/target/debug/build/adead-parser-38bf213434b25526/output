@@ -1,0 +1,2 @@
+cargo:rustc-link-search=native=../../../zig/zig-out/lib
+cargo:rerun-if-changed=../../../zig/zig-out/lib/adead_zig.lib

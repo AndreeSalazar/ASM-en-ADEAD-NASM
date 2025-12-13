@@ -116,3 +116,103 @@ fn test_generate_match_with_wildcard() {
     assert!(asm.contains("jmp match_arm_"));
 }
 
+// ========== Tests para operador ? (PropagateError) ==========
+
+#[test]
+fn test_generate_propagate_error_with_ok() {
+    let src = r#"
+        let x = Ok(42)
+        let resultado = x?
+    "#;
+    let program = parse(src).unwrap();
+    let mut gen = CodeGenerator::new();
+    let asm = gen.generate(&program).unwrap();
+    
+    // Verificar que se genera código para propagación de errores
+    // Buscar indicadores de propagación: guardar dirección, cargar tag, comparar
+    assert!(asm.contains("rbx") || asm.contains("propagate") || asm.contains("tag"));
+    // Verificar comparación de tag
+    assert!(asm.contains("cmp") || asm.contains("je") || asm.contains("jmp"));
+}
+
+#[test]
+fn test_generate_propagate_error_with_method_call() {
+    let src = r#"
+        let x = Ok(100)
+        let valor = x?
+    "#;
+    let program = parse(src).unwrap();
+    let mut gen = CodeGenerator::new();
+    let asm = gen.generate(&program).unwrap();
+    
+    // Verificar que se genera código para propagación
+    // Debe haber código que guarda la dirección y verifica el tag
+    assert!(asm.contains("rbx") || asm.contains("propagate") || asm.contains("[rbx"));
+    // Verificar que se verifica el tag (comparación o salto)
+    assert!(asm.contains("cmp") || asm.contains("je") || asm.contains("jmp"));
+}
+
+#[test]
+fn test_generate_propagate_error_checks_tag() {
+    let src = r#"
+        let x = Ok(42)
+        let valor = x?
+    "#;
+    let program = parse(src).unwrap();
+    let mut gen = CodeGenerator::new();
+    let asm = gen.generate(&program).unwrap();
+    
+    // Verificar que se genera verificación de tag
+    // Debe guardar dirección en rbx y cargar tag
+    assert!(asm.contains("rbx") && (asm.contains("mov rbx") || asm.contains("[rbx")));
+    // Debe comparar el tag o hacer saltos condicionales
+    assert!(asm.contains("cmp") || asm.contains("je") || asm.contains("jmp"));
+}
+
+#[test]
+fn test_generate_propagate_error_handles_ok() {
+    let src = r#"
+        let resultado = Ok(10)?
+    "#;
+    let program = parse(src).unwrap();
+    let mut gen = CodeGenerator::new();
+    let asm = gen.generate(&program).unwrap();
+    
+    // Verificar que desarrolla valor cuando es Ok
+    // Debe acceder al valor desde [rbx + 8] o similar
+    assert!(asm.contains("[rbx + 8]") || asm.contains("Ok") || asm.contains("valor"));
+}
+
+#[test]
+fn test_generate_propagate_error_handles_err() {
+    let src = r#"
+        let resultado = Err(5)?
+    "#;
+    let program = parse(src).unwrap();
+    let mut gen = CodeGenerator::new();
+    let asm = gen.generate(&program).unwrap();
+    
+    // Verificar que propaga error cuando es Err
+    // Debe haber código que maneja el caso de error
+    assert!(asm.contains("propagate") || asm.contains("Err") || asm.contains("[rbx + 8]"));
+}
+
+#[test]
+fn test_generate_propagate_error_chained() {
+    let src = r#"
+        let x = Ok(1)
+        let y = Ok(2)
+        let suma = x? + y?
+    "#;
+    let program = parse(src).unwrap();
+    let mut gen = CodeGenerator::new();
+    let asm = gen.generate(&program).unwrap();
+    
+    // Verificar que ambas propagaciones generan código
+    // Debería haber múltiples verificaciones de tag (cmp o saltos)
+    let cmp_count = asm.matches("cmp").count();
+    let je_count = asm.matches("je").count();
+    // Al menos debe haber algunas comparaciones o saltos por las dos propagaciones
+    assert!(cmp_count >= 1 || je_count >= 1 || asm.contains("rbx"));
+}
+

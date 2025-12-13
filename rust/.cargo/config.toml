@@ -1,0 +1,28 @@
+# Configuración de Cargo para Windows
+# Soluciona problemas de linker LNK1318 (límite de PDB)
+
+[build]
+# Limitar compilación en paralelo para evitar error LNK1318 en Windows
+# El linker de MSVC tiene un límite de 12 archivos PDB abiertos simultáneamente
+jobs = 1  # Compilar de uno en uno (más lento pero evita el error)
+
+# Alternativa: Compilar en paralelo pero limitar tests
+[target.x86_64-pc-windows-msvc]
+linker = "link.exe"
+
+# Para tests, podemos compilar con menos paralelismo
+[profile.test]
+# Mantener optimizaciones básicas incluso en tests para evitar problemas de linker
+opt-level = 0
+debug = true
+
+[profile.dev]
+# Perfil de desarrollo optimizado para Windows
+opt-level = 0
+debug = true
+
+# Configuración específica para evitar problemas de PDB
+# Comentar la línea de jobs = 1 arriba y usar esto si prefieres paralelismo limitado
+# [build]
+# jobs = 4  # Reducir paralelismo a 4 en lugar de usar todos los cores
+

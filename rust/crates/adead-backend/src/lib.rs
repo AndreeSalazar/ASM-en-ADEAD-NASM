@@ -713,6 +713,46 @@ impl CodeGenerator {
                 // Label de fin
                 self.text_section.push(format!("{}:", end_label));
             }
+            Expr::PropagateError(expr) => {
+                // Operador ?: propaga error automáticamente
+                // expr? desenvuelve Result: si es Err, retorna temprano con el error
+                // Si es Ok(valor), desarrolla el valor y continúa
+                
+                // Evaluar la expresión (debe ser Result<T, E>)
+                self.generate_expr_windows(expr)?;
+                // rax contiene la dirección del tagged union Result
+                
+                // Guardar dirección en rbx para poder acceder después
+                self.text_section.push("    mov rbx, rax  ; guardar dirección del Result".to_string());
+                
+                // Cargar tag
+                self.text_section.push("    mov rax, [rbx]  ; cargar tag (0=Ok, 1=Err)".to_string());
+                
+                // Crear labels
+                let ok_label = self.new_label("propagate_ok");
+                let error_label = self.new_label("propagate_error");
+                
+                // Verificar si es Ok (tag == 0)
+                self.text_section.push("    cmp rax, 0  ; comparar tag con 0 (Ok)".to_string());
+                self.text_section.push(format!("    je {}  ; si es Ok, desenvolver valor", ok_label));
+                
+                // Si llegamos aquí, es Err (tag == 1) -> propagar error
+                self.text_section.push(format!("    jmp {}  ; si es Err, propagar", error_label));
+                
+                // Label para Ok: desenvolver valor
+                self.text_section.push(format!("{}:", ok_label));
+                self.text_section.push("    mov rax, [rbx + 8]  ; cargar valor de Ok desde Result".to_string());
+                
+                // Label para error: dejar error en rax (dirección del error)
+                // El error está en [rbx + 8]
+                self.text_section.push(format!("{}:", error_label));
+                self.text_section.push("    mov rax, [rbx + 8]  ; cargar error de Err".to_string());
+                // TODO: En una función con tipo de retorno Result, deberíamos:
+                // 1. Construir un nuevo Result con el error
+                // 2. Retornar temprano con "ret"
+                // Por ahora, el error queda en rax para que el caller lo maneje
+                self.text_section.push("    ; Nota: En función Result, debería retornar temprano".to_string());
+            }
         }
         Ok(())
     }
@@ -991,6 +1031,43 @@ impl CodeGenerator {
                 if let Some(first_arm) = arms.first() {
                     self.generate_expr(&first_arm.body)?;
                 }
+            }
+            Expr::PropagateError(expr) => {
+                // Operador ?: propaga error automáticamente (versión Linux)
+                // Misma lógica que Windows pero con syscalls de Linux si es necesario
+                // Evaluar la expresión (debe ser Result<T, E>)
+                self.generate_expr(expr)?;
+                // rax contiene la dirección del tagged union Result
+                
+                // Guardar dirección en rbx para poder acceder después
+                self.text_section.push("    mov rbx, rax  ; guardar dirección del Result".to_string());
+                
+                // Cargar tag
+                self.text_section.push("    mov rax, [rbx]  ; cargar tag (0=Ok, 1=Err)".to_string());
+                
+                // Crear labels
+                let ok_label = self.new_label("propagate_ok");
+                let error_label = self.new_label("propagate_error");
+                
+                // Verificar si es Ok (tag == 0)
+                self.text_section.push("    cmp rax, 0  ; comparar tag con 0 (Ok)".to_string());
+                self.text_section.push(format!("    je {}  ; si es Ok, desenvolver valor", ok_label));
+                
+                // Si llegamos aquí, es Err (tag == 1) -> propagar error
+                self.text_section.push(format!("    jmp {}  ; si es Err, propagar", error_label));
+                
+                // Label para Ok: desenvolver valor
+                self.text_section.push(format!("{}:", ok_label));
+                self.text_section.push("    mov rax, [rbx + 8]  ; cargar valor de Ok desde Result".to_string());
+                
+                // Label para error: dejar error en rax (dirección del error)
+                self.text_section.push(format!("{}:", error_label));
+                self.text_section.push("    mov rax, [rbx + 8]  ; cargar error de Err".to_string());
+                // TODO: En una función con tipo de retorno Result, deberíamos:
+                // 1. Construir un nuevo Result con el error
+                // 2. Retornar temprano con "ret"
+                // Por ahora, el error queda en rax para que el caller lo maneje
+                self.text_section.push("    ; Nota: En función Result, debería retornar temprano".to_string());
             }
             Expr::Ident(name) => {
                 if let Some(&offset) = self.variables.get(name) {

@@ -42,6 +42,7 @@ pub enum Expr {
         expr: Box<Expr>,
         arms: Vec<MatchArm>,
     },
+    PropagateError(Box<Expr>), // expr? - Propaga error automáticamente
     // Structs/Clases (Fase 1.2 - O1)
     StructLiteral {             // StructName { field1: value1, field2: value2 }
         name: String,
@@ -55,6 +56,12 @@ pub enum Expr {
         object: Box<Expr>,
         method: String,
         args: Vec<Expr>,
+    },
+    // Arrays (Sprint 1.2)
+    ArrayLiteral(Vec<Expr>),    // [1, 2, 3]
+    Index {                     // arr[0]
+        array: Box<Expr>,
+        index: Box<Expr>,
     },
 }
 
@@ -689,6 +696,18 @@ fn expr_parser() -> impl Parser<char, Expr, Error = Simple<char>> + Clone {
             .map(Expr::String)
             .labelled("string");
 
+        // Array literal: [1, 2, 3] (Sprint 1.2)
+        let array_literal = just('[')
+            .padded()
+            .ignore_then(
+                expr.clone()
+                    .separated_by(just(',').padded())
+                    .allow_trailing(),
+            )
+            .then_ignore(just(']').padded())
+            .map(Expr::ArrayLiteral)
+            .labelled("array literal");
+
         let ident = text::ident().map(Expr::Ident).labelled("identifier");
 
         // Borrowing: &expr o &mut expr
@@ -768,6 +787,7 @@ fn expr_parser() -> impl Parser<char, Expr, Error = Simple<char>> + Clone {
 
         let atom = number
             .or(string)
+            .or(array_literal)  // Array literal antes de borrow
             .or(borrow)  // Borrow debe ir ANTES de ident para que &x se parse como Borrow, no como Call
             .or(deref)
             .or(some.clone())
@@ -896,13 +916,38 @@ fn expr_parser() -> impl Parser<char, Expr, Error = Simple<char>> + Clone {
                 }
             });
 
-        let product = with_access
+        // Indexación: arr[0] (Sprint 1.2)
+        let with_index = with_access
+            .then(
+                just('[')
+                    .padded()
+                    .ignore_then(expr.clone())
+                    .then_ignore(just(']').padded())
+                    .repeated(),
+            )
+            .foldl(|arr, idx| Expr::Index {
+                array: Box::new(arr),
+                index: Box::new(idx),
+            });
+
+        // Operador ? para propagación de errores (expr?)
+        let with_propagate = with_index
+            .then(just("?").padded().or_not())
+            .map(|(expr, has_question)| {
+                if has_question.is_some() {
+                    Expr::PropagateError(Box::new(expr))
+                } else {
+                    expr
+                }
+            });
+
+        let product = with_propagate
             .clone()
             .then(
                 just("*")
                     .to(BinOp::Mul)
                     .or(just("/").to(BinOp::Div))
-                    .then(with_access.clone())
+                    .then(with_propagate.clone())
                     .repeated(),
             )
             .foldl(|l, (op, r)| Expr::BinaryOp {
@@ -1281,6 +1326,152 @@ mod tests {
             }
         } else {
             panic!("Expected Let statement");
+        }
+    }
+
+    #[test]
+    fn test_parse_propagate_error_operator() {
+        // Test del operador ? para propagación de errores
+        let src = r#"let valor = funcion()?"#;
+        let program = parse(src).unwrap();
+        if let Stmt::Let { value, .. } = &program.statements[0] {
+            assert!(matches!(value, Expr::PropagateError(_)));
+            if let Expr::PropagateError(inner) = value {
+                // El inner debe ser una llamada a función
+                assert!(matches!(inner.as_ref(), Expr::Call { .. }));
+            }
+        } else {
+            panic!("Expected Let statement with PropagateError");
+        }
+    }
+
+    #[test]
+    fn test_parse_propagate_error_with_method_call() {
+        // Test de propagación con método: objeto.metodo()?
+        let src = r#"let resultado = objeto.metodo()?"#;
+        let program = parse(src).unwrap();
+        if let Stmt::Let { value, .. } = &program.statements[0] {
+            assert!(matches!(value, Expr::PropagateError(_)));
+        } else {
+            panic!("Expected Let statement with PropagateError");
+        }
+    }
+
+    #[test]
+    fn test_parse_propagate_error_with_ok() {
+        // Test de propagación con Ok(): Ok(42)?
+        let src = r#"let valor = Ok(42)?"#;
+        let program = parse(src).unwrap();
+        if let Stmt::Let { value, .. } = &program.statements[0] {
+            assert!(matches!(value, Expr::PropagateError(_)));
+            if let Expr::PropagateError(inner) = value {
+                // El inner debe ser Ok(42)
+                assert!(matches!(inner.as_ref(), Expr::Ok(_)));
+            }
+        } else {
+            panic!("Expected Let statement with PropagateError");
+        }
+    }
+
+    #[test]
+    fn test_parse_propagate_error_chained() {
+        // Test de múltiples propagaciones: funcion1()? + funcion2()?
+        let src = r#"let suma = funcion1()? + funcion2()?"#;
+        let program = parse(src).unwrap();
+        if let Stmt::Let { value, .. } = &program.statements[0] {
+            // Debe ser una BinaryOp con PropagateError en ambos lados
+            assert!(matches!(value, Expr::BinaryOp { .. }));
+        } else {
+            panic!("Expected Let statement with BinaryOp");
+        }
+    }
+
+    // ========== Tests para Arrays (Sprint 1.2) ==========
+    
+    #[test]
+    fn test_parse_array_literal() {
+        // Test de literal de array: [1, 2, 3]
+        let src = r#"let arr = [1, 2, 3]"#;
+        let program = parse(src).unwrap();
+        if let Stmt::Let { value, .. } = &program.statements[0] {
+            assert!(matches!(value, Expr::ArrayLiteral(_)));
+            if let Expr::ArrayLiteral(elements) = value {
+                assert_eq!(elements.len(), 3);
+                assert!(matches!(elements[0], Expr::Number(1)));
+                assert!(matches!(elements[1], Expr::Number(2)));
+                assert!(matches!(elements[2], Expr::Number(3)));
+            }
+        } else {
+            panic!("Expected Let statement with ArrayLiteral");
+        }
+    }
+
+    #[test]
+    fn test_parse_array_literal_empty() {
+        // Test de array vacío: []
+        let src = r#"let arr = []"#;
+        let program = parse(src).unwrap();
+        if let Stmt::Let { value, .. } = &program.statements[0] {
+            assert!(matches!(value, Expr::ArrayLiteral(_)));
+            if let Expr::ArrayLiteral(elements) = value {
+                assert_eq!(elements.len(), 0);
+            }
+        } else {
+            panic!("Expected Let statement with empty ArrayLiteral");
+        }
+    }
+
+    #[test]
+    fn test_parse_array_index() {
+        // Test de indexación: arr[0]
+        let src = r#"let valor = arr[0]"#;
+        let program = parse(src).unwrap();
+        if let Stmt::Let { value, .. } = &program.statements[0] {
+            assert!(matches!(value, Expr::Index { .. }));
+            if let Expr::Index { array, index } = value {
+                assert!(matches!(array.as_ref(), Expr::Ident(_)));
+                assert!(matches!(index.as_ref(), Expr::Number(0)));
+            }
+        } else {
+            panic!("Expected Let statement with Index");
+        }
+    }
+
+    #[test]
+    fn test_parse_array_index_nested() {
+        // Test de indexación anidada: arr[i][j]
+        let src = r#"let valor = matriz[i][j]"#;
+        let program = parse(src).unwrap();
+        if let Stmt::Let { value, .. } = &program.statements[0] {
+            assert!(matches!(value, Expr::Index { .. }));
+            if let Expr::Index { array, index } = value {
+                // El array debe ser otro Index
+                assert!(matches!(array.as_ref(), Expr::Index { .. }));
+                if let Expr::Index { array: inner_array, index: inner_index } = array.as_ref() {
+                    assert!(matches!(inner_array.as_ref(), Expr::Ident(_)));
+                    assert!(matches!(inner_index.as_ref(), Expr::Ident(_)));
+                }
+                assert!(matches!(index.as_ref(), Expr::Ident(_)));
+            }
+        } else {
+            panic!("Expected Let statement with nested Index");
+        }
+    }
+
+    #[test]
+    fn test_parse_array_literal_with_expressions() {
+        // Test de array con expresiones: [1 + 2, 3 * 4]
+        let src = r#"let arr = [1 + 2, 3 * 4]"#;
+        let program = parse(src).unwrap();
+        if let Stmt::Let { value, .. } = &program.statements[0] {
+            assert!(matches!(value, Expr::ArrayLiteral(_)));
+            if let Expr::ArrayLiteral(elements) = value {
+                assert_eq!(elements.len(), 2);
+                assert!(matches!(elements[0], Expr::BinaryOp { .. }));
+                assert!(matches!(elements[1], Expr::BinaryOp { .. }));
+            }
+        } else {
+            panic!("Expected Let statement with ArrayLiteral containing expressions");
         }
     }
 

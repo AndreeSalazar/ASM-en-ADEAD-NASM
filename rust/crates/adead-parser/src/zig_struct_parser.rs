@@ -181,11 +181,11 @@ mod tests {
         let field = parse_field("saldo: int64").unwrap();
         assert_eq!(field.name, "saldo");
         assert_eq!(field.ty, Some("int64".to_string()));
-        assert!(!field.visibility);
+        assert_eq!(field.visibility, Visibility::Private);
         
         let pub_field = parse_field("pub nombre: string").unwrap();
         assert_eq!(pub_field.name, "nombre");
-        assert!(pub_field.visibility);
+        assert_eq!(pub_field.visibility, Visibility::Public);
     }
 
     #[test]
