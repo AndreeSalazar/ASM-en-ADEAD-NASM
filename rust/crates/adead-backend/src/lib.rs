@@ -239,12 +239,14 @@ impl CodeGenerator {
                         
                         // IMPORTANTE: Guardar RAX (longitud) inmediatamente después del call
                         self.text_section.push("    push rax  ; guardar longitud (resultado del call)".to_string());
-                        // RDX debe tener la dirección del buffer (función helper la preserva en r8 y la copia a rdx)
+                        // CRÍTICO: La función helper preserva la dirección del buffer en r8
+                        // Necesitamos copiar r8 a rdx porque WriteFile necesita RDX para el buffer
+                        self.text_section.push("    mov rdx, r8  ; copiar dirección buffer de r8 a rdx (función helper la preserva en r8)".to_string());
                         
                         // Preparar WriteFile call
                         self.text_section.push("    ; Prepare WriteFile call for numeric expression".to_string());
                         self.text_section.push("    mov rcx, [rbp+16]  ; stdout handle (primer parámetro)".to_string());
-                        // RDX ya tiene la dirección del buffer (segundo parámetro) - preservado por helper
+                        // RDX ya tiene la dirección del buffer (segundo parámetro) - copiada desde r8
                         self.text_section.push("    pop r8  ; longitud del string (tercer parámetro)".to_string());
                         self.text_section.push("    lea r9, [rbp+24]  ; lpNumberOfBytesWritten (cuarto parámetro)".to_string());
                         self.text_section.push("    mov qword [r9], 0  ; inicializar lpNumberOfBytesWritten".to_string());
@@ -278,7 +280,9 @@ impl CodeGenerator {
                         self.text_section.push("    neg rax".to_string());
                         self.text_section.push(format!("{}:", pos_label));
                         
-                        self.text_section.push("    mov rbx, rdx  ; inicio buffer".to_string());
+                        // CRÍTICO: Usar rsi (que tiene la dirección original del buffer) en lugar de rdx
+                        // porque rdx puede haber sido modificado si el número era negativo
+                        self.text_section.push("    mov rbx, rsi  ; inicio buffer (usar rsi que tiene dirección original)".to_string());
                         self.text_section.push("    mov rcx, 10  ; divisor".to_string());
                         
                         // Caso especial: 0
@@ -316,9 +320,13 @@ impl CodeGenerator {
                         self.text_section.push("    dec rdx  ; excluir newline del reverso".to_string());
                         self.text_section.push("    cmp rcx, rdx".to_string());
                         self.text_section.push(format!("    jge {}", rev_done));
+                        // CRÍTICO: Guardar rbx (fin del string) antes del loop de reversión
+                        // porque el loop modificará rbx
+                        self.text_section.push("    push rbx  ; guardar fin del string antes de reversión".to_string());
+                        
                         self.text_section.push(format!("{}:", rev_loop));
-                        self.text_section.push("    mov al, [rcx]".to_string());
-                        self.text_section.push("    mov bl, [rdx]".to_string());
+                        self.text_section.push("    mov al, [rcx]  ; byte desde inicio".to_string());
+                        self.text_section.push("    mov bl, [rdx]  ; byte desde fin (rbx temporal, se restaurará después)".to_string());
                         self.text_section.push("    mov [rcx], bl".to_string());
                         self.text_section.push("    mov [rdx], al".to_string());
                         self.text_section.push("    inc rcx".to_string());
@@ -326,6 +334,9 @@ impl CodeGenerator {
                         self.text_section.push("    cmp rcx, rdx".to_string());
                         self.text_section.push(format!("    jl {}", rev_loop));
                         self.text_section.push(format!("{}:", rev_done));
+                        
+                        // Restaurar rbx (fin del string) después del loop
+                        self.text_section.push("    pop rbx  ; restaurar fin del string después de reversión".to_string());
                         
                         // Calcular longitud: rbx (fin) - dirección inicial del buffer
                         self.text_section.push("    mov rax, rbx  ; fin del string (incluye newline)".to_string());
