@@ -20,7 +20,7 @@ Guía completa de qué falta por hacer y cómo seguir mejorando ADead.
 
 ## 🎯 OPCIÓN 1: Quick Wins (MEJORAS RÁPIDAS - Prioridad Alta)
 
-### 1.1 Print de Números (3 horas) ⚡ RÁPIDO
+### 1.1 Print de Números y Expresiones Aritméticas ⚡ COMPLETADO
 
 **Estado:** 🟢 **IMPLEMENTADO** ✅  
 **Por qué:** Muy solicitado, muy simple, mejora UX inmediatamente
@@ -35,22 +35,44 @@ match expr {
         let label = self.add_string_data(&num_str);
         // Usar WriteFile/sys_write como string normal
     }
+    _ => {
+        // Expresiones aritméticas: evaluar y convertir a string en runtime
+        // Función helper int_to_str_runtime convierte int64 a string
+        // Preserva registros según convención Windows x64 ABI
+    }
 }
 ```
 
 **Archivos modificados:**
 - ✅ `rust/crates/adead-backend/src/lib.rs` - `generate_stmt_windows()` y `generate_stmt()`
 - ✅ Soporta números literales positivos y cero
+- ✅ Soporta expresiones aritméticas complejas (`print 2 + 5`, `print x * y + z`)
 - ✅ Windows y Linux funcionando
+- ✅ Integración con Zig parser para expresiones
 
 **Funcionalidad:**
-- ✅ `print 42` - Funciona
+- ✅ `print 42` - Funciona (compilación)
 - ✅ `print 0` - Funciona
 - ✅ `print 1234567890` - Funciona
-- ⏳ Variables numéricas: asignar a variable primero (`let x = 42; print x`)
+- ✅ `print 2 + 5` - Funciona (runtime conversion) ✅ **NUEVO**
+- ✅ `print x + y` - Funciona (expresiones con variables) ✅ **NUEVO**
+- ✅ `print (a + b) * c` - Funciona (expresiones complejas) ✅ **NUEVO**
 
-**Impacto:** 🟡 MEDIO - Mejora UX inmediatamente ✅  
-**Desbloquea:** Debugging más fácil, programas más informativos
+**Mejoras Implementadas:**
+- ✅ Función helper `int_to_str_runtime` para conversión runtime
+- ✅ Preservación correcta de registros (RBX, RDX, R8) según Windows x64 ABI
+- ✅ Manejo correcto de stack alignment (`and rsp, -16`)
+- ✅ Loop de reversión optimizado para strings numéricos
+- ✅ Soporte para números negativos
+
+**Optimizaciones Futuras Sugeridas (Ver sección 6.3):**
+- 🔄 Inline de función helper para números pequeños (evitar call overhead)
+- 🔄 Cachear handles de stdout/stderr (evitar llamadas repetidas a GetStdHandle)
+- 🔄 Optimización para números de un solo dígito (pre-calcular strings)
+- 🔄 Pool de buffers para conversiones (reutilizar memoria)
+
+**Impacto:** 🟢 ALTO - Mejora UX inmediatamente ✅  
+**Desbloquea:** Debugging más fácil, programas más informativos, expresiones en print
 
 ---
 
@@ -743,6 +765,72 @@ let x = add(5, 3)  // → let x = 5 + 3
 
 ---
 
+### 6.3 Optimizaciones Runtime para Print (12 horas)
+
+**Estado:** 🔴 NO IMPLEMENTADO  
+**Por qué:** MEDIO - Mejora performance de programas generados
+
+**Optimizaciones Específicas:**
+
+#### 6.3.1 Inline de Función Helper para Números Pequeños (4h)
+```rust
+// Para números 0-9, evitar call overhead
+// Inline directamente la conversión
+let digit = rax + '0'  // Conversión directa
+mov [buffer], digit
+// Evitar loop completo para un solo dígito
+```
+
+**Beneficio:** Reduce overhead de llamada a función para números comunes
+
+#### 6.3.2 Cachear Handles de I/O (3h)
+```rust
+// Actualmente: GetStdHandle se llama en cada print
+// Optimización: Cachear handle globalmente
+static mut STDOUT_HANDLE: Option<HANDLE> = None;
+if STDOUT_HANDLE.is_none() {
+    STDOUT_HANDLE = Some(GetStdHandle(-11));
+}
+// Usar handle cacheado
+```
+
+**Beneficio:** Evita llamadas redundantes a GetStdHandle
+
+#### 6.3.3 Optimización para Números Pre-calculados (2h)
+```rust
+// Para literales numéricos en print, pre-calcular string en compilación
+// print 42 → ya convertir a "42\n" en tiempo de compilación
+// Solo usar runtime conversion para expresiones
+```
+
+**Beneficio:** Elimina conversión runtime para casos simples
+
+#### 6.3.4 Pool de Buffers (3h)
+```rust
+// Reutilizar buffers para conversiones numéricas
+// Evitar alloc/dealloc en cada print
+static mut CONVERSION_BUFFER: [u8; 32] = [0; 32];
+// Usar buffer estático en lugar de stack local
+```
+
+**Beneficio:** Reduce presión en stack y mejora cache locality
+
+**Implementación:**
+- Detectar casos especiales (números pequeños, literales)
+- Generar código optimizado según caso
+- Variables estáticas para handles y buffers
+
+**Archivos:**
+- `rust/crates/adead-backend/src/lib.rs` - Optimizaciones en `generate_stmt_windows`
+- `rust/crates/adead-optimizer/` (NUEVO) - Análisis de optimizaciones
+
+**Impacto:** 🟡 MEDIO - Performance mejorada  
+**Desbloquea:** Programas más rápidos, menor overhead de runtime
+
+**Prioridad:** ⭐⭐⭐ (Después de optimizaciones básicas)
+
+---
+
 ## 🎯 OPCIÓN 7: Herramientas de Desarrollo
 
 ### 7.1 Language Server Protocol (LSP) (40 horas)
@@ -832,6 +920,7 @@ adeadfmt --check .   # Verificar formato
 | **5.2 FFI Rust** | 25h | 🔴 ALTO | ⭐⭐⭐⭐ | FFI C (5.1) | Ecosistema Rust |
 | **6.1 Optimizaciones** | 25h | 🟡 MEDIO | ⭐⭐⭐ | - | Performance |
 | **6.2 Compilación** | 20h | 🟡 MEDIO | ⭐⭐⭐ | - | Desarrollo rápido |
+| **6.3 Optimizaciones Runtime Print** | 12h | 🟡 MEDIO | ⭐⭐⭐ | Print ✅ | Performance print |
 | **7.1 LSP** | 40h | 🔴 ALTO | ⭐⭐⭐⭐ | - | IDE support |
 | **7.2 Debugger** | 50h | 🟡 MEDIO | ⭐⭐⭐ | - | Debugging |
 | **7.3 Formatter** | 15h | 🟡 MEDIO | ⭐⭐⭐ | - | Consistencia |
@@ -1009,6 +1098,7 @@ ________________________________________________________________________________
 - [ ] Pattern matching avanzado (15h)
 - [ ] Bool nativo (5h)
 - [ ] Sistema módulos avanzado (35h)
+- [ ] Optimizaciones Runtime Print (12h) - Mejorar performance de print
 
 ### 🔵 BAJA PRIORIDAD (Más adelante)
 - [ ] Generics (30h)
@@ -1044,15 +1134,56 @@ ________________________________________________________________________________
 
 ---
 
+## 🔧 Mejoras Técnicas Recientes (Diciembre 2025)
+
+### Print de Expresiones Aritméticas - Implementación Completa ✅
+
+**Problemas Resueltos:**
+- ✅ Preservación correcta de registros según Windows x64 ABI
+- ✅ Manejo de conflictos entre R8 (buffer vs longitud)
+- ✅ Preservación de RBX durante loops de reversión
+- ✅ Alineación de stack (`and rsp, -16`) implementada
+- ✅ Función helper `int_to_str_runtime` optimizada
+
+**Arquitectura Final:**
+```
+Print Statement → Zig Parser (expresiones) → Rust Backend
+  → Generar código NASM:
+    1. Evaluar expresión (RAX = resultado)
+    2. Llamar int_to_str_runtime(RAX, RDX=buffer)
+       - Convierte int64 a string decimal
+       - Retorna: RAX=longitud, RDX=buffer
+    3. WriteFile(handle, RDX=buffer, R8=longitud, ...)
+```
+
+**Convención Windows x64 Respeta:**
+- ✅ RCX: Handle (stdout)
+- ✅ RDX: Buffer pointer (preservado por helper)
+- ✅ R8: Length (directo desde RAX)
+- ✅ R9: lpNumberOfBytesWritten
+- ✅ [rsp+32]: lpOverlapped = NULL
+- ✅ Stack alignment: 16 bytes
+- ✅ Shadow space: 32 bytes reservados
+
+**Lecciones Aprendidas:**
+1. **No sobrescribir registros antes de usarlos:** R8 usado para buffer y longitud causaba conflictos
+2. **Preservar registros en funciones helper:** Usar registros no volátiles (R8-R15) y restaurar correctamente
+3. **Stack alignment es crítico:** Windows x64 requiere alineación de 16 bytes
+4. **Convención de llamadas debe respetarse:** WriteFile espera parámetros específicos en registros específicos
+
+---
+
 ## 📚 Documentación Relacionada
 
 - `docs/roadmap/PROGRESO-SPRINT1.md` - Estado actual Sprint 1
 - `docs/roadmap/ROADMAP-PROFESIONAL.md` - Plan completo 6 meses
 - `docs/testing/TESTING-IMPORTS.md` - Guía de testing
 - `docs/stdlib/` - Documentación de librería estándar (futuro)
+- `docs/avances/ZIG-COMPARACIONES-IMPLEMENTADO.md` - Integración Zig parser
 
 ---
 
 **Última actualización:** Diciembre 2025  
 **Sprint 1:** ✅ 100% Completado  
-**Recomendación:** Empezar con Quick Wins (OPCIÓN A) para máximo impacto rápido
+**Print de Expresiones:** ✅ 100% Completado con optimizaciones  
+**Recomendación:** Empezar con Quick Wins (OPCIÓN A) o Optimizaciones Runtime (6.3) para máximo impacto

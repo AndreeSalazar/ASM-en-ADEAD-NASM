@@ -236,18 +236,27 @@ impl CodeGenerator {
                         self.text_section.push(format!("    call {}", conv_label));
                         // RAX ahora contiene la longitud del string
                         // RDX tiene la dirección del buffer (preservada por la función helper usando r8)
+                        // CRÍTICO: La función helper retorna RDX con la dirección del buffer
+                        // No necesitamos mover desde r8 porque RDX ya está correcto después del ret
                         
-                        // IMPORTANTE: Guardar RAX (longitud) inmediatamente después del call
-                        self.text_section.push("    push rax  ; guardar longitud (resultado del call)".to_string());
-                        // CRÍTICO: La función helper preserva la dirección del buffer en r8
-                        // Necesitamos copiar r8 a rdx porque WriteFile necesita RDX para el buffer
-                        self.text_section.push("    mov rdx, r8  ; copiar dirección buffer de r8 a rdx (función helper la preserva en r8)".to_string());
+                        // IMPORTANTE: Guardar RAX (longitud) y RDX (buffer) inmediatamente después del call
+                        // porque ambos se necesitan para WriteFile
+                        self.text_section.push("    mov r8, rax  ; guardar longitud en r8 (tercer parámetro de WriteFile)".to_string());
+                        // RDX ya tiene la dirección del buffer (segundo parámetro) - preservado por la función helper
+                        // No tocamos RDX aquí porque la función helper ya lo restauró correctamente
                         
-                        // Preparar WriteFile call
+                        // Preparar WriteFile call (Windows x64 calling convention)
+                        // BOOL WriteFile(
+                        //   HANDLE hFile,                    // RCX
+                        //   LPCVOID lpBuffer,                // RDX (ya está correcto)
+                        //   DWORD nNumberOfBytesToWrite,     // R8 (longitud, ya guardada arriba)
+                        //   LPDWORD lpNumberOfBytesWritten,  // R9
+                        //   LPOVERLAPPED lpOverlapped        // [rsp+32] (shadow space)
+                        // )
                         self.text_section.push("    ; Prepare WriteFile call for numeric expression".to_string());
                         self.text_section.push("    mov rcx, [rbp+16]  ; stdout handle (primer parámetro)".to_string());
-                        // RDX ya tiene la dirección del buffer (segundo parámetro) - copiada desde r8
-                        self.text_section.push("    pop r8  ; longitud del string (tercer parámetro)".to_string());
+                        // RDX ya tiene la dirección del buffer (segundo parámetro) - no modificar
+                        // R8 ya tiene la longitud (tercer parámetro) - no modificar
                         self.text_section.push("    lea r9, [rbp+24]  ; lpNumberOfBytesWritten (cuarto parámetro)".to_string());
                         self.text_section.push("    mov qword [r9], 0  ; inicializar lpNumberOfBytesWritten".to_string());
                         self.text_section.push("    mov qword [rsp+32], 0  ; lpOverlapped = NULL (quinto parámetro en shadow space)".to_string());
