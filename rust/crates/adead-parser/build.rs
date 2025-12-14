@@ -1,7 +1,12 @@
-// Build script para linkear con librería Zig
+// Build script para linkear con librería Zig y Tree-sitter
 // Zig es el parser PRINCIPAL - esto asegura que Rust pueda usar Zig
+// Tree-sitter es el parser ROBUSTO - para estructuras complejas
 
 fn main() {
+    // COMPILAR TREE-SITTER
+    compile_tree_sitter();
+    
+    // LINKAR CON ZIG (código existente)
     // En Windows, linkear con librerías del sistema necesarias para Zig
     if cfg!(target_os = "windows") {
         // El símbolo ___chkstk_ms es generado por Zig cuando una función necesita
@@ -120,4 +125,49 @@ fn main() {
     println!("cargo:warning=Zig library path not found, using default: {}", default_path);
     println!("cargo:warning=Compile Zig first with: cd zig && zig build-lib src/nasm_generator.zig ...");
     println!("cargo:rustc-link-search=native={}", default_path);
+}
+
+fn compile_tree_sitter() {
+    // Ruta al directorio tree-sitter-adead
+    let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
+    let manifest_path = std::path::Path::new(&manifest_dir);
+    
+    // Desde rust/crates/adead-parser/ subir a la raíz: ../../../
+    if let Some(root) = manifest_path.parent()
+        .and_then(|p| p.parent())
+        .and_then(|p| p.parent()) {
+        
+        let tree_sitter_dir = root.join("tree-sitter-adead");
+        let src_dir = tree_sitter_dir.join("src");
+        
+        if !src_dir.exists() {
+            println!("cargo:warning=Tree-sitter source directory not found: {}", src_dir.display());
+            return;
+        }
+        
+        // Verificar que parser.c existe
+        let parser_c = src_dir.join("parser.c");
+        if !parser_c.exists() {
+            println!("cargo:warning=parser.c not found. Run 'cd tree-sitter-adead && tree-sitter generate' first");
+            return;
+        }
+        
+        // Compilar tree-sitter como biblioteca estática
+        let mut build = cc::Build::new();
+        build
+            .file(src_dir.join("parser.c"))
+            .include(&src_dir)
+            .include(src_dir.join("tree_sitter"))
+            .warnings(false)
+            .flag_if_supported("-std=c99");
+        
+        // Compilar
+        build.compile("tree_sitter_adead");
+        
+        // Registrar función externa para Rust
+        println!("cargo:rustc-link-lib=static=tree_sitter_adead");
+        
+        // Recompilar si cambian los archivos fuente
+        println!("cargo:rerun-if-changed={}", parser_c.display());
+    }
 }

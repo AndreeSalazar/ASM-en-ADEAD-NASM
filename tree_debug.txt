@@ -1,0 +1,118 @@
+
+=== DEBUG: Estructura completa del AST ===
+Root node kind: source_file, children: 7
+source_file (0..157) 'print "Test loop simple 1-10:"\nprint ""\n\nlet i ...'
+  print_statement (0..30) 'print "Test loop simple 1-10:"'
+    print (0..5) 'print'
+    primary_expression (6..30) '"Test loop simple 1-10:"'
+      string (6..30) '"Test loop simple 1-10:"'
+        " (6..7) '"'
+        " (29..30) '"'
+  print_statement (32..40) 'print ""'
+    print (32..37) 'print'
+    primary_expression (38..40) '""'
+      string (38..40) '""'
+        " (38..39) '"'
+        " (39..40) '"'
+  let_statement (44..53) 'let i = 1'
+    let (44..47) 'let'
+    identifier (48..49) 'i'
+    = (50..51) '='
+    primary_expression (52..53) '1'
+      number (52..53) '1'
+  let_statement (55..67) 'let max = 10'
+    let (55..58) 'let'
+    identifier (59..62) 'max'
+    = (63..64) '='
+    primary_expression (65..67) '10'
+      number (65..67) '10'
+  ERROR (71..118) 'while i <= max {\n    print i\n    i = i + 1\n}'
+    while (71..76) 'while'
+    binary_expression (77..118) 'i <= max {\n    print i\n    i = i + 1\n}'
+      primary_expression (77..78) 'i'
+        identifier (77..78) 'i'
+      <= (79..81) '<='
+      primary_expression (82..118) 'max {\n    print i\n    i = i + 1\n}'
+        struct_literal (82..118) 'max {\n    print i\n    i = i + 1\n}'
+          identifier (82..85) 'max'
+          { (86..87) '{'
+          ERROR (93..115) 'print i\n    i = i + 1'
+            identifier (93..98) 'print'
+            identifier (99..100) 'i'
+            identifier (106..107) 'i'
+            = (108..109) '='
+            identifier (110..111) 'i'
+            + (112..113) '+'
+            number (114..115) '1'
+          } (117..118) '}'
+  print_statement (122..130) 'print ""'
+    print (122..127) 'print'
+    primary_expression (128..130) '""'
+      string (128..130) '""'
+        " (128..129) '"'
+        " (129..130) '"'
+  print_statement (132..153) 'print "Fin del loop!"'
+    print (132..137) 'print'
+    primary_expression (138..153) '"Fin del loop!"'
+      string (138..153) '"Fin del loop!"'
+        " (138..139) '"'
+        " (152..153) '"'
+
+=== DEBUG: Estructura completa del AST ===
+Root node kind: source_file, children: 7
+source_file (0..157) 'print "Test loop simple 1-10:"\nprint ""\n\nlet i ...'
+  print_statement (0..30) 'print "Test loop simple 1-10:"'
+    print (0..5) 'print'
+    primary_expression (6..30) '"Test loop simple 1-10:"'
+      string (6..30) '"Test loop simple 1-10:"'
+        " (6..7) '"'
+        " (29..30) '"'
+  print_statement (32..40) 'print ""'
+    print (32..37) 'print'
+    primary_expression (38..40) '""'
+      string (38..40) '""'
+        " (38..39) '"'
+        " (39..40) '"'
+  let_statement (44..53) 'let i = 1'
+    let (44..47) 'let'
+    identifier (48..49) 'i'
+    = (50..51) '='
+    primary_expression (52..53) '1'
+      number (52..53) '1'
+  let_statement (55..67) 'let max = 10'
+    let (55..58) 'let'
+    identifier (59..62) 'max'
+    = (63..64) '='
+    primary_expression (65..67) '10'
+      number (65..67) '10'
+  ERROR (71..118) 'while i <= max {\n    print i\n    i = i + 1\n}'
+    while (71..76) 'while'
+    binary_expression (77..118) 'i <= max {\n    print i\n    i = i + 1\n}'
+      primary_expression (77..78) 'i'
+        identifier (77..78) 'i'
+      <= (79..81) '<='
+      primary_expression (82..118) 'max {\n    print i\n    i = i + 1\n}'
+        struct_literal (82..118) 'max {\n    print i\n    i = i + 1\n}'
+          identifier (82..85) 'max'
+          { (86..87) '{'
+          ERROR (93..115) 'print i\n    i = i + 1'
+            identifier (93..98) 'print'
+            identifier (99..100) 'i'
+            identifier (106..107) 'i'
+            = (108..109) '='
+            identifier (110..111) 'i'
+            + (112..113) '+'
+            number (114..115) '1'
+          } (117..118) '}'
+  print_statement (122..130) 'print ""'
+    print (122..127) 'print'
+    primary_expression (128..130) '""'
+      string (128..130) '""'
+        " (128..129) '"'
+        " (129..130) '"'
+  print_statement (132..153) 'print "Fin del loop!"'
+    print (132..137) 'print'
+    primary_expression (138..153) '"Fin del loop!"'
+      string (138..153) '"Fin del loop!"'
+        " (138..139) '"'
+        " (152..153) '"'

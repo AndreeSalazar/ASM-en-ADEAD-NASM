@@ -13,11 +13,27 @@ Simple sintaxis estilo Python • Rendimiento nativo
 
 </div>
 
-## 🔄 Flujos de Compilación Establecidos
+## 🔄 Arquitectura Triple: Zig + Tree-sitter + Rust
 
-**ADead soporta múltiples flujos de compilación según la complejidad:**
+**ADead utiliza una arquitectura única de 3 lenguajes/herramientas que trabajan juntos, solos o independientemente según las necesidades:**
 
-### 🚀 Flujo Directo: ADead → Zig → NASM (ASM)
+### 🌳 Tree-sitter + Rust → NASM (ASM)
+**Para estructuras complejas** (while/if anidados, parsing robusto):
+```
+ADead Source (.ad)
+  ↓
+Tree-sitter (parsing robusto con error recovery)
+  ↓
+Rust (conversión AST + validación + codegen)
+  ↓
+NASM (Assembly x86_64)
+  ↓
+Ejecutable (.exe)
+```
+**Ventajas:** Parsing robusto de estructuras anidadas, error recovery automático
+**Uso:** Loops complejos, estructuras anidadas, programas grandes
+
+### 🚀 Zig → NASM Directo (ASM)
 **Para casos simples** (floats, expresiones aritméticas básicas):
 ```
 ADead Source (.ad)
@@ -29,14 +45,14 @@ NASM (Assembly x86_64)
 Ejecutable (.exe)
 ```
 **Ventajas:** Máxima eficiencia, sin overhead de validación
-**Uso:** Floats simples, expresiones aritméticas puras
+**Uso:** Floats simples, expresiones aritméticas puras, máxima performance
 
-### 🔒 Flujo con Validación: ADead → Zig → Rust → NASM (ASM)
-**Para casos complejos** (requiere validación, type checking, seguridad):
+### 🔒 Zig → Rust → NASM (ASM)
+**Para código que requiere validación** (variables, funciones, structs):
 ```
 ADead Source (.ad)
   ↓
-Zig (parsea expresiones)
+Zig (parsea expresiones eficientemente)
   ↓
 Rust (validación de memoria, type checking, seguridad)
   ↓
@@ -44,22 +60,30 @@ NASM (Assembly x86_64)
   ↓
 Ejecutable (.exe)
 ```
-**Ventajas:** Seguridad garantizada, validación completa
-**Uso:** Variables, funciones, structs, OOP, validaciones complejas
+**Ventajas:** Seguridad garantizada, validación completa, parsing eficiente
+**Uso:** Variables, funciones, structs, OOP, expresiones complejas
 
-### 🛠️ Flujo Rust Directo: ADead → Rust → NASM (ASM)
-**Para casos especiales** (cuando Zig no puede parsear):
+### 🛠️ Rust Directo → NASM (ASM)
+**Para casos especiales** (fallback cuando otros fallan):
 ```
 ADead Source (.ad)
   ↓
-Rust (parser completo + validación)
+Rust (parser Chumsky completo + validación)
   ↓
 NASM (Assembly x86_64)
   ↓
 Ejecutable (.exe)
 ```
 **Ventajas:** Parser completo en Rust, fallback robusto
-**Uso:** Sintaxis compleja, casos edge, fallback
+**Uso:** Sintaxis compleja, casos edge, último recurso
+
+### 🔄 Selección Automática de Flujo
+
+El compilador elige automáticamente el mejor flujo:
+1. **Primero intenta:** Tree-sitter (parsing robusto)
+2. **Si falla, intenta:** Zig → Rust (eficiente + seguro)
+3. **Si falla, intenta:** Zig directo (máximo rendimiento)
+4. **Último recurso:** Rust directo (compatibilidad total)
 
 **Ver documentación completa:** [docs/FLUJO-COMPLETO.md](docs/FLUJO-COMPLETO.md)
 
@@ -88,8 +112,11 @@ ADead es un lenguaje de programación que combina la simplicidad de Python con e
   - ✅ Precisión Float64 verificada (~15-17 dígitos decimales)
 
 #### ✅ Arquitectura Técnica Sólida
-- ✅ **Arquitectura Híbrida Zig + Rust** - Parsing eficiente + seguridad de memoria
-- ✅ **Flujos múltiples inteligentes** - Directo (Zig→NASM) para simple, con Rust para complejo
+- ✅ **Arquitectura Triple: Zig + Tree-sitter + Rust** - Parsing robusto + eficiente + seguro
+  - **🌳 Tree-sitter:** Parsing robusto de estructuras complejas (while/if anidados)
+  - **⚡ Zig:** Parsing eficiente y generación directa a ASM para casos simples
+  - **🔒 Rust:** Validación de memoria, type checking, seguridad y codegen NASM
+- ✅ **Flujos múltiples inteligentes** - Selección automática del mejor parser según el código
 - ✅ **Generación NASM x86_64** - Funcional en Windows/Linux
 - ✅ **CLI modular profesional** - `compile`, `assemble`, `link`, `run`
 - ✅ **Floats completamente funcionales** - Literales, expresiones, operaciones verificadas
@@ -173,8 +200,9 @@ Para que ADead sea considerado una alternativa seria low-level (tipo Zig/Rust pe
 El script `build-all.ps1` automatiza:
 1. ✅ Compilación de Zig (`zig build-lib`)
 2. ✅ Generación de `adead_zig.lib`
-3. ✅ Compilación de Rust con linking correcto
-4. ✅ Prueba del flujo completo (opcional con `-Test`)
+3. ✅ Generación de parser Tree-sitter (`tree-sitter generate`)
+4. ✅ Compilación de Rust con linking correcto
+5. ✅ Prueba del flujo completo (opcional con `-Test`)
 
 ### Requisitos
 
@@ -185,11 +213,22 @@ El script `build-all.ps1` automatiza:
 
 **Windows:**
 - Rust (última versión estable)
+- Zig (última versión estable) - Para parsing eficiente
+- Node.js (última versión LTS) - Para Tree-sitter
 - NASM (`nasm` en PATH)
 - MinGW/MSYS2 con `gcc` o binutils con `ld`
 - ⚠️ **Nota importante:** El código generado usa syscalls de Linux. Para ejecutar en Windows necesitas:
   - WSL (Windows Subsystem for Linux) - **Recomendado**
   - O usar herramientas de Linux (MSYS2 puede funcionar con algunas limitaciones)
+
+**Instalación rápida de Tree-sitter (una vez):**
+```powershell
+# Instalar tree-sitter CLI globalmente
+npm install -g tree-sitter-cli
+
+# Verificar instalación
+tree-sitter --version
+```
 
 ### Instalación
 
@@ -317,23 +356,67 @@ let result = add(5, 3)
 
 ## 🏗️ Arquitectura
 
-### Arquitectura Híbrida Zig + Rust
+### Arquitectura Triple: Zig + Tree-sitter + Rust
 
-**Filosofía:** Cada lenguaje hace lo que mejor sabe
-- **Zig:** Parsing eficiente y directo (expresiones aritméticas, structs complejos) ⚡
-- **Rust:** Seguridad de memoria, borrow checking, validación y generación de código NASM 🔒
+**Filosofía:** Cada herramienta hace lo que mejor sabe - trabajan juntos o independientemente según lo necesario
+
+- **🌳 Tree-sitter:** Parser generator especializado en parsing robusto de estructuras complejas
+  - Maneja bloques anidados perfectamente (while con if dentro)
+  - Error recovery automático
+  - Incremental parsing (preparado para LSP futuro)
+  - Usado por VS Code, GitHub, Atom
+  
+- **⚡ Zig:** Parsing eficiente y generación directa a ASM
+  - Máximo rendimiento para casos simples
+  - Generación directa de NASM sin overhead
+  - Parsing de expresiones aritméticas rápido
+  
+- **🔒 Rust:** Seguridad, validación y codegen robusto
+  - Validación de memoria (borrow checking)
+  - Type checking y validación completa
+  - Generación de código NASM optimizado
+  - Parser de fallback (Chumsky) para compatibilidad total
 
 ### Proceso de Compilación Completo
 
-**ADead utiliza múltiples flujos según la complejidad del código:**
+**ADead utiliza múltiples flujos que trabajan juntos, solos o independientemente según las necesidades:**
 
-#### 🚀 Flujo 1: Directo (Zig → NASM)
+#### 🌳 Flujo 1: Tree-sitter → Rust → NASM (Parsing Robusto)
+**Para estructuras complejas y programas grandes:**
+```
+ADead Source: while x <= limite { if x % 10 == 0 { print x } }
+  ↓
+┌─────────────────────────────────────────┐
+│  TREE-SITTER (parsing robusto)         │
+│  • Maneja bloques anidados perfectamente│
+│  • Error recovery automático            │
+│  • Incremental parsing                  │
+│  • Genera AST Tree-sitter               │
+└─────────────────────────────────────────┘
+  ↓ (AST Tree-sitter)
+┌─────────────────────────────────────────┐
+│  RUST (conversión + validación)        │
+│  • Convertir AST Tree-sitter → AST Rust│
+│  • Validación de memoria (borrow checker)│
+│  • Type checking y validación           │
+│  • Code Generator → NASM                │
+└─────────────────────────────────────────┘
+  ↓
+┌─────────────────────────────────────────┐
+│  NASM (Assembly x86_64)                │
+│  • Generación de código assembly       │
+└─────────────────────────────────────────┘
+  ↓
+✅ Ejecutable (.exe)
+```
+
+#### ⚡ Flujo 2: Zig → NASM Directo (Máxima Eficiencia)
 **Para expresiones simples y floats:**
 ```
 ADead Source: print 3.14
   ↓
 ┌─────────────────────────────────────────┐
-│  ZIG (parsea y genera ASM)             │
+│  ZIG (parsea y genera ASM directamente)│
 │  • Parsea: readFloat() → 3.14          │
 │  • Genera NASM directamente            │
 │  • Crea .data section: float_0: dq 3.14│
@@ -349,7 +432,7 @@ ADead Source: print 3.14
 ✅ Ejecutable (.exe)
 ```
 
-#### 🔒 Flujo 2: Con Validación (Zig → Rust → NASM)
+#### 🔒 Flujo 3: Zig → Rust → NASM (Eficiente + Seguro)
 **Para código que requiere validación:**
 ```
 ADead Source: let x = 2 + 5
@@ -373,37 +456,62 @@ ADead Source: let x = 2 + 5
 ┌─────────────────────────────────────────┐
 │  NASM (Assembly x86_64)                │
 │  • Generación de código assembly       │
-│  • Optimizaciones de bajo nivel        │
 └─────────────────────────────────────────┘
   ↓
 ✅ Ejecutable (.exe)
 ```
 
-**Ventajas de este diseño:**
-- ⚡ **Rendimiento:** Flujo directo para casos simples (sin overhead)
-- 🔒 **Seguridad:** Validación Rust para código complejo
-- 🎯 **Flexibilidad:** El compilador elige automáticamente el mejor flujo
+#### 🛠️ Flujo 4: Rust Directo → NASM (Fallback)
+**Para casos especiales cuando otros fallan:**
+```
+ADead Source: (cualquier código complejo)
+  ↓
+┌─────────────────────────────────────────┐
+│  RUST (parser Chumsky completo)        │
+│  • Parser completo en Rust             │
+│  • Validación completa                 │
+│  • Code Generator → NASM                │
+└─────────────────────────────────────────┘
+  ↓
+┌─────────────────────────────────────────┐
+│  NASM (Assembly x86_64)                │
+└─────────────────────────────────────────┘
+  ↓
+✅ Ejecutable (.exe)
+```
 
-**Ejemplo Práctico:**
+**Selección Automática Inteligente:**
+El compilador prueba los flujos en orden de robustez:
+1. **🌳 Tree-sitter** (más robusto) - Para estructuras complejas
+2. **⚡ Zig → Rust** (eficiente + seguro) - Para código con validación
+3. **⚡ Zig directo** (máximo rendimiento) - Para casos simples
+4. **🛠️ Rust directo** (fallback) - Último recurso
+
+**Ejemplo Práctico - Estructura Compleja:**
 ```adead
-print 2 + 5
+while suma <= limite {
+    if suma % intervalo == 0 {
+        print suma
+    }
+    suma = suma + 1
+}
 ```
 
 **Proceso:**
-1. **Zig parsea:** `"2 + 5"` → AST Zig → Serializa: `"BINOP:ADD:NUMBER:2:NUMBER:5"`
-2. **Rust recibe:** FFI deserializa → `Expr::BinaryOp { op: Add, left: Number(2), right: Number(5) }`
-3. **Rust valida:** Borrow checker, type checking, seguridad
-4. **Rust genera NASM:** Código assembly para evaluar `2 + 5` y convertir a string
+1. **Tree-sitter parsea:** Maneja bloques anidados perfectamente → AST Tree-sitter
+2. **Rust convierte:** Tree-sitter AST → AST Rust
+3. **Rust valida:** Borrow checker, type checking
+4. **Rust genera NASM:** Código assembly con loops y condiciones
 5. **NASM compila:** Genera `.obj` → Linker → `.exe`
-6. **Ejecución:** Output: `7`
 
-**Ventajas de esta Arquitectura Multi-Flujo:**
-- ✅ **Zig → NASM directo:** Máxima eficiencia para floats y expresiones simples
-- ✅ **Zig → Rust → NASM:** Seguridad garantizada para código complejo
-- ✅ **Selección automática:** El compilador elige el mejor flujo automáticamente
+**Ventajas de la Arquitectura Triple:**
+- ✅ **🌳 Tree-sitter:** Parsing robusto de estructuras complejas (while/if anidados)
+- ✅ **⚡ Zig:** Máxima eficiencia para casos simples (sin overhead)
+- ✅ **🔒 Rust:** Seguridad garantizada y validación completa
+- ✅ **🛠️ Fallback:** Siempre hay un parser que funciona
+- ✅ **Selección automática:** El compilador elige el mejor flujo
 - ✅ **Rendimiento nativo:** Ejecutable final sin dependencias
-- ✅ **Flexibilidad:** Cada caso usa el flujo más apropiado
-- ✅ **Separación clara:** Cada lenguaje hace lo que mejor sabe
+- ✅ **Flexibilidad máxima:** Cada herramienta trabaja sola o combinada según necesidad
 
 ### Comandos Modulares
 
@@ -469,8 +577,9 @@ Puedes ejecutar cada paso por separado para mayor control:
 #### Infraestructura Técnica
 - ✅ **Generación NASM:** x86_64 para Windows/Linux funcional
 - ✅ **CLI profesional:** Comandos modulares (`compile`, `assemble`, `link`, `run`)
-- ✅ **Flujo completo:** `ADead → Zig (parsea) → Rust (seguridad) → NASM (ASM) → .exe` funcionando
-- ✅ **Arquitectura híbrida:** Flujos múltiples inteligentes (directo para simple, con validación para complejo)
+- ✅ **Arquitectura Triple:** Tree-sitter + Zig + Rust con flujos múltiples inteligentes
+- ✅ **Flujos flexibles:** Selección automática del mejor parser según complejidad del código
+- ✅ **Parsing robusto:** Tree-sitter para estructuras complejas, Zig para eficiencia, Rust para seguridad
 
 #### Experiencia de Usuario
 - ✅ **Ejemplos funcionales:** Hello world, factorial, conditional, loops, structs, encapsulación, RAII
@@ -520,8 +629,8 @@ Copyright (c) 2025 Eddi Andreé Salazar Matos
 ### ✅ Completado (MVP Funcional)
 1. ✅ **Sintaxis Core**: `print`, `let`, `if/else`, `while`, `fn` + tests
 2. ✅ **OOP Completo**: Structs, métodos, `init`/`destroy` (RAII), encapsulación (`pub`/`private`)
-3. ✅ **Arquitectura Híbrida**: Zig (parsea) + Rust (seguridad de memoria) integrados
-4. ✅ **Flujo completo**: `ADead → Zig (parsea) → Rust (seguridad) → NASM (ASM) → .exe` funcionando
+3. ✅ **Arquitectura Triple**: Zig + Tree-sitter + Rust trabajando juntos, solos o independientemente
+4. ✅ **Flujos múltiples**: Tree-sitter → Rust, Zig → Rust, Zig directo, Rust directo funcionando
 5. ✅ **CLI profesional**: Comandos modulares (`compile`, `assemble`, `link`, `run`)
 6. ✅ **Floats completos**: ✅ **IMPLEMENTADO Y VERIFICADO** (Diciembre 2025)
    - ✅ Literales float, operaciones aritméticas completas

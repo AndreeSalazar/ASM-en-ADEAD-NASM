@@ -592,7 +592,8 @@ pub export fn generate_nasm_ffi(
             if (parse_result) |stmt| {
                 parsed_any = true;
                 generator.generateStatement(stmt) catch {
-                    return -1;
+                    // Si falla la generación, continuar con el siguiente statement
+                    // en lugar de fallar completamente
                 };
                 
                 // Continuar parseando si hay más
@@ -604,13 +605,16 @@ pub export fn generate_nasm_ffi(
                     break;
                 }
                 // Si avanzó algo pero falló, puede ser un error real
-                // Por ahora, retornar error para debugging
+                // Pero si ya parseamos algo, continuar intentando
                 _ = parse_err;
-                // Intentar continuar solo si ya parseamos algo antes
-                if (!parsed_any) {
-                    return -1;
+                // Si ya parseamos algo, continuar (puede ser un statement que no soportamos aún)
+                if (parsed_any) {
+                    // Continuar intentando parsear más statements
+                    if (stmt_parser.pos >= trimmed.len) break;
+                    continue;
                 }
-                if (stmt_parser.pos >= trimmed.len) break;
+                // Si no parseamos nada y falló, retornar error
+                return -1;
             }
         }
         

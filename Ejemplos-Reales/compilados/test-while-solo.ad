@@ -1,6 +1,0 @@
-print "test"
-while 1 <= 10 {
-    print "loop"
-}
-print "done"
-

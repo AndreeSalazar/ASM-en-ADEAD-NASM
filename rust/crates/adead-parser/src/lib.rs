@@ -15,6 +15,10 @@ mod zig_struct_parser;
 mod zig_expr_parser;
 // Generador NASM directo desde Zig (flujo: ADead → Zig → NASM)
 pub mod zig_nasm_generator;
+// Parser robusto usando Tree-sitter (para estructuras complejas)
+// Soporta Tree-sitter → NASM directo (sin Rust AST)
+pub mod tree_sitter_parser;
+pub mod tree_sitter_nasm;
 
 // Resolución de módulos (Sprint 1.3 - Import básico)
 pub mod module_resolver;
@@ -506,8 +510,9 @@ fn extract_struct(source: &str, start_byte_pos: usize) -> Result<(Stmt, String, 
 
 fn program_parser() -> impl Parser<char, Program, Error = Simple<char>> {
     stmt_parser()
+        .padded()  // Permitir whitespace/newlines entre statements
         .repeated()
-        .then_ignore(end().or_not())  // Permitir trailing whitespace/newlines (corregido para print expr)
+        .then_ignore(end().or_not())  // Permitir trailing whitespace/newlines
         .map(|stmts| Program {
             statements: stmts,
         })
@@ -628,9 +633,11 @@ fn stmt_parser() -> impl Parser<char, Stmt, Error = Simple<char>> + Clone {
                     .padded()
                     .ignore_then(
                         // IMPORTANTE: stmt.clone() ya es recursivo, así que maneja if/while dentro
+                        // Usar .padded() para permitir newlines entre statements dentro del bloque
                         stmt.clone()
-                            .repeated()
                             .padded()
+                            .repeated()
+                            .collect::<Vec<_>>()
                     )
                     .then_ignore(just("}").padded())
             )
@@ -865,10 +872,11 @@ fn stmt_parser() -> impl Parser<char, Stmt, Error = Simple<char>> + Clone {
         // CRÍTICO: while_stmt e if_stmt deben estar ANTES de assign_stmt y expr_stmt
         // para evitar que se parseen mal las condiciones y bloques
         // El orden correcto es: keywords primero, luego expresiones simples
-        struct_stmt
+        // CRÍTICO: while_stmt debe estar PRIMERO para tener máxima precedencia
+        while_stmt  // PRIMERO: máxima precedencia para while
+            .or(if_stmt)      // SEGUNDO: if también tiene alta precedencia
+            .or(struct_stmt)
             .or(import_stmt)
-            .or(while_stmt)  // MOVIDO ANTES: while debe tener alta precedencia
-            .or(if_stmt)      // MOVIDO ANTES: if debe tener alta precedencia
             .or(print)
             .or(let_stmt)
             .or(fn_stmt)

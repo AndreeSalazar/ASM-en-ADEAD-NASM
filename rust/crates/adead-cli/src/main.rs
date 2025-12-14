@@ -85,7 +85,10 @@ fn main() -> Result<()> {
             // NOTA: Solo para literales simples, NO para expresiones complejas
             let trimmed_source = source.trim();
             
-            if trimmed_source.starts_with("print ") {
+            // Solo usar flujo Zig directo si NO tiene estructuras complejas (while/if)
+            let has_complex_structures = source.contains("while") || source.contains("if") || source.contains("loop");
+            
+            if !has_complex_structures && trimmed_source.starts_with("print ") {
                 let expr_part = trimmed_source.strip_prefix("print ").unwrap_or("").trim();
                 
                 // PASO 3: Verificación SIMPLE - solo detectar '+'
@@ -107,12 +110,59 @@ fn main() -> Result<()> {
                 }
             }
 
-            // FLUJO HÍBRIDO: Intentar Rust primero, si falla usar Zig directo
-            println!("   🔒 Intentando flujo con validación: Zig → Rust → NASM");
+            // FLUJO HÍBRIDO TRIPLE: Tree-sitter → Zig → Rust → Fallback
+            // Estrategia: Detectar complejidad y elegir el mejor parser
+            
+            // Detectar si tiene estructuras complejas (while, if, loops)
+            let has_complex_structures = source.contains("while") || source.contains("if") || source.contains("loop");
+            
             let input_path = Path::new(&input);
             let current_dir = input_path.parent();
             
-            // Intentar parsear y generar con Rust primero
+            // PRIORIDAD 1: Tree-sitter → NASM directo (más robusto para estructuras complejas)
+            if has_complex_structures {
+                println!("   🌳 Estructuras complejas detectadas (while/if), intentando Tree-sitter → NASM...");
+                match adead_parser::tree_sitter_parser::TreeSitterParser::new() {
+                    Ok(mut ts_parser) => {
+                        match ts_parser.generate_nasm_direct(&source) {
+                            Ok(nasm_code) => {
+                                if nasm_code.contains("loop") || nasm_code.contains("jmp") || nasm_code.len() > 500 {
+                                    fs::write(&output_path, nasm_code)
+                                        .with_context(|| format!("Failed to write output file: {}", output_path))?;
+                                    println!("✅ Compilado (Tree-sitter → NASM): {} -> {}", input, output_path);
+                                    return Ok(());
+                                } else {
+                                    println!("   ⚠️ Tree-sitter generó código incompleto, intentando Zig...");
+                                }
+                            }
+                            Err(e) => {
+                                println!("   ⚠️ Tree-sitter codegen falló: {}, intentando Zig...", e);
+                            }
+                        }
+                    }
+                    Err(_) => {
+                        println!("   ⚠️ Tree-sitter no disponible aún, intentando Zig...");
+                    }
+                }
+                
+                // PRIORIDAD 2: Zig directo (fallback si Tree-sitter no está disponible)
+                println!("   ⚡ Intentando Zig directo...");
+                if let Some(nasm_code) = adead_parser::zig_nasm_generator::generate_nasm_direct(&source) {
+                    if nasm_code.contains("loop") || nasm_code.contains("jmp") || nasm_code.len() > 500 {
+                        fs::write(&output_path, nasm_code)
+                            .with_context(|| format!("Failed to write output file: {}", output_path))?;
+                        println!("✅ Compilado (Zig directo): {} -> {}", input, output_path);
+                        return Ok(());
+                    } else {
+                        println!("   ⚠️ Zig generó código incompleto, intentando Rust...");
+                    }
+                } else {
+                    println!("   ⚠️ Zig parser falló, intentando Rust...");
+                }
+            }
+            
+            // PRIORIDAD 2: Intentar Rust (con validación completa)
+            println!("   🔒 Intentando flujo con validación: Rust → NASM");
             let rust_success = match adead_parser::parse_with_dir(&source, current_dir) {
                 Ok(program) => {
                     // Debug: verificar statements parseados
@@ -120,23 +170,34 @@ fn main() -> Result<()> {
                     for (i, stmt) in program.statements.iter().enumerate() {
                         println!("      [{}] {:?}", i, std::mem::discriminant(stmt));
                     }
-                    // Rust parser exitoso, intentar generar código con Rust
-                    let mut generator = adead_backend::CodeGenerator::new();
-                    match generator.generate(&program) {
-                        Ok(asm) => {
-                            // Rust exitoso: escribir y retornar
-                            if let Err(e) = fs::write(&output_path, asm) {
-                                println!("   ⚠️ Error escribiendo archivo: {}", e);
-                                false
-                            } else {
-                                println!("✅ Compilado (Rust): {} -> {}", input, output_path);
-                                true
+                    
+                    // Verificar si se parseó el while
+                    let has_while = program.statements.iter().any(|s| {
+                        matches!(s, adead_parser::Stmt::While { .. })
+                    });
+                    
+                    if has_complex_structures && !has_while {
+                        println!("   ⚠️ Rust no parseó el while correctamente, intentando Zig...");
+                        false
+                    } else {
+                        // Rust parser exitoso, intentar generar código con Rust
+                        let mut generator = adead_backend::CodeGenerator::new();
+                        match generator.generate(&program) {
+                            Ok(asm) => {
+                                // Rust exitoso: escribir y retornar
+                                if let Err(e) = fs::write(&output_path, asm) {
+                                    println!("   ⚠️ Error escribiendo archivo: {}", e);
+                                    false
+                                } else {
+                                    println!("✅ Compilado (Rust): {} -> {}", input, output_path);
+                                    true
+                                }
                             }
-                        }
-                        Err(e) => {
-                            // Rust codegen falló, intentar Zig
-                            println!("   ⚠️ Rust codegen falló: {}", e);
-                            false
+                            Err(e) => {
+                                // Rust codegen falló, intentar Zig
+                                println!("   ⚠️ Rust codegen falló: {}", e);
+                                false
+                            }
                         }
                     }
                 }
@@ -147,7 +208,7 @@ fn main() -> Result<()> {
                 }
             };
             
-            // Si Rust falló, intentar con Zig directo (para statements como while)
+            // PRIORIDAD 3: Si Rust falló, intentar con Zig directo
             if !rust_success {
                 println!("   🚀 Intentando flujo directo: Zig → NASM");
                 match adead_parser::zig_nasm_generator::generate_nasm_direct(&source) {

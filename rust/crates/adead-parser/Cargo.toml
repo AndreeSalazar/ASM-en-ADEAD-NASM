@@ -8,7 +8,10 @@ license.workspace = true
 chumsky = { workspace = true }
 adead-common = { path = "../adead-common" }
 anyhow = { workspace = true }
+tree-sitter = "0.21"
+cc = "1.0"
 
 [build-dependencies]
-# Build script para linkear con biblioteca Zig
+cc = "1.0"
+# Build script para linkear con biblioteca Zig y Tree-sitter
 

@@ -1405,6 +1405,476 @@ Print Statement → Zig Parser (expresiones) → Rust Backend
 
 ---
 
+## 🌐 OPCIÓN 9: Arquitectura Multi-Lenguaje - Tercer Lenguaje Especializado en Parsing (NUEVO)
+
+**Estado:** 🔴 PROPUESTA NUEVA  
+**Por qué:** CRÍTICO - Compensar debilidades de Zig y Rust en parsing recursivo complejo
+
+### 9.1 Análisis del Problema Actual
+
+**Arquitectura Actual:**
+```
+ADead Source
+  ↓
+Zig (parsing rápido, eficiente) → ✅ Bueno para expresiones simples
+  ↓
+Rust (seguridad, codegen) → ✅ Bueno para validación
+  ↓
+NASM → Ejecutable
+```
+
+**Problemas Identificados:**
+- ❌ Zig: Parsing recursivo complejo falla con estructuras anidadas
+- ❌ Rust: Chumsky tiene limitaciones con backtracking y bloques anidados profundos
+- ❌ Ambos: Faltan herramientas especializadas para parsing estructurado
+
+### 9.2 Opciones de Tercer Lenguaje/Tool Especializado
+
+#### 🥇 OPCIÓN A: Tree-sitter (Recomendado) (40 horas)
+
+**Por qué Tree-sitter:**
+- ✅ **Parser generator especializado** - Diseñado específicamente para parsing robusto
+- ✅ **Incremental parsing** - Parse solo cambia lo necesario
+- ✅ **Error recovery avanzado** - Continúa parsing incluso con errores
+- ✅ **Múltiples lenguajes** - Bindings en C, Rust, Python, JavaScript
+- ✅ **Usado por VS Code, GitHub, etc.** - Probado en producción
+
+**Implementación:**
+```javascript
+// grammar.js (Tree-sitter grammar para ADead)
+module.exports = grammar({
+  name: 'adead',
+  
+  rules: {
+    source_file: $ => repeat($._statement),
+    
+    _statement: $ => choice(
+      $.print_statement,
+      $.let_statement,
+      $.while_statement,
+      $.if_statement,
+      $.function_definition
+    ),
+    
+    while_statement: $ => seq(
+      'while',
+      $.expression,
+      $.block  // Maneja bloques anidados automáticamente
+    ),
+    
+    block: $ => seq(
+      '{',
+      repeat($._statement),
+      '}'
+    ),
+    // ... más reglas
+  }
+});
+```
+
+**Arquitectura Propuesta:**
+```
+ADead Source
+  ↓
+Tree-sitter (parsing robusto) → AST Tree-sitter
+  ↓
+Rust (conversión AST + validación) → AST Rust
+  ↓
+Rust (codegen) → NASM
+  ↓
+Ejecutable
+```
+
+**Ventajas:**
+- ✅ Parsing robusto de estructuras anidadas
+- ✅ Error recovery automático
+- ✅ Incremental parsing (útil para LSP futuro)
+- ✅ Syntax highlighting automático (bonus)
+
+**Desventajas:**
+- ⚠️ Requiere Node.js para generar grammar
+- ⚠️ C binding necesario para Rust FFI
+- ⚠️ Curva de aprendizaje media
+
+**Tiempo:** 40 horas  
+**Impacto:** 🔴 CRÍTICO - Soluciona parsing complejo definitivamente
+
+---
+
+#### 🥈 OPCIÓN B: Pest (Rust PEG Parser) (25 horas)
+
+**Por qué Pest:**
+- ✅ **Parsing Expression Grammar (PEG)** - Muy potente para expresiones complejas
+- ✅ **100% Rust** - Sin FFI, integración nativa
+- ✅ **Backtracking automático** - Maneja ambigüedades
+- ✅ **Librería madura** - Usada por muchos proyectos Rust
+
+**Implementación:**
+```rust
+// grammar.pest
+WHITESPACE = _{ " " | "\t" | "\n" | "\r" }
+
+source_file = { statement* }
+
+statement = {
+    print_stmt |
+    let_stmt |
+    while_stmt |
+    if_stmt |
+    function_def
+}
+
+while_stmt = { "while" ~ expression ~ "{" ~ statement* ~ "}" }
+
+block = { "{" ~ statement* ~ "}" }
+
+expression = { 
+    comparison |
+    additive |
+    multiplicative |
+    primary
+}
+
+comparison = { additive ~ (("==" | "!=" | "<" | "<=" | ">" | ">=") ~ additive)* }
+additive = { multiplicative ~ (("+" | "-") ~ multiplicative)* }
+multiplicative = { primary ~ (("*" | "/" | "%") ~ primary)* }
+primary = { number | identifier | "(" ~ expression ~ ")" }
+```
+
+**Arquitectura Propuesta:**
+```
+ADead Source
+  ↓
+Pest Parser (grammar.pest) → Pest AST
+  ↓
+Rust (conversión a AST interno) → AST Rust
+  ↓
+Rust (codegen) → NASM
+  ↓
+Ejecutable
+```
+
+**Ventajas:**
+- ✅ 100% Rust (sin FFI)
+- ✅ PEG muy potente
+- ✅ Backtracking automático
+- ✅ Fácil de mantener
+
+**Desventajas:**
+- ⚠️ Aún es un parser, puede tener problemas con casos muy complejos
+- ⚠️ Menos maduro que Tree-sitter para parsing incremental
+
+**Tiempo:** 25 horas  
+**Impacto:** 🔴 ALTO - Solución Rust nativa
+
+---
+
+#### 🥉 OPCIÓN C: LALRPOP (Rust LR Parser) (30 horas)
+
+**Por qué LALRPOP:**
+- ✅ **LR(1) Parser Generator** - Parsing determinístico y eficiente
+- ✅ **100% Rust** - Integración nativa
+- ✅ **Error messages excelentes** - Muy útil para debugging
+- ✅ **Usado por Rustc internamente** - Probado en proyectos grandes
+
+**Implementación:**
+```rust
+// grammar.lalrpop
+grammar;
+
+pub SourceFile: Vec<Statement> = {
+    <statements:Statement*> => statements
+}
+
+pub Statement: Statement = {
+    WhileStmt,
+    IfStmt,
+    LetStmt,
+    PrintStmt,
+    FunctionDef,
+}
+
+WhileStmt: Statement = {
+    "while" <cond:Expression> "{" <body:Statement*> "}" =>
+        Statement::While { condition: cond, body: body }
+}
+
+Expression: Expr = {
+    Comparison,
+}
+
+Comparison: Expr = {
+    Additive ("<=" | ">=" | "<" | ">" | "==" | "!=") Additive =>
+        Expr::BinaryOp { op: <>, left: <>, right: <> },
+    Additive,
+}
+// ... más reglas
+```
+
+**Ventajas:**
+- ✅ LR parser muy robusto
+- ✅ Error messages excelentes
+- ✅ 100% Rust
+- ✅ Determinístico
+
+**Desventajas:**
+- ⚠️ Más complejo de configurar inicialmente
+- ⚠️ Puede ser sobrekill para sintaxis simple
+
+**Tiempo:** 30 horas  
+**Impacto:** 🟡 ALTO - Solución robusta Rust
+
+---
+
+#### OPCIÓN D: OCaml con Menhir (50 horas)
+
+**Por qué OCaml:**
+- ✅ **Excelente para parsing** - Usado en compiladores (Rust, Coq, etc.)
+- ✅ **Menhir parser generator** - Muy potente
+- ✅ **Pattern matching nativo** - Perfecto para AST
+- ✅ **Type safety fuerte** - Menos errores
+
+**Implementación:**
+```ocaml
+%token WHILE IF LET PRINT
+%token <int> NUMBER
+%token <string> IDENTIFIER
+%token EOF
+
+%start <ast.program> program
+
+%%
+
+program:
+  | statements = list(statement) EOF { { statements } }
+
+statement:
+  | WHILE cond = expression LBRACE body = list(statement) RBRACE
+    { While (cond, body) }
+  | IF cond = expression LBRACE then_body = list(statement) RBRACE
+      else_body = option(ELSE LBRACE list(statement) RBRACE)
+    { If (cond, then_body, Option.value else_body ~default:[]) }
+  | LET name = IDENTIFIER EQ value = expression
+    { Let (name, value) }
+  | PRINT expr = expression
+    { Print expr }
+```
+
+**Arquitectura Propuesta:**
+```
+ADead Source
+  ↓
+OCaml (parser con Menhir) → AST OCaml
+  ↓
+FFI (OCaml → Rust) → AST Rust
+  ↓
+Rust (codegen) → NASM
+  ↓
+Ejecutable
+```
+
+**Ventajas:**
+- ✅ Excelente para parsing complejo
+- ✅ Type safety fuerte
+- ✅ Pattern matching nativo
+
+**Desventajas:**
+- ⚠️ Requiere OCaml toolchain
+- ⚠️ FFI OCaml→Rust más complejo
+- ⚠️ Menos común en ecosistema Rust
+
+**Tiempo:** 50 horas  
+**Impacto:** 🟡 MEDIO-ALTO - Excelente pero más complejo
+
+---
+
+#### OPCIÓN E: Nim (35 horas)
+
+**Por qué Nim:**
+- ✅ **Compila a C** - Fácil FFI con Rust
+- ✅ **Macros poderosos** - Puede generar parsers
+- ✅ **Sintaxis limpia** - Fácil de escribir
+- ✅ **Performance nativa** - Sin overhead
+
+**Implementación:**
+```nim
+# parser.nim
+import macros, strutils
+
+proc parseStatement(s: string): Statement =
+  # Parser recursivo con backtracking
+  if s.startsWith("while"):
+    # Parse while loop
+    let cond = parseExpression(...)
+    let body = parseBlock(...)
+    return WhileStmt(cond, body)
+  # ... más casos
+```
+
+**Ventajas:**
+- ✅ Fácil integración con Rust (via C)
+- ✅ Sintaxis limpia
+- ✅ Performance nativa
+
+**Desventajas:**
+- ⚠️ Requiere toolchain Nim
+- ⚠️ Menos especializado en parsing
+
+**Tiempo:** 35 horas  
+**Impacto:** 🟡 MEDIO - Alternativa interesante
+
+---
+
+#### OPCIÓN F: Python + Lark (20 horas) - Prototipo Rápido
+
+**Por qué Python + Lark:**
+- ✅ **Lark parser** - Muy fácil de usar
+- ✅ **Rápido de prototipar** - Validar idea rápido
+- ✅ **Python FFI con Rust** - PyO3
+- ✅ **Excelente para MVP** - Probar conceptos
+
+**Implementación:**
+```python
+# grammar.py
+from lark import Lark
+
+grammar = """
+    source_file: statement*
+
+    statement: while_stmt | if_stmt | let_stmt | print_stmt
+
+    while_stmt: "while" expression "{" statement* "}"
+    if_stmt: "if" expression "{" statement* "}" ["else" "{" statement* "}"]
+    
+    expression: comparison
+    comparison: additive (("<=" | ">=" | "<" | ">" | "==" | "!=") additive)*
+    additive: multiplicative (("+" | "-") multiplicative)*
+    multiplicative: primary (("*" | "/" | "%") primary)*
+    primary: NUMBER | IDENTIFIER | "(" expression ")"
+"""
+
+parser = Lark(grammar, start='source_file')
+
+def parse_adead(source: str) -> dict:
+    tree = parser.parse(source)
+    return convert_to_ast(tree)
+```
+
+**Ventajas:**
+- ✅ Muy rápido de implementar
+- ✅ Excelente para prototipar
+- ✅ Validar arquitectura antes de invertir mucho tiempo
+
+**Desventajas:**
+- ⚠️ Dependencia de Python runtime
+- ⚠️ Más lento que soluciones nativas
+- ⚠️ Mejor para MVP que producción
+
+**Tiempo:** 20 horas  
+**Impacto:** 🟡 MEDIO - Bueno para validar concepto
+
+---
+
+### 9.3 Comparativa de Opciones
+
+| Opción | Tiempo | Complejidad | FFI | Robustez | Incremental | Recomendación |
+|--------|--------|-------------|-----|----------|-------------|---------------|
+| **Tree-sitter** | 40h | Media | C FFI | ⭐⭐⭐⭐⭐ | ✅ Sí | 🥇 **RECOMENDADO** |
+| **Pest** | 25h | Baja | N/A (Rust) | ⭐⭐⭐⭐ | ❌ No | 🥈 Buena opción Rust |
+| **LALRPOP** | 30h | Media | N/A (Rust) | ⭐⭐⭐⭐⭐ | ❌ No | 🥉 Excelente LR parser |
+| **OCaml+Menhir** | 50h | Alta | Complejo | ⭐⭐⭐⭐⭐ | ❌ No | Si ya conoces OCaml |
+| **Nim** | 35h | Media | C FFI | ⭐⭐⭐ | ❌ No | Alternativa interesante |
+| **Python+Lark** | 20h | Baja | PyO3 | ⭐⭐⭐ | ❌ No | Solo para MVP/prototipo |
+
+---
+
+### 9.4 Recomendación Final: Tree-sitter
+
+**¿Por qué Tree-sitter?**
+1. ✅ **Especializado en parsing robusto** - Exactamente lo que necesitamos
+2. ✅ **Incremental parsing** - Útil para LSP futuro
+3. ✅ **Error recovery avanzado** - Continúa parsing con errores
+4. ✅ **Mantenido activamente** - VS Code, GitHub, etc.
+5. ✅ **Documentación excelente** - Fácil de aprender
+
+**Plan de Implementación:**
+
+#### Fase 1: Setup Tree-sitter (5h)
+```bash
+# Instalar tree-sitter CLI
+npm install -g tree-sitter-cli
+
+# Crear grammar básico
+tree-sitter generate
+```
+
+#### Fase 2: Grammar Completo (15h)
+- Definir grammar completo para ADead
+- Tests con casos complejos (while anidados, etc.)
+- Validar parsing robusto
+
+#### Fase 3: FFI Rust (10h)
+- Binding Rust para Tree-sitter C library
+- Conversión de AST Tree-sitter → AST Rust
+- Integración con codegen existente
+
+#### Fase 4: Migración Gradual (10h)
+- Reemplazar parser actual por Tree-sitter
+- Validar todos los casos de uso
+- Optimizar performance
+
+**Total:** 40 horas
+
+---
+
+### 9.5 Arquitectura Final Propuesta
+
+**Arquitectura Híbrida Triple:**
+```
+ADead Source (.ad)
+  ↓
+┌─────────────────────────────────────────┐
+│  TREE-SITTER (Parsing Robusto)         │
+│  • Maneja estructuras anidadas         │
+│  • Error recovery automático           │
+│  • Incremental parsing                 │
+└─────────────────────────────────────────┘
+  ↓ (AST Tree-sitter)
+┌─────────────────────────────────────────┐
+│  RUST (Conversión + Validación)        │
+│  • Convertir AST Tree-sitter → AST Rust│
+│  • Validación de tipos                 │
+│  • Borrow checking                     │
+└─────────────────────────────────────────┘
+  ↓ (AST Rust validado)
+┌─────────────────────────────────────────┐
+│  RUST (Code Generation)                │
+│  • Generar NASM x86_64                 │
+│  • Optimizaciones                      │
+└─────────────────────────────────────────┘
+  ↓ (NASM Assembly)
+┌─────────────────────────────────────────┐
+│  NASM + Linker                         │
+│  • Ensamblar a .obj/.o                 │
+│  • Enlazar a ejecutable                │
+└─────────────────────────────────────────┘
+  ↓
+✅ Ejecutable (.exe)
+```
+
+**Flujo de Fallback:**
+1. **Primero:** Tree-sitter (parsing robusto)
+2. **Si falla:** Pest parser (fallback Rust)
+3. **Si falla:** Parser actual Chumsky (último recurso)
+
+**Ventajas de esta Arquitectura:**
+- ✅ **Robustez máxima:** Triple fallback
+- ✅ **Performance:** Tree-sitter muy rápido
+- ✅ **Mantenibilidad:** Cada herramienta hace lo mejor
+- ✅ **Escalabilidad:** Fácil agregar más parsers si es necesario
+
+---
+
 ## 📚 Documentación Relacionada
 
 - `docs/roadmap/PROGRESO-SPRINT1.md` - Estado actual Sprint 1
