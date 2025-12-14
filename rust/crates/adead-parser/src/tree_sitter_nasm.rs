@@ -141,72 +141,16 @@ impl TreeSitterNASMGenerator {
                 }
                 
                // Si encontramos binary_expression con struct_literal, es un while mal parseado
+               // Procesarlo manualmente usando generate_while para mantener consistencia
                if binary_expr.is_some() && struct_lit.is_some() {
-                   eprintln!("DEBUG: While loop detectado como ERROR node, procesando manualmente...");
-                   self.in_while_loop = true; // Estamos en un while loop
-                   let loop_start = format!("loop_start_{}", self.label_count);
-                   let loop_end = format!("loop_end_{}", self.label_count);
-                   self.label_count += 1;
-                   
-                   writeln!(self.text_section, "{}:", loop_start).unwrap();
-                    
-                    // El binary_expression contiene 'i <= max {' pero necesitamos solo 'i <= max'
-                    // Extraer la condición real: buscar el operador '<=' y los operandos
-                    if let Some(cond_node) = binary_expr {
-                        // El binary_expr tiene estructura: left ('i'), operator ('<='), right ('max {')
-                        // Necesitamos extraer solo left y el operador, y el right debe ser 'max' (sin el '{')
-                        // Por ahora, generar código para la condición completa
-                        // generate_condition_code manejará el binary_expression
-                        self.generate_condition_code(&cond_node, source, &loop_end);
-                    }
-                    
-                    // FORZAR generación de print i e incremento ANTES de procesar el body
-                    // Buscar offset de 'i' en variables, o usar offset estándar si no existe
-                    let offset_i = self.variables.get("i").copied().unwrap_or(96); // offset estándar [rbp - 96]
-                    
-                    // GENERAR PRINT I SIEMPRE (dentro del loop, después de la condición)
-                    writeln!(self.text_section, "    mov rax, [rbp - {}]  ; cargar variable i para print", offset_i).unwrap();
-                    let buffer_offset = self.stack_offset;
-                    self.stack_offset += 32;
-                    let conv_label = format!("int_to_str_{}", self.label_count);
-                    self.label_count += 1;
-                    writeln!(self.text_section, "    mov rbx, rax  ; guardar número").unwrap();
-                    writeln!(self.text_section, "    lea rdx, [rbp - {}]  ; dirección del buffer", buffer_offset).unwrap();
-                    writeln!(self.text_section, "    push rbx").unwrap();
-                    writeln!(self.text_section, "    push rdx").unwrap();
-                    writeln!(self.text_section, "    mov rax, rbx").unwrap();
-                    writeln!(self.text_section, "    call {}", conv_label).unwrap();
-                    writeln!(self.text_section, "    mov r8, rax  ; longitud").unwrap();
-                    writeln!(self.text_section, "    mov rcx, [rbp+16]  ; stdout handle").unwrap();
-                    writeln!(self.text_section, "    lea r9, [rbp+24]  ; lpNumberOfBytesWritten").unwrap();
-                    writeln!(self.text_section, "    mov qword [rsp+32], 0  ; lpOverlapped").unwrap();
-                    writeln!(self.text_section, "    call WriteFile").unwrap();
-                    writeln!(self.text_section, "    jmp {}_end", conv_label).unwrap();
-                    // Generar función helper
-                    self.generate_int_to_str_function(&conv_label);
-                    writeln!(self.text_section, "{}_end:", conv_label).unwrap();
-                    
-                    // GENERAR INCREMENTO SIEMPRE (i = i + 1)
-                    writeln!(self.text_section, "    mov rax, [rbp - {}]  ; cargar variable i", offset_i).unwrap();
-                    writeln!(self.text_section, "    add rax, 1  ; incrementar").unwrap();
-                    writeln!(self.text_section, "    mov [rbp - {}], rax  ; guardar variable i", offset_i).unwrap();
-                    
-                    // El código de print e incremento YA se generó arriba (líneas 167-192)
-                    // NO procesar el body manualmente - ya generamos print e incremento arriba
-                    // Esto evita duplicación y problemas de orden
-                    
-                    // VERIFICAR: El código debería estar generado aquí
-                    // Si no aparece en el ASM, significa que este bloque no se está ejecutando
-                    // o que hay otro código que lo sobrescribe después
-                    
-                    writeln!(self.text_section, "    jmp {}", loop_start).unwrap();
-                    writeln!(self.text_section, "{}:", loop_end).unwrap();
-                    self.in_while_loop = false; // Terminamos el while
-                    return;
-                } else {
-                    // Si no se detectó como while en ERROR node, podría estar procesándose como while_statement
-                    // El código se generará en generate_while
-                }
+                   eprintln!("DEBUG: While loop detectado como ERROR node, procesando con generate_while...");
+                   // Crear un nodo sintético para pasar a generate_while
+                   // Pero mejor: procesar directamente usando generate_while pasando el nodo ERROR completo
+                   // generate_while buscará la condición y el body dentro del nodo
+                   self.generate_while(node, source);
+                   // IMPORTANTE: Retornar sin procesar hijos para evitar duplicación
+                   return;
+               }
             }
             // Si no es un while, procesar recursivamente hijos
             for i in 0..node.child_count() {
@@ -274,15 +218,23 @@ impl TreeSitterNASMGenerator {
                 self.label_count += 1;
                 writeln!(self.text_section, "    mov rbx, rax  ; guardar número").unwrap();
                 writeln!(self.text_section, "    lea rdx, [rbp - {}]  ; dirección del buffer", buffer_offset).unwrap();
-                writeln!(self.text_section, "    push rbx").unwrap();
-                writeln!(self.text_section, "    push rdx").unwrap();
-                writeln!(self.text_section, "    mov rax, rbx").unwrap();
+                // int_to_str_3 restaura rdx automáticamente al final, NO hacer push/pop aquí
+                writeln!(self.text_section, "    mov rax, rbx  ; número en rax").unwrap();
                 writeln!(self.text_section, "    call {}", conv_label).unwrap();
+                // PASO 2: int_to_str_3 YA restauró rdx desde r10 antes de ret, así que rdx ya tiene el buffer
                 writeln!(self.text_section, "    mov r8, rax  ; longitud").unwrap();
+                // NO necesitamos mov rdx, r10 aquí porque int_to_str_3 ya restauró rdx antes de retornar
                 writeln!(self.text_section, "    mov rcx, [rbp+16]  ; stdout handle").unwrap();
                 writeln!(self.text_section, "    lea r9, [rbp+24]  ; lpNumberOfBytesWritten").unwrap();
-                writeln!(self.text_section, "    mov qword [rsp+32], 0  ; lpOverlapped").unwrap();
+                writeln!(self.text_section, "    sub rsp, 32  ; reservar shadow space para WriteFile").unwrap();
+                writeln!(self.text_section, "    mov qword [rsp+32], 0  ; lpOverlapped (NULL)").unwrap();
                 writeln!(self.text_section, "    call WriteFile").unwrap();
+                writeln!(self.text_section, "    add rsp, 32  ; restaurar shadow space").unwrap();
+                writeln!(self.text_section, "    test rax, rax  ; verificar retorno de WriteFile").unwrap();
+                writeln!(self.text_section, "    jz {}_writefile_error  ; si rax == 0, hubo error", conv_label).unwrap();
+                writeln!(self.text_section, "    jmp {}_end", conv_label).unwrap();
+                writeln!(self.text_section, "{}_writefile_error:", conv_label).unwrap();
+                writeln!(self.text_section, "    ; WriteFile falló, pero continuamos").unwrap();
                 writeln!(self.text_section, "    jmp {}_end", conv_label).unwrap();
                 self.generate_int_to_str_function(&conv_label);
                 writeln!(self.text_section, "{}_end:", conv_label).unwrap();
@@ -322,21 +274,30 @@ impl TreeSitterNASMGenerator {
         self.label_count += 1;
         
         // Guardar número y preparar conversión
+        // int_to_str_3 preserva rdx en el stack, así que NO hacer push/pop aquí
         writeln!(self.text_section, "    mov rbx, rax  ; guardar número").unwrap();
         writeln!(self.text_section, "    lea rdx, [rbp - {}]  ; dirección del buffer", buffer_offset).unwrap();
-        writeln!(self.text_section, "    push rbx").unwrap();
-        writeln!(self.text_section, "    push rdx").unwrap();
-        writeln!(self.text_section, "    mov rax, rbx").unwrap();
+        // int_to_str_3 espera: rax = número, rdx = buffer
+        // int_to_str_3 preserva rdx en el stack al inicio y lo restaura al final
+        writeln!(self.text_section, "    mov rax, rbx  ; número en rax").unwrap();
         writeln!(self.text_section, "    call {}", conv_label).unwrap();
         
-        // RAX = longitud después de call
+        // int_to_str_3 retorna con rax=longitud, rdx ya restaurado desde stack
         writeln!(self.text_section, "    mov r8, rax  ; longitud").unwrap();
+        // rdx ya tiene el buffer correcto (restaurado por int_to_str_3)
         
-        // WriteFile call
+        // WriteFile call - Windows x64 calling convention
         writeln!(self.text_section, "    mov rcx, [rbp+16]  ; stdout handle").unwrap();
         writeln!(self.text_section, "    lea r9, [rbp+24]  ; lpNumberOfBytesWritten").unwrap();
-        writeln!(self.text_section, "    mov qword [rsp+32], 0  ; lpOverlapped").unwrap();
+        writeln!(self.text_section, "    sub rsp, 32  ; reservar shadow space (32 bytes)").unwrap();
+        writeln!(self.text_section, "    mov qword [rsp+32], 0  ; lpOverlapped (NULL)").unwrap();
         writeln!(self.text_section, "    call WriteFile").unwrap();
+        writeln!(self.text_section, "    add rsp, 32  ; restaurar shadow space").unwrap();
+        writeln!(self.text_section, "    test rax, rax  ; verificar retorno").unwrap();
+        writeln!(self.text_section, "    jz {}_writefile_error", conv_label).unwrap();
+        writeln!(self.text_section, "    jmp {}_end", conv_label).unwrap();
+        writeln!(self.text_section, "{}_writefile_error:", conv_label).unwrap();
+        writeln!(self.text_section, "    ; WriteFile falló, continuamos").unwrap();
         
         // Saltar la función helper int_to_str
         writeln!(self.text_section, "    jmp {}_end", conv_label).unwrap();
@@ -431,8 +392,10 @@ impl TreeSitterNASMGenerator {
                         writeln!(self.text_section, "    lea rdx, [rel {}]", msg_name).unwrap();
                         writeln!(self.text_section, "    mov r8, {}_len", msg_name).unwrap();
                         writeln!(self.text_section, "    lea r9, [rbp+24]").unwrap();
+                        writeln!(self.text_section, "    sub rsp, 32  ; reservar shadow space").unwrap();
                         writeln!(self.text_section, "    mov qword [rsp+32], 0").unwrap();
                         writeln!(self.text_section, "    call WriteFile").unwrap();
+                        writeln!(self.text_section, "    add rsp, 32  ; restaurar shadow space").unwrap();
                         return;
                     }
                     _ => {}
@@ -580,6 +543,36 @@ impl TreeSitterNASMGenerator {
     
     fn generate_expression_code(&mut self, expr_node: &Node, source: &str) {
         // Primero, intentar encontrar identificador recursivamente
+        // Si es primary_expression con struct_literal, extraer el identificador primero
+        if expr_node.kind() == "primary_expression" {
+            // Buscar identifier dentro del primary_expression
+            for i in 0..expr_node.child_count() {
+                if let Some(child) = expr_node.child(i) {
+                    if child.kind() == "identifier" {
+                        let var_name = &source[child.start_byte()..child.end_byte()];
+                        if let Some(&offset) = self.variables.get(var_name) {
+                            writeln!(self.text_section, "    mov rax, [rbp - {}]  ; cargar variable {} (primary_expression)", offset, var_name).unwrap();
+                            return;
+                        }
+                    } else if child.kind() == "struct_literal" {
+                        // Buscar identifier dentro del struct_literal
+                        for j in 0..child.child_count() {
+                            if let Some(grandchild) = child.child(j) {
+                                if grandchild.kind() == "identifier" {
+                                    let var_name = &source[grandchild.start_byte()..grandchild.end_byte()];
+                                    if let Some(&offset) = self.variables.get(var_name) {
+                                        writeln!(self.text_section, "    mov rax, [rbp - {}]  ; cargar variable {} (struct_literal)", offset, var_name).unwrap();
+                                        return;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Segundo, intentar encontrar identificador recursivamente (método general)
         if let Some((var_name, _)) = self.find_identifier_in_node(expr_node, source) {
             if let Some(&offset) = self.variables.get(var_name.as_str()) {
                 writeln!(self.text_section, "    mov rax, [rbp - {}]  ; cargar variable {} (recursivo)", offset, var_name).unwrap();
@@ -587,13 +580,13 @@ impl TreeSitterNASMGenerator {
             }
         }
         
-        // Segundo, intentar encontrar número recursivamente
+        // Tercero, intentar encontrar número recursivamente
         if let Some(num) = self.find_number_in_node(expr_node, source) {
             writeln!(self.text_section, "    mov rax, {}  ; número literal (recursivo)", num).unwrap();
             return;
         }
         
-        // Tercero, intentar parsear directamente del texto como fallback
+        // Cuarto, intentar parsear directamente del texto como fallback
         let expr_text = source[expr_node.start_byte()..expr_node.end_byte()].trim();
         if let Some(&offset) = self.variables.get(expr_text) {
             writeln!(self.text_section, "    mov rax, [rbp - {}]  ; cargar variable {} (del texto)", offset, expr_text).unwrap();
@@ -915,22 +908,23 @@ impl TreeSitterNASMGenerator {
             writeln!(self.text_section, "{}:", loop_start).unwrap();
             
             // Generar código para evaluar condición
-            // Esto genera: cmp, jg, y SI estamos en un while loop, también genera el print i
-            // Pasar true explícitamente para indicar que estamos en un while loop
+            // Esto genera: cmp, jg, y salta a loop_end si la condición es falsa
             let old_in_while = self.in_while_loop;
             self.in_while_loop = true; // Asegurar que esté en true
-            self.generate_condition_code(&cond_node, source, &loop_end);
+            // NO pasar loop_start aquí - el jmp se generará después del body
+            self.generate_condition_code(&cond_node, source, &loop_end, None);
             self.in_while_loop = old_in_while; // Restaurar estado
             
-            // GENERAR INCREMENTO SIEMPRE (i = i + 1) después del print
-            // El print ya fue generado dentro de generate_condition_code si in_while_loop=true
-            let offset_i = self.variables.get("i").copied().unwrap_or(96);
-            writeln!(self.text_section, "    mov rax, [rbp - {}]  ; cargar variable i", offset_i).unwrap();
-            writeln!(self.text_section, "    add rax, 1  ; incrementar").unwrap();
-            writeln!(self.text_section, "    mov [rbp - {}], rax  ; guardar variable i", offset_i).unwrap();
+            // PROCESAR BODY DEL LOOP - esto es crítico
+            if let Some(body_node) = body {
+                // Procesar todos los statements del body
+                self.process_loop_body_recursive(body_node, source);
+            }
             
-            // Jmp al inicio del loop
+            // Jmp al inicio del loop (después de procesar el body)
             writeln!(self.text_section, "    jmp {}", loop_start).unwrap();
+            
+            // Label de fin del loop
             writeln!(self.text_section, "{}:", loop_end).unwrap();
             }
         self.in_while_loop = false; // Terminamos el while
@@ -961,7 +955,8 @@ impl TreeSitterNASMGenerator {
         writeln!(self.text_section, "    push rbx").unwrap();
         writeln!(self.text_section, "    push rcx").unwrap();
         writeln!(self.text_section, "    push r8").unwrap();
-        writeln!(self.text_section, "    mov r8, rdx  ; guardar buffer en r8").unwrap();
+        writeln!(self.text_section, "    push rdx  ; PASO 6: CRÍTICO - preservar buffer original en STACK (más seguro que r10 volátil)").unwrap();
+        writeln!(self.text_section, "    mov r8, rdx  ; guardar buffer en r8 para uso interno").unwrap();
         writeln!(self.text_section, "    mov rcx, r8  ; dirección buffer").unwrap();
         writeln!(self.text_section, "    mov rbx, rax  ; número").unwrap();
         writeln!(self.text_section, "    cmp rbx, 0").unwrap();
@@ -1010,14 +1005,19 @@ impl TreeSitterNASMGenerator {
         writeln!(self.text_section, "    dec rbx").unwrap();
         writeln!(self.text_section, "    jmp {}_rev", conv_label).unwrap();
         writeln!(self.text_section, "{}_revd:", conv_label).unwrap();
-        writeln!(self.text_section, "    mov rax, rsi").unwrap();
-        writeln!(self.text_section, "    pop r8").unwrap();
-        writeln!(self.text_section, "    sub rax, r8").unwrap();
-        writeln!(self.text_section, "    pop rcx").unwrap();
-        writeln!(self.text_section, "    pop rbx").unwrap();
-        writeln!(self.text_section, "    leave").unwrap();
-        writeln!(self.text_section, "    mov rdx, r8").unwrap();
-        writeln!(self.text_section, "    ret").unwrap();
+        writeln!(self.text_section, "    mov rax, rsi  ; final del string").unwrap();
+        writeln!(self.text_section, "    pop r8  ; PASO 4: restaurar dirección inicio buffer (guardado como rcx en push rcx)").unwrap();
+        writeln!(self.text_section, "    sub rax, r8  ; longitud = final - inicio").unwrap();
+        writeln!(self.text_section, "    pop rcx  ; restaurar rcx original del caller").unwrap();
+        writeln!(self.text_section, "    pop rbx  ; restaurar rbx original del caller").unwrap();
+        // PASO 6: El stack ahora está: [r8 original, rdx buffer]
+        // Restaurar r8 antes de leave
+        writeln!(self.text_section, "    pop r8  ; PASO 6: restaurar r8 original del caller (antes de leave)").unwrap();
+        writeln!(self.text_section, "    leave  ; restaura rbp y rsp (equivalente a mov rsp, rbp; pop rbp)").unwrap();
+        // PASO 6: Después de leave, rsp apunta al return address (dejado por call)
+        // El buffer está en el stack del caller, restaurarlo ahora
+        writeln!(self.text_section, "    pop rdx  ; PASO 6: restaurar buffer desde stack (más seguro que r10 volátil)").unwrap();
+        writeln!(self.text_section, "    ret  ; retorna con rax=longitud, rdx=buffer").unwrap();
     }
     
     fn find_and_process_statements_in_node(&mut self, node: Node, source: &str) {
@@ -1238,7 +1238,7 @@ impl TreeSitterNASMGenerator {
         }
     }
     
-    fn generate_condition_code(&mut self, cond_node: &Node, source: &str, loop_end: &str) {
+    fn generate_condition_code(&mut self, cond_node: &Node, source: &str, loop_end: &str, loop_start: Option<&str>) {
         // Si la condición es un binary_expression con operador de comparación,
         // generar código de comparación directo en lugar de evaluar a booleano
         if cond_node.kind() == "binary_expression" {
@@ -1266,7 +1266,31 @@ impl TreeSitterNASMGenerator {
                         left = Some(children[i-1]);
                     }
                     if i < children.len() - 1 {
-                        right = Some(children[i+1]);
+                        let right_node = &children[i+1];
+                        // Si right es primary_expression, extraer el identifier
+                        if right_node.kind() == "primary_expression" {
+                            for j in 0..right_node.child_count() {
+                                if let Some(grandchild) = right_node.child(j) {
+                                    if grandchild.kind() == "identifier" {
+                                        right = Some(grandchild);
+                                        break;
+                                    } else if grandchild.kind() == "struct_literal" {
+                                        // Buscar identifier dentro del struct_literal
+                                        for k in 0..grandchild.child_count() {
+                                            if let Some(ggchild) = grandchild.child(k) {
+                                                if ggchild.kind() == "identifier" {
+                                                    right = Some(ggchild);
+                                                    break;
+                                                }
+                                            }
+                                        }
+                                        break;
+                                    }
+                                }
+                            }
+                        } else {
+                            right = Some(children[i+1]);
+                        }
                     }
                     break;
                 }
@@ -1287,26 +1311,36 @@ impl TreeSitterNASMGenerator {
                 writeln!(self.text_section, "    pop rax  ; restaurar left (i)").unwrap();
                 
                 // Comparar rax (i) con rbx (max) según el operador
+                // NO hacer push/pop de rbx - rbx se puede usar libremente para la comparación
                 writeln!(self.text_section, "    cmp rax, rbx  ; comparar i con max").unwrap();
                 
                 match op {
                     "<=" => {
-                        writeln!(self.text_section, "    jg {}  ; si left > right, salir", loop_end).unwrap();
+                        // Para i <= max: si i > max, salir del loop
+                        // cmp rax, rbx hace: rax - rbx
+                        // jg salta si (SF != OF), es decir, si rax > rbx (signed)
+                        // Esto significa: si i > max, salir del loop
+                        writeln!(self.text_section, "    jg {}  ; si i > max, salir del loop", loop_end).unwrap();
                     }
                     ">=" => {
-                        writeln!(self.text_section, "    jl {}  ; si left < right, salir", loop_end).unwrap();
+                        // Para i >= max: si i < max, salir del loop
+                        writeln!(self.text_section, "    jl {}  ; si i < max, salir del loop", loop_end).unwrap();
                     }
                     "<" => {
-                        writeln!(self.text_section, "    jge {}  ; si left >= right, salir", loop_end).unwrap();
+                        // Para i < max: si i >= max, salir del loop
+                        writeln!(self.text_section, "    jge {}  ; si i >= max, salir del loop", loop_end).unwrap();
                     }
                     ">" => {
-                        writeln!(self.text_section, "    jle {}  ; si left <= right, salir", loop_end).unwrap();
+                        // Para i > max: si i <= max, salir del loop
+                        writeln!(self.text_section, "    jle {}  ; si i <= max, salir del loop", loop_end).unwrap();
                     }
                     "==" => {
-                        writeln!(self.text_section, "    jne {}  ; si left != right, salir", loop_end).unwrap();
+                        // Para i == max: si i != max, salir del loop
+                        writeln!(self.text_section, "    jne {}  ; si i != max, salir del loop", loop_end).unwrap();
                     }
                     "!=" => {
-                        writeln!(self.text_section, "    je {}  ; si left == right, salir", loop_end).unwrap();
+                        // Para i != max: si i == max, salir del loop
+                        writeln!(self.text_section, "    je {}  ; si i == max, salir del loop", loop_end).unwrap();
                     }
                     _ => {
                         // Fallback: evaluar como expresión booleana
@@ -1315,39 +1349,8 @@ impl TreeSitterNASMGenerator {
                     }
                 }
                 
-                // FORZAR GENERACIÓN DE PRINT I después de CUALQUIER salto condicional en un loop
-                // Esto se ejecuta DESPUÉS de generar el salto condicional, dentro del loop
-                // SIEMPRE generar si loop_end contiene "loop_end" (indica que estamos en un while)
-                eprintln!("DEBUG: generate_condition_code - loop_end='{}', contains 'loop_end'={}", loop_end, loop_end.contains("loop_end"));
-                if loop_end.contains("loop_end") {
-                    eprintln!("DEBUG: Generando print i dentro de generate_condition_code (loop_end contiene loop_end)");
-                    // Usar offset estándar [rbp - 96] para variable 'i'
-                    let offset_i = self.variables.get("i").copied().unwrap_or(96);
-                    eprintln!("DEBUG: offset_i={}", offset_i);
-                    writeln!(self.text_section, "    mov rax, [rbp - {}]  ; cargar variable i para print (FORZADO en condition)", offset_i).unwrap();
-                    let buffer_offset = self.stack_offset;
-                    self.stack_offset += 32;
-                    let conv_label = format!("int_to_str_{}", self.label_count);
-                    self.label_count += 1;
-                    writeln!(self.text_section, "    mov rbx, rax  ; guardar número").unwrap();
-                    writeln!(self.text_section, "    lea rdx, [rbp - {}]  ; dirección del buffer", buffer_offset).unwrap();
-                    writeln!(self.text_section, "    push rbx").unwrap();
-                    writeln!(self.text_section, "    push rdx").unwrap();
-                    writeln!(self.text_section, "    mov rax, rbx").unwrap();
-                    writeln!(self.text_section, "    call {}", conv_label).unwrap();
-                    writeln!(self.text_section, "    mov r8, rax  ; longitud").unwrap();
-                    writeln!(self.text_section, "    mov rcx, [rbp+16]  ; stdout handle").unwrap();
-                    writeln!(self.text_section, "    lea r9, [rbp+24]  ; lpNumberOfBytesWritten").unwrap();
-                    writeln!(self.text_section, "    mov qword [rsp+32], 0  ; lpOverlapped").unwrap();
-                    writeln!(self.text_section, "    call WriteFile").unwrap();
-                    writeln!(self.text_section, "    jmp {}_end", conv_label).unwrap();
-                    self.generate_int_to_str_function(&conv_label);
-                    writeln!(self.text_section, "{}_end:", conv_label).unwrap();
-                    eprintln!("DEBUG: Print i generado exitosamente");
-                } else {
-                    eprintln!("DEBUG: NO generando print i - loop_end no contiene 'loop_end'");
-                }
-                
+                // NO generar print aquí - el body del loop se procesa después
+                // El print debe estar en el body del loop, no en la condición
                 return; // IMPORTANTE: return aquí para no ejecutar el fallback
             }
         }
@@ -1356,35 +1359,6 @@ impl TreeSitterNASMGenerator {
         self.generate_expression_code(cond_node, source);
         writeln!(self.text_section, "    cmp rax, 0  ; comparar condición con 0").unwrap();
         writeln!(self.text_section, "    je {}  ; si condición es falsa (0), salir", loop_end).unwrap();
-        
-        // FORZAR generación de print i SIEMPRE después de cualquier condición en un loop
-        // Esto asegura que el print se genere dentro del loop
-        // Solo hacerlo si estamos en un contexto de loop (loop_end contiene "loop_end")
-        if loop_end.contains("loop_end") {
-            let offset_i = self.variables.get("i").copied().unwrap_or(96);
-            
-            // GENERAR PRINT I
-            writeln!(self.text_section, "    mov rax, [rbp - {}]  ; cargar variable i para print (forzado)", offset_i).unwrap();
-            let buffer_offset = self.stack_offset;
-            self.stack_offset += 32;
-            let conv_label = format!("int_to_str_{}", self.label_count);
-            self.label_count += 1;
-            writeln!(self.text_section, "    mov rbx, rax  ; guardar número").unwrap();
-            writeln!(self.text_section, "    lea rdx, [rbp - {}]  ; dirección del buffer", buffer_offset).unwrap();
-            writeln!(self.text_section, "    push rbx").unwrap();
-            writeln!(self.text_section, "    push rdx").unwrap();
-            writeln!(self.text_section, "    mov rax, rbx").unwrap();
-            writeln!(self.text_section, "    call {}", conv_label).unwrap();
-            writeln!(self.text_section, "    mov r8, rax  ; longitud").unwrap();
-            writeln!(self.text_section, "    mov rcx, [rbp+16]  ; stdout handle").unwrap();
-            writeln!(self.text_section, "    lea r9, [rbp+24]  ; lpNumberOfBytesWritten").unwrap();
-            writeln!(self.text_section, "    mov qword [rsp+32], 0  ; lpOverlapped").unwrap();
-            writeln!(self.text_section, "    call WriteFile").unwrap();
-            writeln!(self.text_section, "    jmp {}_end", conv_label).unwrap();
-            // Generar función helper
-            self.generate_int_to_str_function(&conv_label);
-            writeln!(self.text_section, "{}_end:", conv_label).unwrap();
-        }
     }
 
     fn generate_if(&mut self, node: Node, source: &str) {
@@ -1411,7 +1385,7 @@ impl TreeSitterNASMGenerator {
 
         if let Some(cond_node) = condition {
             // Generar código para evaluar condición
-            self.generate_condition_code(&cond_node, source, &if_end);
+            self.generate_condition_code(&cond_node, source, &if_end, None);
             
             if let Some(body_node) = then_body {
                 // Procesar cuerpo del if
