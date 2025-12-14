@@ -156,6 +156,18 @@ impl CodeGenerator {
             Stmt::Print(expr) => {
                 self.text_section.push("    ; print".to_string());
                 match expr {
+                    Expr::Bool(b) => {
+                        // Bool literal: convertir a string en compile-time
+                        let bool_str = if *b { "true" } else { "false" };
+                        let label = self.add_string_data(bool_str);
+                        self.text_section.push("    ; Prepare WriteFile call for bool".to_string());
+                        self.text_section.push("    mov rcx, [rbp+16]  ; stdout handle".to_string());
+                        self.text_section.push(format!("    lea rdx, [rel {}]  ; buffer pointer", label));
+                        self.text_section.push(format!("    mov r8, {}_len  ; number of bytes to write", label));
+                        self.text_section.push("    lea r9, [rbp+24]  ; lpNumberOfBytesWritten (local var)".to_string());
+                        self.text_section.push("    mov qword [rsp+32], 0  ; lpOverlapped = NULL (5th param in shadow space)".to_string());
+                        self.text_section.push("    call WriteFile".to_string());
+                    }
                     Expr::Float(f) => {
                         // Float literal: convertir a string en compile-time
                         // PASO 12: Usar función helper para formateo inteligente
@@ -601,6 +613,12 @@ impl CodeGenerator {
             Expr::Number(n) => {
                 self.text_section.push(format!("    mov rax, {}", n));
             }
+            Expr::Bool(b) => {
+                // Bool: 0 = false, 1 = true en RAX
+                // En x86-64, convención común: 0 = false, cualquier valor != 0 = true
+                let value = if *b { 1 } else { 0 };
+                self.text_section.push(format!("    mov rax, {}  ; bool {}", value, b));
+            }
             Expr::Float(f) => {
                 // Cargar constante flotante en XMM0
                 // Estrategia: almacenar float en .data y cargar desde ahí
@@ -749,6 +767,24 @@ impl CodeGenerator {
                             self.text_section.push("    mov rcx, rax".to_string());
                             self.text_section.push("    mov rax, rbx".to_string());
                             self.text_section.push("    div rcx".to_string());
+                        }
+                        BinOp::Mod => {
+                            // Módulo: RAX = RBX % RAX
+                            // div rcx deja el resto en RDX
+                            self.text_section.push("    mov rdx, 0".to_string());
+                            self.text_section.push("    mov rcx, rax".to_string());
+                            self.text_section.push("    mov rax, rbx".to_string());
+                            self.text_section.push("    div rcx".to_string());
+                            self.text_section.push("    mov rax, rdx  ; resto (módulo) en RAX".to_string());
+                        }
+                        BinOp::Mod => {
+                            // Módulo: RAX = RBX % RAX
+                            // div rcx deja el resto en RDX
+                            self.text_section.push("    mov rdx, 0".to_string());
+                            self.text_section.push("    mov rcx, rax".to_string());
+                            self.text_section.push("    mov rax, rbx".to_string());
+                            self.text_section.push("    div rcx".to_string());
+                            self.text_section.push("    mov rax, rdx  ; resto (módulo) en RAX".to_string());
                         }
                         BinOp::Eq => {
                             self.text_section.push("    cmp rax, rbx".to_string());
@@ -1331,6 +1367,11 @@ impl CodeGenerator {
             Expr::Number(n) => {
                 self.text_section.push(format!("    mov rax, {}", n));
             }
+            Expr::Bool(b) => {
+                // Bool: 0 = false, 1 = true en RAX
+                let value = if *b { 1 } else { 0 };
+                self.text_section.push(format!("    mov rax, {}  ; bool {}", value, b));
+            }
             Expr::Float(f) => {
                 // Cargar constante flotante en XMM0 (Linux)
                 let label = self.add_float_data(*f);
@@ -1528,6 +1569,12 @@ impl CodeGenerator {
                     BinOp::Div => {
                         self.text_section.push("    cqo".to_string()); // sign extend rax to rdx:rax
                         self.text_section.push("    idiv rbx".to_string());
+                    }
+                    BinOp::Mod => {
+                        // Módulo: RAX = RAX % RBX (resto de división)
+                        self.text_section.push("    cqo".to_string()); // sign extend rax to rdx:rax
+                        self.text_section.push("    idiv rbx".to_string());
+                        self.text_section.push("    mov rax, rdx  ; resto (módulo) en RAX".to_string());
                     }
                     BinOp::Eq => {
                         self.text_section.push("    cmp rax, rbx".to_string());

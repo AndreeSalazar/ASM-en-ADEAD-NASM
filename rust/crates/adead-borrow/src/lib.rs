@@ -221,7 +221,7 @@ impl BorrowChecker {
     /// Verificar una expresión
     fn check_expr(&self, expr: &Expr) -> Result<()> {
         match expr {
-            Expr::Number(_) | Expr::String(_) => Ok(()), // Literales no necesitan verificación
+            Expr::Number(_) | Expr::String(_) | Expr::Float(_) | Expr::Bool(_) => Ok(()), // Literales no necesitan verificación
             Expr::Ident(name) => {
                 // Verificar que la variable existe y no fue movida
                 if let Some(info) = self.find_variable(name) {

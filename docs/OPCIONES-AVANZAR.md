@@ -897,7 +897,206 @@ adeadfmt --check .   # Verificar formato
 
 ---
 
-## 📊 Tabla Comparativa Completa
+## 🚀 NUEVAS IDEAS: Parser Híbrido y Soluciones Avanzadas (Diciembre 2025)
+
+### 8.1 Parser Híbrido Multi-Pass con Fallback Inteligente (30 horas)
+
+**Estado:** 🔴 PROPUESTA NUEVA  
+**Por qué:** CRÍTICO - Soluciona problemas de parsing complejos (while anidados, estructuras complejas)
+
+**Problema Identificado:**
+- Zig y Rust tienen limitaciones en parsing recursivo complejo
+- Estructuras anidadas (while con if dentro) fallan silenciosamente
+- Falta manejo de errores robusto en parsing recursivo
+
+**Solución Propuesta: Parser Multi-Pass con Validación Incremental**
+
+#### Fase 1: Parser de Bloques Robusto (10h)
+```rust
+// Nuevo módulo: rust/crates/adead-parser/src/block_parser.rs
+pub struct BlockParser {
+    // Parser que maneja bloques anidados correctamente
+    // Usa stack de contextos para rastrear niveles de anidación
+}
+
+impl BlockParser {
+    // Parsear bloque completo con validación de llaves
+    pub fn parse_block(&self, input: &str) -> Result<Vec<Statement>> {
+        // 1. Escanear y validar estructura de llaves
+        // 2. Identificar statements dentro del bloque
+        // 3. Parsear cada statement recursivamente
+        // 4. Validar que todas las llaves estén balanceadas
+    }
+}
+```
+
+**Ventajas:**
+- Validación previa de estructura antes de parsing
+- Manejo robusto de bloques anidados
+- Mejores mensajes de error (línea exacta del problema)
+
+#### Fase 2: Parser Híbrido Zig→Rust→Fallback (12h)
+```rust
+// Estrategia de parsing inteligente:
+// 1. Intentar Zig parser (rápido, eficiente)
+// 2. Si falla, intentar Rust parser (robusto)
+// 3. Si ambos fallan, usar parser de fallback (simple pero funcional)
+
+pub enum ParserStrategy {
+    ZigDirect,      // Zig → NASM directo
+    ZigRust,        // Zig → Rust → NASM
+    RustDirect,     // Rust → NASM
+    Fallback,       // Parser simple pero robusto
+}
+
+pub fn parse_with_fallback(input: &str) -> Result<Program> {
+    // Intentar estrategias en orden de complejidad
+    match parse_with_zig(input) {
+        Ok(program) => Ok(program),
+        Err(_) => match parse_with_rust(input) {
+            Ok(program) => Ok(program),
+            Err(_) => parse_with_fallback_simple(input),  // Último recurso
+        }
+    }
+}
+```
+
+**Ventajas:**
+- Máxima robustez: siempre hay un parser que funciona
+- Performance optimizada: usa el parser más rápido posible
+- Degradación elegante: si Zig falla, usa Rust; si Rust falla, usa fallback
+
+#### Fase 3: Validación Incremental (8h)
+```rust
+// Validar estructura antes de parsing profundo
+pub fn validate_structure(input: &str) -> Result<StructureInfo> {
+    // 1. Contar llaves abiertas/cerradas
+    // 2. Validar keywords (while, if, etc.)
+    // 3. Identificar bloques anidados
+    // 4. Detectar problemas estructurales antes de parsing
+}
+
+// Si validación falla, dar mensaje de error claro
+// Si pasa, proceder con parsing completo
+```
+
+**Impacto:** 🔴 CRÍTICO - Soluciona parsing de estructuras complejas  
+**Desbloquea:** while/if anidados, programas complejos, mejor experiencia de usuario
+
+---
+
+### 8.2 Parser de Expresiones Unificado con Backtracking (20 horas)
+
+**Estado:** 🔴 PROPUESTA NUEVA  
+**Por qué:** MEDIO - Mejora parsing de expresiones complejas
+
+**Problema:**
+- Parsers actuales fallan con expresiones ambiguas
+- No hay backtracking para resolver ambigüedades
+- Operadores complejos (%, ==, <=) causan problemas
+
+**Solución: Parser con Backtracking Inteligente**
+
+```rust
+// Nuevo módulo: rust/crates/adead-parser/src/expr_unified.rs
+pub struct UnifiedExprParser {
+    // Parser que usa backtracking para resolver ambigüedades
+    // Mantiene múltiples hipótesis y prueba la mejor
+}
+
+impl UnifiedExprParser {
+    pub fn parse_with_backtracking(&self, input: &str) -> Result<Expr> {
+        // 1. Generar múltiples hipótesis de parsing
+        // 2. Probar cada una hasta encontrar la correcta
+        // 3. Validar resultado
+        // 4. Retornar mejor match
+    }
+}
+```
+
+**Ventajas:**
+- Maneja expresiones ambiguas correctamente
+- Mejores mensajes de error
+- Más robusto para casos edge
+
+---
+
+### 8.3 Sistema de Parsing por Fases (Parser Pipeline) (25 horas)
+
+**Estado:** 🔴 PROPUESTA NUEVA  
+**Por qué:** MEDIO-ALTO - Arquitectura más robusta y mantenible
+
+**Idea: Dividir parsing en fases claras**
+
+#### Fase 1: Tokenización (Lexer) (8h)
+```rust
+// Separar tokenización de parsing
+// Ventaja: detectar errores de sintaxis temprano
+pub struct Lexer {
+    // Convierte string → tokens
+    // Detecta keywords, identificadores, operadores, etc.
+}
+```
+
+#### Fase 2: Parsing Estructural (10h)
+```rust
+// Parsear estructura (statements, bloques)
+// Sin evaluar expresiones todavía
+pub struct StructuralParser {
+    // Identifica: while, if, let, etc.
+    // Construye árbol estructural
+}
+```
+
+#### Fase 3: Parsing de Expresiones (7h)
+```rust
+// Parsear expresiones dentro de estructura
+// Usar árbol estructural para contexto
+pub struct ExprParser {
+    // Parsea expresiones con contexto completo
+    // Sabe en qué tipo de statement está
+}
+```
+
+**Ventajas:**
+- Separación clara de responsabilidades
+- Más fácil de debuggear
+- Mejor manejo de errores
+- Más mantenible
+
+---
+
+### 8.4 Parser Incremental con Error Recovery (30 horas)
+
+**Estado:** 🔴 PROPUESTA NUEVA  
+**Por qué:** ALTO - Mejora experiencia de desarrollo
+
+**Idea: Continuar parsing incluso con errores**
+
+```rust
+// Parser que no se detiene en primer error
+// Continúa y reporta todos los errores encontrados
+pub struct IncrementalParser {
+    // Parsear todo el archivo
+    // Reportar múltiples errores
+    // Permitir corrección de múltiples problemas a la vez
+}
+
+// Ejemplo:
+// Error en línea 10: missing '}'
+// Error en línea 15: undefined variable 'x'
+// Error en línea 20: type mismatch
+// → Usuario corrige todos a la vez
+```
+
+**Ventajas:**
+- Desarrollo más rápido
+- Menos iteraciones de compilación
+- Mejor experiencia de usuario
+
+---
+
+## 📋 Tabla Comparativa Completa (Actualizada)
 
 | Opción | Esfuerzo | Impacto | Prioridad | Dependencias | Desbloquea |
 |--------|----------|---------|-----------|--------------|------------|
@@ -924,14 +1123,32 @@ adeadfmt --check .   # Verificar formato
 | **7.1 LSP** | 40h | 🔴 ALTO | ⭐⭐⭐⭐ | - | IDE support |
 | **7.2 Debugger** | 50h | 🟡 MEDIO | ⭐⭐⭐ | - | Debugging |
 | **7.3 Formatter** | 15h | 🟡 MEDIO | ⭐⭐⭐ | - | Consistencia |
+| **8.1 Parser Híbrido Multi-Pass** | 30h | 🔴 CRÍTICO | ⭐⭐⭐⭐⭐ | - | Parsing robusto |
+| **8.2 Parser Unificado Backtracking** | 20h | 🟡 MEDIO | ⭐⭐⭐ | - | Expresiones complejas |
+| **8.3 Parser por Fases** | 25h | 🟡 MEDIO-ALTO | ⭐⭐⭐⭐ | - | Arquitectura robusta |
+| **8.4 Parser Incremental** | 30h | 🔴 ALTO | ⭐⭐⭐⭐ | - | Mejor UX desarrollo |
 
 ---
 
-## 🎯 Plan de Acción Recomendado (Actualizado)
+## 🎯 Plan de Acción Recomendado (Actualizado Diciembre 2025)
+
+### Fase 0: CRÍTICO - Fix Parsing Robusto (2 semanas) - 30 horas
+
+**Prioridad MÁXIMA:** Solucionar parsing de estructuras complejas
+
+1. **Parser Híbrido Multi-Pass (30h)** - 🔴 CRÍTICO
+   - Implementar parser de bloques robusto
+   - Sistema de fallback Zig→Rust→Simple
+   - Validación incremental
+   - **Resultado:** Parsing confiable de while/if anidados
+
+**Resultado:** Base sólida para todo lo demás
+
+---
 
 ### Fase 1: Quick Wins (1 semana) - 23 horas
 
-1. **Print de números** (3h) - ⚡ Más rápido, impacto inmediato
+1. **Print de números** (3h) - ⚡ Más rápido, impacto inmediato ✅ COMPLETADO
 2. **Operadores lógicos** (4h) - Fácil, útil
 3. **Break/Continue** (5h) - Simple, mejora loops
 4. **Asignación arrays** (6h) - Arrays mutables
@@ -1001,16 +1218,26 @@ adeadfmt --check .   # Verificar formato
 
 Si quieres resultados rápidos con máximo impacto:
 
-1. **Print de números** (3h) - ⚡ Más rápido
-2. **Operadores lógicos** (4h) - Muy útil
-3. **Asignación arrays** (6h) - Desbloquea algoritmos
-4. **Break/Continue** (5h) - Control esencial
+1. **Parser Híbrido Multi-Pass** (30h) - 🔴 CRÍTICO - Soluciona parsing complejo
+2. **Print de números** (3h) - ⚡ Más rápido ✅ COMPLETADO
+3. **Operadores lógicos** (4h) - Muy útil
+4. **Asignación arrays** (6h) - Desbloquea algoritmos
+5. **Break/Continue** (5h) - Control esencial
 
-**Total:** ~18 horas, transforman la experiencia
+**Total:** ~48 horas, transforman la experiencia
 
 ---
 
 ## 🔮 Vision: Roadmap a 6 Meses
+
+### Mes 0: Fundación Sólida de Parsing (2 semanas)
+- ✅ Parser Híbrido Multi-Pass implementado
+- ✅ Parsing robusto de estructuras complejas
+- ✅ Sistema de fallback funcional
+
+**Resultado:** Parsing confiable y robusto
+
+---
 
 ### Mes 1: Fundación Sólida
 - ✅ Sprint 1 completo
@@ -1069,16 +1296,11 @@ Si quieres resultados rápidos con máximo impacto:
 **Resultado:** Lenguaje listo para público
 
 ---
-____________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________________
 
-
-
-
-
-
-## 📋 Checklist de Prioridades Actualizado
+## 📋 Checklist de Prioridades Actualizado (Diciembre 2025)
 
 ### 🔴 CRÍTICO (Hacer ahora)
+- [ ] **Parser Híbrido Multi-Pass (30h)** - 🔴 NUEVO - Soluciona parsing complejo
 - [x] Import básico (15h) ✅ **COMPLETADO**
 - [x] Print de números (3h) ✅ **COMPLETADO** (2h reales)
 - [ ] Float64/Float32 (15h)
@@ -1099,6 +1321,7 @@ ________________________________________________________________________________
 - [ ] Bool nativo (5h)
 - [ ] Sistema módulos avanzado (35h)
 - [ ] Optimizaciones Runtime Print (12h) - Mejorar performance de print
+- [ ] Parser Incremental con Error Recovery (30h) - 🔴 NUEVO
 
 ### 🔵 BAJA PRIORIDAD (Más adelante)
 - [ ] Generics (30h)
@@ -1106,26 +1329,35 @@ ________________________________________________________________________________
 - [ ] LSP (40h)
 - [ ] Debugger (50h)
 - [ ] Optimizaciones (45h)
+- [ ] Parser Unificado Backtracking (20h) - 🔴 NUEVO
+- [ ] Parser por Fases (25h) - 🔴 NUEVO
 
 ---
 
-## 🎯 Siguiente Paso Recomendado
+## 🎯 Siguiente Paso Recomendado (ACTUALIZADO)
 
-**OPCIÓN A: Quick Wins (Máximo impacto rápido)**
+**OPCIÓN A: Fix Parsing Crítico (MÁXIMA PRIORIDAD)**
 ```
-→ Print números (3h) + Operadores lógicos (4h) + Break/Continue (5h)
+→ Parser Híbrido Multi-Pass (30h)
+→ Resultado: Parsing robusto de estructuras complejas (while/if anidados)
+→ Impacto: Crítico, tiempo: Medio
+```
+
+**OPCIÓN B: Quick Wins (Máximo impacto rápido)**
+```
+→ Print números (3h) ✅ + Operadores lógicos (4h) + Break/Continue (5h)
 → Resultado: Mejoras inmediatas en UX (12h total)
 → Impacto: Alto, tiempo: Bajo
 ```
 
-**OPCIÓN B: Fundación Crítica (Largo plazo)**
+**OPCIÓN C: Fundación Crítica (Largo plazo)**
 ```
 → Float64 (15h) + Strings completos (25h)
 → Resultado: Base sólida para todo (40h total)
 → Impacto: Crítico, tiempo: Medio
 ```
 
-**OPCIÓN C: Interoperabilidad (Desbloquea ecosistemas)**
+**OPCIÓN D: Interoperabilidad (Desbloquea ecosistemas)**
 ```
 → FFI con C (35h)
 → Resultado: Acceso a todo el ecosistema C
@@ -1186,4 +1418,5 @@ Print Statement → Zig Parser (expresiones) → Rust Backend
 **Última actualización:** Diciembre 2025  
 **Sprint 1:** ✅ 100% Completado  
 **Print de Expresiones:** ✅ 100% Completado con optimizaciones  
-**Recomendación:** Empezar con Quick Wins (OPCIÓN A) o Optimizaciones Runtime (6.3) para máximo impacto
+**Parsing Robusto:** 🔴 PRIORIDAD CRÍTICA - Nuevas ideas agregadas (Sección 8)  
+**Recomendación:** Empezar con **OPCIÓN A (Parser Híbrido Multi-Pass)** para solucionar parsing complejo, luego continuar con Quick Wins

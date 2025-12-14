@@ -4,11 +4,10 @@ print ""
 
 let suma = 1
 let limite = 1000000000
-let intervalo = 100000000
 let contador = 0
 
 while suma <= limite {
-    if contador == intervalo {
+    if contador == 100000000 {
         print suma
         contador = 0
     }

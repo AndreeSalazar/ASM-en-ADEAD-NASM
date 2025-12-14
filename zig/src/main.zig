@@ -7,7 +7,9 @@ const expr_parser = @import("expr_parser.zig");
 // Importar generador NASM
 const nasm_generator = @import("nasm_generator.zig");
 
-// Re-exportar todas las funciones de expr_parser (incluyendo parse_expr_ffi y generate_nasm_ffi)
+// Re-exportar todas las funciones de expr_parser (incluyendo parse_expr_ffi)
 pub usingnamespace expr_parser;
+// Re-exportar generate_nasm_ffi desde nasm_generator
+pub const generate_nasm_ffi = nasm_generator.generate_nasm_ffi;
 // Re-exportar NASMGenerator para uso directo si es necesario
 pub const NASMGenerator = nasm_generator.NASMGenerator;

@@ -1,0 +1,11 @@
+print "Test: while simple"
+let suma = 1
+let limite = 10
+
+while suma <= limite {
+    print suma
+    suma = suma + 1
+}
+
+print "Fin"
+

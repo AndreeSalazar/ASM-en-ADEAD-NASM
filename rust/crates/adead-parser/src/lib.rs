@@ -23,6 +23,7 @@ pub mod module_resolver;
 pub enum Expr {
     Number(i64),
     Float(f64),  // Literal flotante: 3.14, 2.5e10, etc.
+    Bool(bool),  // Literal booleano: true, false
     String(String),
     Ident(String),
     BinaryOp {
@@ -149,6 +150,7 @@ pub enum BinOp {
     Sub,
     Mul,
     Div,
+    Mod,  // Módulo: a % b
     Eq,
     Ne,
     Lt,
@@ -531,8 +533,8 @@ fn stmt_parser() -> impl Parser<char, Stmt, Error = Simple<char>> + Clone {
         let expr_for_while = expr.clone();
         let expr_for_expr_stmt = expr.clone();
 
-        // Print statement: ZIG ES EL PARSER PRINCIPAL
-        // Intentar parsear con Zig primero, especialmente para floats
+        // Print statement: Intentar Rust primero para booleanos, luego Zig para otros casos
+        // CRÍTICO: Rust parser debe usarse primero para booleanos ya que Zig no los soporta
         let print = just("print")
             .padded()
             .ignore_then(
@@ -546,14 +548,20 @@ fn stmt_parser() -> impl Parser<char, Stmt, Error = Simple<char>> + Clone {
                         let expr_clone = expr.clone(); // Clonar el parser de Rust
                         move |expr_str: String, span| {
                             let trimmed = expr_str.trim();
-                            // Intentar Zig PRIMERO para floats e integer expressions
-                            if let Some(zig_expr) = zig_expr_parser::parse_expr_with_zig(trimmed) {
-                                Ok(zig_expr)
+                            // CRÍTICO: Detectar booleanos PRIMERO (antes de Zig)
+                            // Zig no soporta booleanos todavía, así que crear directamente Expr::Bool
+                            if trimmed == "true" {
+                                Ok(Expr::Bool(true))
+                            } else if trimmed == "false" {
+                                Ok(Expr::Bool(false))
                             } else {
-                                // Si Zig falla, intentar Rust parser
-                                match expr_clone.clone().parse(trimmed) {
-                                    Ok(parsed_expr) => Ok(parsed_expr),
-                                    Err(_) => Err(Simple::custom(span, format!("Parse error: could not parse expression")))
+                                // Para otros casos: Intentar Zig PRIMERO para floats e integer expressions
+                                if let Some(zig_expr) = zig_expr_parser::parse_expr_with_zig(trimmed) {
+                                    Ok(zig_expr)
+                                } else {
+                                    // Si Zig falla, intentar Rust parser
+                                    expr_clone.clone().parse(trimmed)
+                                        .map_err(|_| Simple::custom(span, format!("Parse error: could not parse expression '{}'", trimmed)))
                                 }
                             }
                         }
@@ -605,58 +613,32 @@ fn stmt_parser() -> impl Parser<char, Stmt, Error = Simple<char>> + Clone {
                 else_body,
             });
 
-        // While statement: ZIG ES EL PARSER PRINCIPAL para condiciones
-        // FLUJO: Zig parsea condiciones (soporta <, <=, >, >=, ==, !=) → Rust valida
+        // While statement: Parser robusto para estructuras anidadas
+        // CRÍTICO: El parser recursivo ya maneja bloques anidados correctamente
+        // El problema puede estar en el orden de precedencia o en cómo se parsea el cierre
         let while_stmt = just("while")
             .padded()
-            .then(
-                // Capturar condición completa hasta el '{'
-                none_of("{")
-                    .repeated()
-                    .at_least(1)
-                    .collect::<String>()
+            .ignore_then(
+                expr_for_while.clone()
                     .padded()
-                    .then_ignore(just("{").padded())
-                    .try_map({
-                        let expr_clone = expr_for_while.clone();
-                        move |condition_str: String, span| {
-                            let trimmed = condition_str.trim();
-                            // IMPORTANTE: Intentar parser Rust PRIMERO para floats
-                            // Zig aún no soporta floats completamente, así que usamos Rust primero
-                            match expr_clone.clone().parse(trimmed) {
-                                Ok(parsed_expr) => {
-                                    // Si contiene floats, usar Rust
-                                    if contains_float(&parsed_expr) {
-                                        Ok(parsed_expr)
-                                    } else {
-                                        // Si no tiene floats, intentar Zig para mejor rendimiento
-                                        if let Some(zig_expr) = zig_expr_parser::parse_expr_with_zig(trimmed) {
-                                            Ok(zig_expr)
-                                        } else {
-                                            Ok(parsed_expr) // Fallback a Rust
-                                        }
-                                    }
-                                }
-                                Err(_) => {
-                                    // Si Rust falla, intentar Zig
-                                    if let Some(zig_expr) = zig_expr_parser::parse_expr_with_zig(trimmed) {
-                                        Ok(zig_expr)
-                                    } else {
-                                        Err(Simple::custom(span, format!("Parse error: could not parse expression")))
-                                    }
-                                }
-                            }
-                        }
-                    })
             )
             .then(
-                stmt.clone().repeated()
-                    .then_ignore(just("}").padded()),
+                // Parsear bloque: el parser recursivo ya maneja if/while anidados
+                just("{")
+                    .padded()
+                    .ignore_then(
+                        // IMPORTANTE: stmt.clone() ya es recursivo, así que maneja if/while dentro
+                        stmt.clone()
+                            .repeated()
+                            .padded()
+                    )
+                    .then_ignore(just("}").padded())
             )
-            .map(|((_, condition), body)| Stmt::While {
+            .map(|(condition, body)| Stmt::While {
                 condition,
                 body,
-            });
+            })
+            .labelled("while statement");
 
         // Parser para par├ímetros de funci├│n (soporta borrowing)
         let fn_param = just("&")
@@ -877,16 +859,18 @@ fn stmt_parser() -> impl Parser<char, Stmt, Error = Simple<char>> + Clone {
             .map(Stmt::Import)
             .labelled("import statement");
 
-        // IMPORTANTE: struct_stmt debe estar ANTES de expr_stmt para tener precedencia
-        // Si expr_stmt está primero, intentará parsear "struct" como una expresión
+        // IMPORTANTE: Orden de precedencia crítico para parsing correcto
+        // struct_stmt debe estar ANTES de expr_stmt para tener precedencia
         // Import debe estar antes de expr_stmt también para evitar conflictos
-        // while_stmt debe estar ANTES de assign_stmt para evitar conflictos con comparaciones
+        // CRÍTICO: while_stmt e if_stmt deben estar ANTES de assign_stmt y expr_stmt
+        // para evitar que se parseen mal las condiciones y bloques
+        // El orden correcto es: keywords primero, luego expresiones simples
         struct_stmt
             .or(import_stmt)
+            .or(while_stmt)  // MOVIDO ANTES: while debe tener alta precedencia
+            .or(if_stmt)      // MOVIDO ANTES: if debe tener alta precedencia
             .or(print)
             .or(let_stmt)
-            .or(if_stmt)
-            .or(while_stmt)
             .or(fn_stmt)
             .or(return_stmt)
             .or(assign_stmt)
@@ -993,7 +977,18 @@ fn expr_parser() -> impl Parser<char, Expr, Error = Simple<char>> + Clone {
             .map(Expr::ArrayLiteral)
             .labelled("array literal");
 
-        let ident = text::ident().map(Expr::Ident).labelled("identifier");
+        // Identificador - filtrar keywords para evitar que "while", "if", etc. se parseen como identificadores
+        let ident = text::ident()
+            .try_map(|s: String, span| {
+                // Keywords que NO deben parsearse como identificadores
+                let keywords = ["while", "if", "let", "print", "fn", "struct", "return", "true", "false", "Some", "None", "Ok", "Err", "match", "end"];
+                if keywords.contains(&s.as_str()) {
+                    Err(Simple::custom(span, format!("'{}' is a keyword and cannot be used as an identifier", s)))
+                } else {
+                    Ok(Expr::Ident(s))
+                }
+            })
+            .labelled("identifier");
 
         // Borrowing: &expr o &mut expr
         let borrow = just("&")
@@ -1070,8 +1065,24 @@ fn expr_parser() -> impl Parser<char, Expr, Error = Simple<char>> + Clone {
             })
             .labelled("struct literal");
 
+        // Parser para booleanos: true, false
+        // CRÍTICO: Debe venir ANTES de ident para que "true" no se parse como identificador
+        // Usar just() con .padded() y verificar que no es seguido de caracteres alfanuméricos
+        // Alternativa: usar lookahead negativo para asegurar que "true" no es parte de "trueVar"
+        let bool_literal = just("true")
+            .then(text::ident().not().to(()))  // Asegurar que no es seguido de identificador
+            .map(|_| Expr::Bool(true))
+            .labelled("true")
+            .padded()
+            .or(just("false")
+                .then(text::ident().not().to(()))  // Asegurar que no es seguido de identificador
+                .map(|_| Expr::Bool(false))
+                .labelled("false")
+                .padded());
+
         let atom = float_literal.clone()  // Floats PRIMERO para que 3.14 se parse como float, no como 3
             .or(number)  // Numbers después para evitar conflicto con floats
+            .or(bool_literal)  // Booleanos después de numbers pero antes de string
             .or(string)
             .or(array_literal)  // Array literal antes de borrow
             .or(borrow)  // Borrow debe ir ANTES de ident para que &x se parse como Borrow, no como Call
@@ -1249,6 +1260,7 @@ fn expr_parser() -> impl Parser<char, Expr, Error = Simple<char>> + Clone {
                     .padded()
                     .to(BinOp::Mul)
                     .or(just("/").padded().to(BinOp::Div))
+                    .or(just("%").padded().to(BinOp::Mod))
                     .then(with_propagate.clone())
                     .repeated(),
             )

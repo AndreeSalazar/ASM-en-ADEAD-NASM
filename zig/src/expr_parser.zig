@@ -10,6 +10,7 @@ pub const BinOp = enum {
     Sub,    // -
     Mul,    // *
     Div,    // /
+    Mod,    // %
     Eq,     // ==
     Ne,     // !=
     Lt,     // <
@@ -170,6 +171,34 @@ pub const ExprParser = struct {
         return if (is_negative) -num else num;
     }
 
+    /// Leer un string literal entre comillas dobles
+    fn readString(self: *ExprParser) ?[]const u8 {
+        if (self.pos >= self.input.len) return null;
+        if (self.input[self.pos] != '"') return null;
+        
+        const start = self.pos + 1; // Skip comilla inicial
+        self.pos += 1;
+        
+        // Buscar comilla de cierre
+        while (self.pos < self.input.len) {
+            if (self.input[self.pos] == '"') {
+                // Encontramos el final
+                const str = self.input[start..self.pos];
+                self.pos += 1; // Skip comilla final
+                return str;
+            }
+            // Escapar comillas dobles escapadas \" (opcional para ahora)
+            if (self.input[self.pos] == '\\' and self.pos + 1 < self.input.len and self.input[self.pos + 1] == '"') {
+                self.pos += 2; // Skip \"
+                continue;
+            }
+            self.pos += 1;
+        }
+        
+        // No se encontró comilla de cierre
+        return null;
+    }
+    
     /// Leer un identificador
     fn readIdent(self: *ExprParser) ?[]const u8 {
         if (self.pos >= self.input.len) return null;
@@ -183,7 +212,7 @@ pub const ExprParser = struct {
         return self.input[start..self.pos];
     }
 
-    /// Parsear un átomo (número, float, identificador, o expresión entre paréntesis)
+    /// Parsear un átomo (número, float, string, identificador, o expresión entre paréntesis)
     fn parseAtom(self: *ExprParser) anyerror!?*Expr {
         self.skipWhitespace();
         
@@ -198,6 +227,15 @@ pub const ExprParser = struct {
         if (self.readNumber()) |num| {
             const expr = try self.allocator.create(Expr);
             expr.* = Expr{ .Number = num };
+            return expr;
+        }
+        
+        // String literal (ANTES de identificador para no confundir)
+        if (self.readString()) |str| {
+            // Duplicar el string para ownership
+            const str_owned = try self.allocator.dupe(u8, str);
+            const expr = try self.allocator.create(Expr);
+            expr.* = Expr{ .String = str_owned };
             return expr;
         }
         
@@ -358,8 +396,11 @@ pub const ExprParser = struct {
             } else if (self.input[self.pos] == '/') {
                 op = BinOp.Div;
                 self.pos += 1;
+            } else if (self.input[self.pos] == '%') {
+                op = BinOp.Mod;
+                self.pos += 1;
             } else {
-                break; // No es operador de multiplicación/división
+                break; // No es operador de multiplicación/división/módulo
             }
             
             self.skipWhitespace();
@@ -465,6 +506,7 @@ fn serializeExprToBuffer(expr: *Expr, buffer: [*]u8, pos: *usize, max_len: usize
                 .Sub => "SUB",
                 .Mul => "MUL",
                 .Div => "DIV",
+                .Mod => "MOD",
                 .Eq => "EQ",
                 .Ne => "NE",
                 .Lt => "LT",
@@ -501,6 +543,7 @@ fn serializeExpr(expr: *Expr, writer: anytype, allocator: std.mem.Allocator) !vo
                 .Sub => "SUB",
                 .Mul => "MUL",
                 .Div => "DIV",
+                .Mod => "MOD",
                 .Eq => "EQ",
                 .Ne => "NE",
                 .Lt => "LT",

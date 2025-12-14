@@ -23,6 +23,7 @@ extern "C" {
 /// Este flujo es más eficiente para:
 /// - Floats simples: print 3.14
 /// - Expresiones aritméticas puras: 2 + 5, 3.14 * 2.0
+/// - Statements completos: while loops, if statements, etc.
 /// - No requiere validación de Rust
 pub fn generate_nasm_direct(expr_str: &str) -> Option<String> {
     // Limpiar string de entrada

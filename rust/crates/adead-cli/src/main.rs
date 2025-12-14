@@ -65,8 +65,13 @@ fn main() -> Result<()> {
             println!("🔨 Paso 1: Compilando .ad -> .asm");
             println!("   Entrada: {}", input);
             
-            let source = fs::read_to_string(&input)
+            let mut source = fs::read_to_string(&input)
                 .with_context(|| format!("Failed to read input file: {}", input))?;
+            
+            // Remover BOM (Byte Order Mark) si existe
+            if source.starts_with('\u{feff}') {
+                source = source.trim_start_matches('\u{feff}').to_string();
+            }
 
             let output_path = output.unwrap_or_else(|| {
                 input
@@ -102,23 +107,60 @@ fn main() -> Result<()> {
                 }
             }
 
-            // FLUJO NORMAL: ADead → Zig → Rust → NASM (para casos complejos)
-            println!("   🔒 Usando flujo con validación: Zig → Rust → NASM");
+            // FLUJO HÍBRIDO: Intentar Rust primero, si falla usar Zig directo
+            println!("   🔒 Intentando flujo con validación: Zig → Rust → NASM");
             let input_path = Path::new(&input);
             let current_dir = input_path.parent();
             
-            let program = adead_parser::parse_with_dir(&source, current_dir)
-                .map_err(|e| anyhow::anyhow!("Parse error: {}", e))?;
-
-            let mut generator = adead_backend::CodeGenerator::new();
-            let asm = generator
-                .generate(&program)
-                .map_err(|e| anyhow::anyhow!("Code generation error: {}", e))?;
-
-            fs::write(&output_path, asm)
-                .with_context(|| format!("Failed to write output file: {}", output_path))?;
-
-            println!("✅ Compilado: {} -> {}", input, output_path);
+            // Intentar parsear y generar con Rust primero
+            let rust_success = match adead_parser::parse_with_dir(&source, current_dir) {
+                Ok(program) => {
+                    // Debug: verificar statements parseados
+                    println!("   📊 Statements parseados: {}", program.statements.len());
+                    for (i, stmt) in program.statements.iter().enumerate() {
+                        println!("      [{}] {:?}", i, std::mem::discriminant(stmt));
+                    }
+                    // Rust parser exitoso, intentar generar código con Rust
+                    let mut generator = adead_backend::CodeGenerator::new();
+                    match generator.generate(&program) {
+                        Ok(asm) => {
+                            // Rust exitoso: escribir y retornar
+                            if let Err(e) = fs::write(&output_path, asm) {
+                                println!("   ⚠️ Error escribiendo archivo: {}", e);
+                                false
+                            } else {
+                                println!("✅ Compilado (Rust): {} -> {}", input, output_path);
+                                true
+                            }
+                        }
+                        Err(e) => {
+                            // Rust codegen falló, intentar Zig
+                            println!("   ⚠️ Rust codegen falló: {}", e);
+                            false
+                        }
+                    }
+                }
+                Err(e) => {
+                    // Rust parser falló, intentar Zig
+                    println!("   ⚠️ Rust parser falló: {}", e);
+                    false
+                }
+            };
+            
+            // Si Rust falló, intentar con Zig directo (para statements como while)
+            if !rust_success {
+                println!("   🚀 Intentando flujo directo: Zig → NASM");
+                match adead_parser::zig_nasm_generator::generate_nasm_direct(&source) {
+                    Some(nasm_code) => {
+                        fs::write(&output_path, nasm_code)
+                            .with_context(|| format!("Failed to write output file: {}", output_path))?;
+                        println!("✅ Compilado (Zig directo): {} -> {}", input, output_path);
+                    }
+                    None => {
+                        return Err(anyhow::anyhow!("Falló tanto Rust como Zig. Verifica que el código sea válido."));
+                    }
+                }
+            }
         }
         Commands::Assemble { input, output } => {
             println!("⚙️  Paso 2: Ensamblando .asm -> .obj");
@@ -805,8 +847,13 @@ fn run_program(input_file: &str, keep_temp: bool) -> Result<()> {
 
     // Step 1: Compile to ASM
     println!("🔨 Compiling {}...", input_file);
-    let source = fs::read_to_string(input_file)
+    let mut source = fs::read_to_string(input_file)
         .with_context(|| format!("Failed to read input file: {}", input_file))?;
+    
+    // Remover BOM (Byte Order Mark) si existe
+    if source.starts_with('\u{feff}') {
+        source = source.trim_start_matches('\u{feff}').to_string();
+    }
 
     // Pasar directorio del archivo de entrada para resolución de imports (Sprint 1.3)
     let input_path = Path::new(input_file);

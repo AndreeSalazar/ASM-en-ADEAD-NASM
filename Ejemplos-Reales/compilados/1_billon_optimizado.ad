@@ -1,19 +1,16 @@
-print "Iniciando suma hasta 1 billon..."
+﻿print "Iniciando suma hasta 1 billon..."
 print "Progreso: se imprimira cada 100 millones"
 print ""
 
 let suma = 1
 let limite = 1000000000
 let intervalo = 100000000
-let contador = 0
 
 while suma <= limite {
-    if contador == intervalo {
+    if suma % intervalo == 0 {
         print suma
-        contador = 0
     }
     suma = suma + 1
-    contador = contador + 1
 }
 
 print ""
