@@ -13,6 +13,8 @@ mod zig_struct_parser;
 
 // Parser de expresiones aritméticas usando Zig
 mod zig_expr_parser;
+// Generador NASM directo desde Zig (flujo: ADead → Zig → NASM)
+pub mod zig_nasm_generator;
 
 // Resolución de módulos (Sprint 1.3 - Import básico)
 pub mod module_resolver;
@@ -20,6 +22,7 @@ pub mod module_resolver;
 #[derive(Debug, Clone, PartialEq)]
 pub enum Expr {
     Number(i64),
+    Float(f64),  // Literal flotante: 3.14, 2.5e10, etc.
     String(String),
     Ident(String),
     BinaryOp {
@@ -508,6 +511,17 @@ fn program_parser() -> impl Parser<char, Program, Error = Simple<char>> {
         })
 }
 
+// Helper para detectar si una expresión contiene floats
+fn contains_float(expr: &Expr) -> bool {
+    match expr {
+        Expr::Float(_) => true,
+        Expr::BinaryOp { left, right, .. } => {
+            contains_float(left) || contains_float(right)
+        }
+        _ => false,
+    }
+}
+
 fn stmt_parser() -> impl Parser<char, Stmt, Error = Simple<char>> + Clone {
     recursive(|stmt| {
         let ident = text::ident().padded();
@@ -518,10 +532,33 @@ fn stmt_parser() -> impl Parser<char, Stmt, Error = Simple<char>> + Clone {
         let expr_for_expr_stmt = expr.clone();
 
         // Print statement: ZIG ES EL PARSER PRINCIPAL
-        // Capturar expresión completa hasta newline - usar expr directamente para que funcione correctamente
+        // Intentar parsear con Zig primero, especialmente para floats
         let print = just("print")
             .padded()
-            .ignore_then(expr.clone())
+            .ignore_then(
+                // Capturar la expresión como string para decidir qué parser usar
+                none_of("\n")
+                    .repeated()
+                    .at_least(1)
+                    .collect::<String>()
+                    .padded()
+                    .try_map({
+                        let expr_clone = expr.clone(); // Clonar el parser de Rust
+                        move |expr_str: String, span| {
+                            let trimmed = expr_str.trim();
+                            // Intentar Zig PRIMERO para floats e integer expressions
+                            if let Some(zig_expr) = zig_expr_parser::parse_expr_with_zig(trimmed) {
+                                Ok(zig_expr)
+                            } else {
+                                // Si Zig falla, intentar Rust parser
+                                match expr_clone.clone().parse(trimmed) {
+                                    Ok(parsed_expr) => Ok(parsed_expr),
+                                    Err(_) => Err(Simple::custom(span, format!("Parse error: could not parse expression")))
+                                }
+                            }
+                        }
+                    })
+            )
             .map(Stmt::Print)
             .labelled("print statement");
 
@@ -584,14 +621,29 @@ fn stmt_parser() -> impl Parser<char, Stmt, Error = Simple<char>> + Clone {
                         let expr_clone = expr_for_while.clone();
                         move |condition_str: String, span| {
                             let trimmed = condition_str.trim();
-                            // ZIG PRIMERO - Intentar parsear condición con Zig
-                            if let Some(zig_expr) = zig_expr_parser::parse_expr_with_zig(trimmed) {
-                                Ok(zig_expr)
-                            } else {
-                                // Fallback a parser Rust
-                                match expr_clone.clone().parse(trimmed) {
-                                    Ok(parsed_expr) => Ok(parsed_expr),
-                                    Err(e) => Err(Simple::custom(span, format!("Parse error: {:?}", e)))
+                            // IMPORTANTE: Intentar parser Rust PRIMERO para floats
+                            // Zig aún no soporta floats completamente, así que usamos Rust primero
+                            match expr_clone.clone().parse(trimmed) {
+                                Ok(parsed_expr) => {
+                                    // Si contiene floats, usar Rust
+                                    if contains_float(&parsed_expr) {
+                                        Ok(parsed_expr)
+                                    } else {
+                                        // Si no tiene floats, intentar Zig para mejor rendimiento
+                                        if let Some(zig_expr) = zig_expr_parser::parse_expr_with_zig(trimmed) {
+                                            Ok(zig_expr)
+                                        } else {
+                                            Ok(parsed_expr) // Fallback a Rust
+                                        }
+                                    }
+                                }
+                                Err(_) => {
+                                    // Si Rust falla, intentar Zig
+                                    if let Some(zig_expr) = zig_expr_parser::parse_expr_with_zig(trimmed) {
+                                        Ok(zig_expr)
+                                    } else {
+                                        Err(Simple::custom(span, format!("Parse error: could not parse expression")))
+                                    }
                                 }
                             }
                         }
@@ -844,10 +896,81 @@ fn stmt_parser() -> impl Parser<char, Stmt, Error = Simple<char>> + Clone {
 }
 
 fn expr_parser() -> impl Parser<char, Expr, Error = Simple<char>> + Clone {
-    // ZIG ES EL PARSER PRINCIPAL - Intentar parsear con Zig primero para TODAS las expresiones
-    recursive(|expr| {
-        let number = text::int(10)
-            .map(|s: String| s.parse::<i64>().unwrap())
+        // ZIG ES EL PARSER PRINCIPAL - Intentar parsear con Zig primero para TODAS las expresiones
+        recursive(|expr| {
+            // Definir literales primero (number, float, string)
+        // Parser para literales flotantes (debe venir ANTES de number para que 3.14 se parse como float)
+        // Maneja: 3.14, .5, 5., 2.5e10, 1e-5
+        // Estrategia: usar then_ignore para consumir el punto explícitamente
+        // CRÍTICO: El problema es que text::digits() consume "3" antes de verificar el punto
+        // Solución: Usar un parser que verifica el punto ANTES de consumir
+        // Estrategia: leer dígitos con lookahead para ver si viene un punto
+        // Parser de float: 3.14, 5.0, etc.
+        // SOLUCIÓN DEFINITIVA: Usar un parser que lea el patrón completo
+        // Importante: text::digits() lee dígitos y se detiene en el primer no-dígito
+        // Luego verificamos si ese carácter es un punto, y si es, seguimos leyendo
+        // Parser de float: 3.14, 5.0, etc.
+        // SOLUCIÓN DEFINITIVA: Usar text::int() que lee dígitos y luego verificar punto
+        // text::int() consume dígitos pero se detiene antes de consumir el siguiente carácter
+        // Luego verificamos si ese carácter es un punto
+        let float_with_int_part = text::int(10)
+            .then(just('.').then(text::digits(10).or_not()))  // Punto seguido de dígitos opcionales
+            .try_map(|(int_part, (_, dec_opt)), span| {
+                let dec = dec_opt.unwrap_or_default();
+                let float_str = if dec.is_empty() {
+                    format!("{}.0", int_part)  // 5. -> 5.0
+                } else {
+                    format!("{}.{}", int_part, dec)
+                };
+                float_str.parse::<f64>()
+                    .map_err(|_| Simple::custom(span, format!("Invalid float literal: {}", float_str)))
+            })
+            .map(Expr::Float)
+            .labelled("float");
+        
+        // También manejar .5 (sin parte entera)
+        let float_without_int_part = just('.')
+            .ignore_then(text::digits(10))  // .5
+            .then(
+                just('e').or(just('E'))
+                    .ignore_then(
+                        just('+').or(just('-')).or_not()
+                            .then(text::int(10))
+                            .map(|(sign, num): (Option<char>, String)| {
+                                if sign == Some('-') {
+                                    format!("-{}", num)
+                                } else {
+                                    num
+                                }
+                            })
+                    )
+                    .or_not()
+            )
+            .try_map(|(dec_part, exp_part), span| {
+                let float_str = format!("0.{}", dec_part);
+                let float_str = match exp_part {
+                    Some(exp) => format!("{}e{}", float_str, exp),
+                    None => float_str,
+                };
+                float_str.parse::<f64>()
+                    .map_err(|_| Simple::custom(span, "Invalid float literal"))
+            })
+            .map(Expr::Float)
+            .labelled("float");
+        
+        // Combinar ambos parsers de float
+        let float_literal = float_with_int_part
+            .or(float_without_int_part);
+
+        // Parser para números enteros (solo enteros puros, sin punto)
+        // Nota: Como float_literal viene primero en atom, los floats ya se parsean como floats
+        // Solo llegamos aquí si NO es un float
+        // Parser para números enteros (solo enteros puros, sin punto)
+        // CRÍTICO: Este parser solo se ejecuta si float_literal falló
+        // Verificamos explícitamente que NO viene un punto después
+        let number = text::digits(10)
+            .then(just('.').not())  // Asegurar que NO viene un punto después
+            .map(|(s, _): (String, _)| s.parse::<i64>().unwrap())
             .map(Expr::Number)
             .labelled("number");
 
@@ -947,7 +1070,8 @@ fn expr_parser() -> impl Parser<char, Expr, Error = Simple<char>> + Clone {
             })
             .labelled("struct literal");
 
-        let atom = number
+        let atom = float_literal.clone()  // Floats PRIMERO para que 3.14 se parse como float, no como 3
+            .or(number)  // Numbers después para evitar conflicto con floats
             .or(string)
             .or(array_literal)  // Array literal antes de borrow
             .or(borrow)  // Borrow debe ir ANTES de ident para que &x se parse como Borrow, no como Call

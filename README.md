@@ -13,16 +13,152 @@ Simple sintaxis estilo Python • Rendimiento nativo
 
 </div>
 
-## 🔄 Flujo de Compilación Establecido
+## 🔄 Flujos de Compilación Establecidos
 
-**Flujo Principal:**
+**ADead soporta múltiples flujos de compilación según la complejidad:**
+
+### 🚀 Flujo Directo: ADead → Zig → NASM (ASM)
+**Para casos simples** (floats, expresiones aritméticas básicas):
 ```
-ADead → Zig (parsea expresiones) → Rust (seguridad) → NASM → .exe
+ADead Source (.ad)
+  ↓
+Zig (parsea y genera ASM directamente)
+  ↓
+NASM (Assembly x86_64)
+  ↓
+Ejecutable (.exe)
 ```
+**Ventajas:** Máxima eficiencia, sin overhead de validación
+**Uso:** Floats simples, expresiones aritméticas puras
+
+### 🔒 Flujo con Validación: ADead → Zig → Rust → NASM (ASM)
+**Para casos complejos** (requiere validación, type checking, seguridad):
+```
+ADead Source (.ad)
+  ↓
+Zig (parsea expresiones)
+  ↓
+Rust (validación de memoria, type checking, seguridad)
+  ↓
+NASM (Assembly x86_64)
+  ↓
+Ejecutable (.exe)
+```
+**Ventajas:** Seguridad garantizada, validación completa
+**Uso:** Variables, funciones, structs, OOP, validaciones complejas
+
+### 🛠️ Flujo Rust Directo: ADead → Rust → NASM (ASM)
+**Para casos especiales** (cuando Zig no puede parsear):
+```
+ADead Source (.ad)
+  ↓
+Rust (parser completo + validación)
+  ↓
+NASM (Assembly x86_64)
+  ↓
+Ejecutable (.exe)
+```
+**Ventajas:** Parser completo en Rust, fallback robusto
+**Uso:** Sintaxis compleja, casos edge, fallback
 
 **Ver documentación completa:** [docs/FLUJO-COMPLETO.md](docs/FLUJO-COMPLETO.md)
 
+## ✨ ¿Por qué ADead?
+
+**La promesa:** Sintaxis fácil estilo Python → ASM puro → CPU directo, **sin runtime bloat**
+
+ADead es un lenguaje de programación que combina la simplicidad de Python con el rendimiento nativo de Assembly. No es un "toy language" - es un **lenguaje serio low-level** que democratiza la programación a nivel CPU.
+
+### 🎯 Lo que YA TIENE ADead (MVP Sólido)
+
+**ADead ya tiene una base impresionante para ser considerado más que un MVP básico:**
+
+#### ✅ Características Core Completas
+- ✅ **Sintaxis limpia estilo Python** - `print`, `let`, `if/else`, `while`, `fn`
+- ✅ **Variables y aritmética** - Enteros con operadores básicos
+- ✅ **Estructuras de control** - Condicionales (`if/else`) y loops (`while`)
+- ✅ **Funciones** - Parámetros, `return`, llamadas de función
+- ✅ **OOP Completo** - Structs, métodos, `init`/`destroy` (RAII), encapsulación (`pub`/`private`)
+
+#### ✅ Arquitectura Técnica Sólida
+- ✅ **Arquitectura Híbrida Zig + Rust** - Parsing eficiente + seguridad de memoria
+- ✅ **Flujos múltiples inteligentes** - Directo (Zig→NASM) para simple, con Rust para complejo
+- ✅ **Generación NASM x86_64** - Funcional en Windows/Linux
+- ✅ **CLI modular profesional** - `compile`, `assemble`, `link`, `run`
+- ✅ **Floats en proceso** - Ya parsea `3.14` y valores flotantes
+
+#### ✅ Experiencia de Usuario
+- ✅ **Ejemplos funcionales reales** - Hello world, factorial, conditional, loops, structs, RAII
+- ✅ **Icono personalizado `.ad`** - Identidad visual en Windows Explorer
+- ✅ **Compilación completa** - De `.ad` a `.exe` ejecutable
+
+**🎉 Ya es más que muchos lenguajes hobby - tienes MVP funcional con OOP y RAII, que pocos logran tan rápido.**
+
+### 🎯 Lo que FALTA para ser "Lenguaje Completo y Profesional"
+
+Para que ADead sea considerado una alternativa seria low-level (tipo Zig/Rust pero más fácil), necesita:
+
+#### 🔴 Críticos (Prioridad 1 - Sprint 1)
+- [ ] **Floats completos** - Aritmética full, print real (conversión float→string en ASM)
+- [ ] **Bool nativo** - `true`/`false` con branching optimizado
+- [ ] **Arrays/listas básicas** - `let arr = [1, 2, 3]`, acceso `arr[0]`, `length`, `push`/`pop`
+
+#### 🟠 Esenciales (Prioridad 2 - Sprint 2-3)
+- [ ] **Sistema de módulos e imports** - `import "std/math.ad"`, `import "mylib.ad"` (proyectos multi-archivo)
+- [ ] **Strings reales** - No solo hardcoded, sino concatenación, `length`, `substr` (en `.data` o stack)
+- [ ] **Librería estándar mínima** - `std.io`, `std.math`, `std.string`, `std.array`
+- [ ] **Estructuras de control avanzadas** - `for` loops (`for i in 0..10`), `break`/`continue`
+
+#### 🟡 Profesionales (Prioridad 3 - Sprint 4-6)
+- [ ] **Manejo de errores** - Option/Result o panic simple con mensajes claros
+- [ ] **Match/switch** - Para enums futuros y pattern matching
+- [ ] **Pointers y memoria manual** - Opcional, con `unsafe` block (estilo Rust)
+- [ ] **Enums y unions** - Tipos de datos avanzados
+- [ ] **Generics básicos** - Comptime (estilo Zig) para reusabilidad
+- [ ] **Inline ASM** - Para casos extremos de optimización
+- [ ] **Optimizaciones avanzadas** - Más registros, peephole opts, flag `--release`
+- [ ] **Soporte ARM64** - Para mobile/Apple Silicon
+
+#### 🔵 Ecosistema (Futuro)
+- [ ] **Package Manager** - Ecosistema distribuido de librerías
+- [ ] **Interoperabilidad C/Rust** - FFI completo
+- [ ] **Documentación completa** - Tutorial oficial, website, playground online
+- [ ] **Pipeline optimizado** - Caching, compilación incremental
+
+### 🗺️ Roadmap Priorizado: De MVP a Lenguaje Completo
+
+**Sprint 1 (1-2 semanas):** Floats full + Arrays básicos + Bool  
+**Sprint 2 (2-3 semanas):** Módulos/imports + Strings reales + std mínima  
+**Sprint 3 (2-3 semanas):** Manejo errores + for/match + break/continue  
+**Sprint 4 (3-4 semanas):** Pointers/unsafe + Enums + Generics básicos  
+**Sprint 5 (3-4 semanas):** std.math completo + Optimizaciones + ARM64  
+
+**Con estos sprints, ADead pasa de "MVP impresionante" a lenguaje serio que respeta ASM puro y envía directo al CPU, democratizando low-level como nadie.**
+
+---
+
 ## 🚀 Quickstart
+
+### 🔧 Compilación Rápida
+
+**Para compilar todo (Zig + Rust) en un solo comando:**
+
+```powershell
+# Compilar todo y probar
+.\build-all.ps1 -Test
+
+# Solo compilar sin pruebas
+.\build-all.ps1
+
+# Limpiar y recompilar desde cero
+.\build-all.ps1 -Clean -Test
+```
+
+El script `build-all.ps1` automatiza:
+1. ✅ Compilación de Zig (`zig build-lib`)
+2. ✅ Generación de `adead_zig.lib`
+3. ✅ Compilación de Rust con linking correcto
+4. ✅ Prueba del flujo completo (opcional con `-Test`)
 
 ### Requisitos
 
@@ -160,15 +296,39 @@ let result = add(5, 3)
 
 ### Proceso de Compilación Completo
 
-**Flujo Principal Establecido:**
+**ADead utiliza múltiples flujos según la complejidad del código:**
+
+#### 🚀 Flujo 1: Directo (Zig → NASM)
+**Para expresiones simples y floats:**
 ```
-ADead Source (.ad)
+ADead Source: print 3.14
+  ↓
+┌─────────────────────────────────────────┐
+│  ZIG (parsea y genera ASM)             │
+│  • Parsea: readFloat() → 3.14          │
+│  • Genera NASM directamente            │
+│  • Crea .data section: float_0: dq 3.14│
+│  • Genera .text: movsd xmm0, [rel ...] │
+│  • FFI: generate_nasm_ffi()            │
+└─────────────────────────────────────────┘
+  ↓ (Código NASM completo)
+┌─────────────────────────────────────────┐
+│  NASM (Assembly x86_64)                │
+│  • Ensamblado directo                  │
+└─────────────────────────────────────────┘
+  ↓
+✅ Ejecutable (.exe)
+```
+
+#### 🔒 Flujo 2: Con Validación (Zig → Rust → NASM)
+**Para código que requiere validación:**
+```
+ADead Source: let x = 2 + 5
   ↓
 ┌─────────────────────────────────────────┐
 │  ZIG PARSER (parsea expresiones)       │
 │  • Expresiones aritméticas (2 + 5)      │
 │  • Operadores con precedencia correcta  │
-│  • Paréntesis y operaciones complejas   │
 │  • FFI: parse_expr_ffi()                │
 └─────────────────────────────────────────┘
   ↓ (Serialización: "BINOP:ADD:NUMBER:2:NUMBER:5")
@@ -187,23 +347,13 @@ ADead Source (.ad)
 │  • Optimizaciones de bajo nivel        │
 └─────────────────────────────────────────┘
   ↓
-┌─────────────────────────────────────────┐
-│  Object File (.obj/.o)                  │
-│  • Archivo objeto compilado             │
-└─────────────────────────────────────────┘
-  ↓
-┌─────────────────────────────────────────┐
-│  Ejecutable (.exe)                      │
-│  • Binario nativo Windows               │
-└─────────────────────────────────────────┘
-  ↓
-✅ Ejecución
+✅ Ejecutable (.exe)
 ```
 
-**Flujo Simplificado (Establecido):**
-```
-ADead → Zig (parsea expresiones) → Rust (seguridad) → NASM → .exe
-```
+**Ventajas de este diseño:**
+- ⚡ **Rendimiento:** Flujo directo para casos simples (sin overhead)
+- 🔒 **Seguridad:** Validación Rust para código complejo
+- 🎯 **Flexibilidad:** El compilador elige automáticamente el mejor flujo
 
 **Ejemplo Práctico:**
 ```adead
@@ -218,11 +368,12 @@ print 2 + 5
 5. **NASM compila:** Genera `.obj` → Linker → `.exe`
 6. **Ejecución:** Output: `7`
 
-**Ventajas de esta Arquitectura:**
-- ✅ **Zig parsea:** Más eficiente para expresiones y estructuras complejas
-- ✅ **Rust valida:** Garantiza seguridad de memoria y corrección de tipos
-- ✅ **NASM compila:** Genera código assembly optimizado
+**Ventajas de esta Arquitectura Multi-Flujo:**
+- ✅ **Zig → NASM directo:** Máxima eficiencia para floats y expresiones simples
+- ✅ **Zig → Rust → NASM:** Seguridad garantizada para código complejo
+- ✅ **Selección automática:** El compilador elige el mejor flujo automáticamente
 - ✅ **Rendimiento nativo:** Ejecutable final sin dependencias
+- ✅ **Flexibilidad:** Cada caso usa el flujo más apropiado
 - ✅ **Separación clara:** Cada lenguaje hace lo que mejor sabe
 
 ### Comandos Modulares
@@ -269,55 +420,40 @@ Puedes ejecutar cada paso por separado para mayor control:
 
 ## 🛠️ Estado del Proyecto
 
-**MVP Funcional** ✅
+### ✅ MVP Funcional (Completado)
 
+**ADead ya tiene una base sólida que supera a muchos lenguajes hobby:**
+
+#### Características Core
 - ✅ **Parser completo:** Zig + Rust integrados
   - **Zig:** Parsea expresiones aritméticas y structs complejos de forma eficiente
   - **Rust:** Seguridad de memoria (borrow checker), validación y generación de código NASM
-- ✅ **OOP Básico:** Structs, métodos, `init`/`destroy`, encapsulación (`pub`/`private`)
-- ✅ Generación NASM para x86_64 Windows/Linux
-- ✅ CLI tool modular (compile, assemble, link, run)
-- ✅ Ejemplos funcionales (hello, factorial, conditional, loop, structs, encapsulación, RAII)
-- ✅ Icono personalizado para archivos `.ad` en Windows
-- ✅ Compilación completa funcional en Windows con MinGW/MSYS2
+- ✅ **Sintaxis completa:** `print`, `let`, `if/else`, `while`, `fn` con parámetros y `return`
+- ✅ **OOP completo:** Structs, métodos, `init`/`destroy` (RAII), encapsulación (`pub`/`private`)
+- ✅ **Floats básicos:** Parsing de valores flotantes (`3.14`, etc.) - **en proceso de completarse**
+
+#### Infraestructura Técnica
+- ✅ **Generación NASM:** x86_64 para Windows/Linux funcional
+- ✅ **CLI profesional:** Comandos modulares (`compile`, `assemble`, `link`, `run`)
 - ✅ **Flujo completo:** `ADead → Zig (parsea) → Rust (seguridad) → NASM (ASM) → .exe` funcionando
+- ✅ **Arquitectura híbrida:** Flujos múltiples inteligentes (directo para simple, con validación para complejo)
 
-**Mejoras Recientes:**
+#### Experiencia de Usuario
+- ✅ **Ejemplos funcionales:** Hello world, factorial, conditional, loops, structs, encapsulación, RAII
+- ✅ **Icono personalizado:** Archivos `.ad` con identidad visual en Windows Explorer
+- ✅ **Compilación robusta:** Funcional en Windows con MinGW/MSYS2
+- ✅ **Proceso modularizado:** Mejor manejo de errores y diagnósticos
 
-- ✅ Proceso de compilación modularizado
-- ✅ Mejor manejo de errores y diagnósticos
-- ✅ Soporte robusto para Windows con MinGW64
-- ✅ Identidad visual con iconos personalizados
+**🎉 Ya es más que un MVP básico - tienes un lenguaje funcional con OOP y RAII, que pocos logran tan rápido.**
 
-**Completado Recientemente:**
+### 🚀 En Desarrollo (Sprint 1 - Actual)
 
-- ✅ Parsing híbrido Zig + Rust (Zig parsea expresiones y structs complejos)
-- ✅ Integración completa: `ADead → Zig (parsea) → Rust (seguridad de memoria) → NASM → .exe`
-- ✅ Encapsulación (public/private) - O5 completado
-- ✅ RAII (init/destroy) - O2 completado
-- ✅ Structs con campos y métodos
-- ✅ Codegen de strings en struct literals
-- ✅ Expresiones aritméticas parseadas con Zig (precedencia correcta garantizada)
+**Prioridades críticas para completar el sistema de tipos:**
+- 🔄 **Floats completos:** Aritmética full + print real (conversión float→string)
+- 🔄 **Bool nativo:** `true`/`false` con branching optimizado
+- 🔄 **Arrays básicos:** Declaración, acceso por índice, operaciones básicas
 
-**🚀 Próximos Pasos (Roadmap Profesional):**
-
-**Críticos (Sprint 1 - Mes 1):**
-- [ ] Manejo de errores completo (Option/Result funcionales)
-- [ ] Arrays básicos
-- [ ] Import básico (módulos simples)
-
-**Esenciales (Sprint 2-3 - Mes 2-3):**
-- [ ] Librería estándar mínima (`std.string`, `std.math`, `std.array`)
-- [ ] Sistema de módulos completo
-- [ ] Tipos nativos: Bool, Float
-
-**Profesionales (Sprint 4-6 - Mes 4-6):**
-- [ ] Package Manager
-- [ ] Interoperabilidad C/Rust
-- [ ] Pipeline optimizado (caching, incremental)
-- [ ] Documentación oficial completa
-
-📖 **Ver [docs/ROADMAP-PROFESIONAL.md](docs/ROADMAP-PROFESIONAL.md) para detalles completos.**
+📖 **Ver sección [Roadmap](#-roadmap-de-mvp-a-lenguaje-completo) para el plan completo de desarrollo.**
 
 ## 🧪 Testing
 
@@ -344,25 +480,46 @@ MIT License - ver [LICENSE](LICENSE) para más detalles.
 
 Copyright (c) 2025 Eddi Andreé Salazar Matos
 
-## 🎯 Roadmap
+## 🎯 Roadmap: De MVP a Lenguaje Completo
 
-### ✅ Completado (MVP)
-1. ✅ **MVP**: print/let/if/while/func + tests
-2. ✅ **OOP Básico**: Structs, métodos, RAII, encapsulación
+### ✅ Completado (MVP Funcional)
+1. ✅ **Sintaxis Core**: `print`, `let`, `if/else`, `while`, `fn` + tests
+2. ✅ **OOP Completo**: Structs, métodos, `init`/`destroy` (RAII), encapsulación (`pub`/`private`)
 3. ✅ **Arquitectura Híbrida**: Zig (parsea) + Rust (seguridad de memoria) integrados
 4. ✅ **Flujo completo**: `ADead → Zig (parsea) → Rust (seguridad) → NASM (ASM) → .exe` funcionando
+5. ✅ **CLI profesional**: Comandos modulares (`compile`, `assemble`, `link`, `run`)
+6. ✅ **Floats básicos**: Parsing de valores flotantes (en proceso de completarse)
 
-### 🚀 Próximos Pasos (Roadmap Profesional)
-1. 🔴 **Manejo de errores completo**: Option/Result funcionales
-2. 🔴 **Arrays y tipos básicos**: Arrays, Bool, Float nativos
-3. 🔴 **Sistema de módulos**: Import/export, proyectos multi-archivo
-4. 🔴 **Librería estándar**: `std.string`, `std.math`, `std.array`
-5. 🟡 **Package Manager**: Ecosistema distribuido
-6. 🟡 **Interoperabilidad**: C/Rust FFI
-7. 🟡 **Optimizaciones**: Compilación incremental, caching, flags
-8. 🟡 **Documentación**: Guías oficiales completas
+### 🔴 Sprint 1: Tipos de Datos Completos (1-2 semanas) - CRÍTICO
+1. 🔴 **Floats completos**: Aritmética full, print real (conversión float→string en ASM puro)
+2. 🔴 **Bool nativo**: `true`/`false` con branching optimizado en assembly
+3. 🔴 **Arrays básicos**: `let arr = [1, 2, 3]`, acceso `arr[0]`, `length`, `push`/`pop`
+
+### 🟠 Sprint 2-3: Módulos y Librería Estándar (2-3 semanas) - ESENCIAL
+1. 🟠 **Sistema de módulos**: `import "std/math.ad"`, `import "mylib.ad"` (proyectos multi-archivo)
+2. 🟠 **Strings reales**: Concatenación, `length`, `substr` (en `.data` o stack)
+3. 🟠 **Librería estándar mínima**: `std.io` (print, read_line), `std.math` (sin, cos, pow, sqrt), `std.string`, `std.array`
+4. 🟠 **Estructuras avanzadas**: `for` loops (`for i in 0..10`), `break`/`continue`
+
+### 🟡 Sprint 4-6: Características Profesionales (3-4 semanas cada uno) - AVANZADO
+1. 🟡 **Manejo de errores**: Option/Result funcionales o panic simple con mensajes claros
+2. 🟡 **Match/switch**: Pattern matching para enums y control flow avanzado
+3. 🟡 **Pointers y memoria manual**: Opcional, con `unsafe` block (estilo Rust)
+4. 🟡 **Enums y unions**: Tipos de datos avanzados
+5. 🟡 **Generics básicos**: Comptime (estilo Zig) para reusabilidad
+6. 🟡 **Inline ASM**: Para casos extremos de optimización
+7. 🟡 **Optimizaciones avanzadas**: Más registros, peephole opts, flag `--release` con optimizaciones agresivas
+8. 🟡 **Soporte ARM64**: Para mobile/Apple Silicon
+
+### 🔵 Futuro: Ecosistema Completo
+1. 🔵 **Package Manager**: Ecosistema distribuido de librerías
+2. 🔵 **Interoperabilidad C/Rust**: FFI completo y robusto
+3. 🔵 **Documentación completa**: Tutorial oficial, website, playground online
+4. 🔵 **Pipeline optimizado**: Caching inteligente, compilación incremental
 
 📖 **Ver [docs/ROADMAP-PROFESIONAL.md](docs/ROADMAP-PROFESIONAL.md) para el plan detallado de 6 meses.**
+
+**🎯 Objetivo Final:** ADead pasa de "MVP impresionante" a **lenguaje serio que respeta ASM puro y envía directo al CPU**, democratizando low-level como nadie. ⚡
 
 ---
 

@@ -68,7 +68,42 @@ fn main() -> Result<()> {
             let source = fs::read_to_string(&input)
                 .with_context(|| format!("Failed to read input file: {}", input))?;
 
-            // Pasar directorio del archivo de entrada para resolución de imports (Sprint 1.3)
+            let output_path = output.unwrap_or_else(|| {
+                input
+                    .replace(".ad", ".asm")
+                    .replace(".adead", ".asm")
+                    .to_string()
+            });
+
+            // FLUJO DIRECTO: ADead → Zig → NASM (para floats simples)
+            // Detectar si es un programa simple con float: "print 3.14"
+            // NOTA: Solo para literales simples, NO para expresiones complejas
+            let trimmed_source = source.trim();
+            
+            if trimmed_source.starts_with("print ") {
+                let expr_part = trimmed_source.strip_prefix("print ").unwrap_or("").trim();
+                
+                // PASO 3: Verificación SIMPLE - solo detectar '+'
+                // Si tiene '+', usar Rust directamente (sin verificar nada más)
+                if expr_part.contains('+') {
+                    println!("   🔒 Expresión compleja detectada (+), usando flujo Rust");
+                    // Continuar con el flujo Rust de abajo (no return)
+                } else {
+                    // Literal simple sin '+' - intentar flujo directo Zig
+                    if adead_parser::zig_nasm_generator::can_use_direct_flow(expr_part) {
+                        println!("   🚀 Usando flujo directo: Zig → NASM");
+                        if let Some(nasm_code) = adead_parser::zig_nasm_generator::generate_nasm_direct(expr_part) {
+                            fs::write(&output_path, nasm_code)
+                                .with_context(|| format!("Failed to write output file: {}", output_path))?;
+                            println!("✅ Compilado (Zig directo): {} -> {}", input, output_path);
+                            return Ok(());
+                        }
+                    }
+                }
+            }
+
+            // FLUJO NORMAL: ADead → Zig → Rust → NASM (para casos complejos)
+            println!("   🔒 Usando flujo con validación: Zig → Rust → NASM");
             let input_path = Path::new(&input);
             let current_dir = input_path.parent();
             
@@ -79,13 +114,6 @@ fn main() -> Result<()> {
             let asm = generator
                 .generate(&program)
                 .map_err(|e| anyhow::anyhow!("Code generation error: {}", e))?;
-
-            let output_path = output.unwrap_or_else(|| {
-                input
-                    .replace(".ad", ".asm")
-                    .replace(".adead", ".asm")
-                    .to_string()
-            });
 
             fs::write(&output_path, asm)
                 .with_context(|| format!("Failed to write output file: {}", output_path))?;

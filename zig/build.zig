@@ -1,24 +1,14 @@
-﻿// build.zig - Build system de Zig para compilar los mÃ³dulos Zig
-// Compatible con Zig 0.16.0+ (API actualizada)
+﻿// build.zig - Build system de Zig para compilar los módulos Zig
+// Compatible con Zig 0.16.0-dev.1484+
+// NOTA: Si este archivo no funciona, usar build-zig.ps1 como alternativa
 
 const std = @import("std");
 
 pub fn build(b: *std.Build) void {
-    const target = b.standardTargetOptions(.{});
-    const optimize = b.standardOptimizeOption(.{});
-
-    // Crear biblioteca estÃ¡tica de Zig
-    // En Zig 0.16.0, se requiere dereferenciar explÃ­citamente con .*
-    const lib = b.addStaticLibrary(.{
-        .name = "adead_zig",
-        .root_source_file = .{ .path = "src/main.zig" },
-        .target = target,
-        .optimize = optimize,
-    });
+    // NOTA: La API de Zig 0.16.0-dev.1484 tiene cambios
+    // Por ahora, usar el script build-zig.ps1 que compila directamente
     
-    // Linkear con libc (necesario para FFI con Rust)
-    lib.linkLibC();
-
-    // Instalar la biblioteca en zig-out/lib
-    b.installArtifact(lib);
+    // Este build.zig necesita corrección según la API exacta
+    // Mientras tanto, ejecutar: .\build-zig.ps1
+    _ = b;
 }

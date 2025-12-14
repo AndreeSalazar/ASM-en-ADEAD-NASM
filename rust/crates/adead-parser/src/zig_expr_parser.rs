@@ -27,6 +27,9 @@ pub fn parse_expr_with_zig(expr_str: &str) -> Option<Expr> {
         return None;
     }
 
+    // Zig AHORA soporta floats completamente - permitir que Zig los parsee
+    // Zig ya tiene readFloat() implementado y serializa como "FLOAT:3.14"
+
     // Convertir a CString para FFI
     let c_input = match CString::new(trimmed) {
         Ok(s) => s,
@@ -88,6 +91,21 @@ fn parse_zig_result_recursive(s: &str, start: usize) -> Option<(Expr, usize)> {
         let num_str = &s[num_start..num_end];
         let num: i64 = num_str.parse().ok()?;
         return Some((Expr::Number(num), num_end));
+    }
+
+    if rest.starts_with("FLOAT:") {
+        // Encontrar el float (hasta ':' siguiente o fin)
+        let float_start = start + 6;
+        // Buscar el siguiente ':' o el fin del string
+        let float_end = s[float_start..]
+            .find(':')
+            .map(|pos| float_start + pos)
+            .unwrap_or(s.len());
+        
+        let float_str = &s[float_start..float_end];
+        // Parsear float - puede ser en formato normal o científico
+        let float_val: f64 = float_str.parse().ok()?;
+        return Some((Expr::Float(float_val), float_end));
     }
 
     if rest.starts_with("IDENT:") {

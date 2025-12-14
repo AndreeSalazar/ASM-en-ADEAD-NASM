@@ -12,7 +12,7 @@ members = [
 resolver = "2"
 
 [workspace.package]
-version = "1.5.5"
+version = "1.9.5"
 edition = "2021"
 authors = ["Eddi Andreé Salazar Matos <eddi.andre.salazar.matos@gmail.com>"]
 license = "MIT"

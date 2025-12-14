@@ -21,6 +21,7 @@ pub const BinOp = enum {
 /// Expresión parseada
 pub const Expr = union(enum) {
     Number: i64,
+    Float: f64,  // Literal flotante: 3.14, 2.5e10, etc.
     String: []const u8,
     Ident: []const u8,
     BinaryOp: struct {
@@ -51,7 +52,87 @@ pub const ExprParser = struct {
         }
     }
 
-    /// Leer un número entero
+    /// Leer un float literal (debe venir antes de readNumber)
+    fn readFloat(self: *ExprParser) anyerror!?f64 {
+        const save_pos = self.pos;
+        if (self.pos >= self.input.len) return null;
+        
+        // Manejar signo negativo
+        var is_negative = false;
+        if (self.input[self.pos] == '-') {
+            is_negative = true;
+            self.pos += 1;
+        }
+        
+        if (self.pos >= self.input.len or !std.ascii.isDigit(self.input[self.pos])) {
+            if (self.pos < self.input.len and self.input[self.pos] == '.') {
+                // Caso: .5 (sin parte entera)
+                self.pos += 1;
+                if (self.pos >= self.input.len or !std.ascii.isDigit(self.input[self.pos])) {
+                    self.pos = save_pos;
+                    return null;
+                }
+                const start = self.pos;
+                while (self.pos < self.input.len and std.ascii.isDigit(self.input[self.pos])) {
+                    self.pos += 1;
+                }
+                const dec_str = self.input[start..self.pos];
+                var float_str_buf: [128]u8 = undefined;
+                const float_str = std.fmt.bufPrint(&float_str_buf, "0.{s}", .{dec_str}) catch {
+                    self.pos = save_pos;
+                    return null;
+                };
+                const float_val = std.fmt.parseFloat(f64, float_str) catch {
+                    self.pos = save_pos;
+                    return null;
+                };
+                return if (is_negative) -float_val else float_val;
+            }
+            if (is_negative) self.pos -= 1; // Revertir
+            self.pos = save_pos;
+            return null;
+        }
+        
+        // Leer parte entera
+        const int_start = self.pos;
+        while (self.pos < self.input.len and std.ascii.isDigit(self.input[self.pos])) {
+            self.pos += 1;
+        }
+        
+        // Verificar si viene un punto
+        if (self.pos >= self.input.len or self.input[self.pos] != '.') {
+            self.pos = save_pos;
+            return null; // No es float
+        }
+        
+        self.pos += 1; // Skip '.'
+        
+        // Leer parte decimal (opcional)
+        const dec_start = self.pos;
+        while (self.pos < self.input.len and std.ascii.isDigit(self.input[self.pos])) {
+            self.pos += 1;
+        }
+        
+        // Construir string del float directamente desde el input
+        const int_str = self.input[int_start..(dec_start - 1)];
+        const dec_str = if (dec_start < self.pos) self.input[dec_start..self.pos] else "";
+        
+        // Construir float_str sin usar allocator si es posible
+        var float_str_buf: [128]u8 = undefined;
+        const float_str = if (dec_str.len > 0) 
+            try std.fmt.bufPrint(&float_str_buf, "{s}.{s}", .{ int_str, dec_str })
+        else
+            try std.fmt.bufPrint(&float_str_buf, "{s}.0", .{int_str});
+        
+        const float_val = std.fmt.parseFloat(f64, float_str) catch {
+            self.pos = save_pos;
+            return null;
+        };
+        
+        return if (is_negative) -float_val else float_val;
+    }
+
+    /// Leer un número entero (solo si no es float)
     fn readNumber(self: *ExprParser) ?i64 {
         if (self.pos >= self.input.len) return null;
         
@@ -70,6 +151,17 @@ pub const ExprParser = struct {
         const start = self.pos;
         while (self.pos < self.input.len and std.ascii.isDigit(self.input[self.pos])) {
             self.pos += 1;
+        }
+        
+        // Verificar que NO viene un punto (si viene, no es int)
+        if (self.pos < self.input.len and self.input[self.pos] == '.') {
+            // Es float, revertir
+            if (is_negative) {
+                self.pos = start - 1;
+            } else {
+                self.pos = start;
+            }
+            return null;
         }
         
         const num_str = self.input[start..self.pos];
@@ -91,11 +183,18 @@ pub const ExprParser = struct {
         return self.input[start..self.pos];
     }
 
-    /// Parsear un átomo (número, identificador, o expresión entre paréntesis)
+    /// Parsear un átomo (número, float, identificador, o expresión entre paréntesis)
     fn parseAtom(self: *ExprParser) anyerror!?*Expr {
         self.skipWhitespace();
         
-        // Número
+        // IMPORTANTE: Intentar float PRIMERO (antes de número)
+        if (try self.readFloat()) |float_val| {
+            const expr = try self.allocator.create(Expr);
+            expr.* = Expr{ .Float = float_val };
+            return expr;
+        }
+        
+        // Número entero (solo si no es float)
         if (self.readNumber()) |num| {
             const expr = try self.allocator.create(Expr);
             expr.* = Expr{ .Number = num };
@@ -297,6 +396,9 @@ pub fn parseExpressionString(allocator: std.mem.Allocator, input: []const u8) !?
     return try parser.parse();
 }
 
+// NOTA: generate_nasm_ffi está en nasm_generator.zig
+// Esta función fue movida allí para evitar duplicación
+
 /// Exportación FFI para Rust - Parsear expresión aritmética
 /// Retorna JSON-like string con la expresión parseada
 /// input_ptr: puntero a string null-terminated
@@ -343,6 +445,10 @@ fn serializeExprToBuffer(expr: *Expr, buffer: [*]u8, pos: *usize, max_len: usize
     switch (expr.*) {
         .Number => |n| {
             const str = try std.fmt.bufPrint(buffer[pos.*..max_len], "NUMBER:{}", .{n});
+            pos.* += str.len;
+        },
+        .Float => |f| {
+            const str = try std.fmt.bufPrint(buffer[pos.*..max_len], "FLOAT:{}", .{f});
             pos.* += str.len;
         },
         .String => |s| {
