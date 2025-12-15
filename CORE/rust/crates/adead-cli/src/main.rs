@@ -81,33 +81,31 @@ fn find_c_compiler() -> Option<String> {
         }
     }
     
-    // 2. Buscar en PATH
-    if Command::new("gcc").arg("--version").output().is_ok() {
-        return Some("gcc".to_string());
-    }
+    // 2. Buscar en PATH (priorizar Clang sobre GCC)
     if Command::new("clang").arg("--version").output().is_ok() {
         return Some("clang".to_string());
     }
+    if Command::new("gcc").arg("--version").output().is_ok() {
+        return Some("gcc".to_string());
+    }
     
-    // 3. Buscar en ubicaciones comunes de MSYS2/MinGW
+    // 3. Buscar en ubicaciones comunes (priorizar Clang sobre GCC)
     let common_paths = vec![
-        // MSYS2 MINGW64
-        "C:\\msys64\\mingw64\\bin\\gcc.exe",
-        "C:\\msys32\\mingw64\\bin\\gcc.exe",
-        // MSYS2 UCRT64
-        "C:\\msys64\\ucrt64\\bin\\gcc.exe",
-        "C:\\msys32\\ucrt64\\bin\\gcc.exe",
-        // MSYS2 CLANG64
-        "C:\\msys64\\clang64\\bin\\gcc.exe",
-        // MSYS2 base
-        "C:\\msys64\\usr\\bin\\gcc.exe",
-        "C:\\msys32\\usr\\bin\\gcc.exe",
-        // MinGW-w64
-        "C:\\mingw64\\bin\\gcc.exe",
-        "C:\\mingw32\\bin\\gcc.exe",
-        // Clang
+        // Clang (prioridad)
         "C:\\Program Files\\LLVM\\bin\\clang.exe",
         "C:\\Program Files (x86)\\LLVM\\bin\\clang.exe",
+        "C:\\msys64\\clang64\\bin\\clang.exe",
+        "C:\\LLVM\\bin\\clang.exe",
+        // GCC (fallback)
+        "C:\\msys64\\mingw64\\bin\\gcc.exe",
+        "C:\\msys32\\mingw64\\bin\\gcc.exe",
+        "C:\\msys64\\ucrt64\\bin\\gcc.exe",
+        "C:\\msys32\\ucrt64\\bin\\gcc.exe",
+        "C:\\msys64\\clang64\\bin\\gcc.exe",
+        "C:\\msys64\\usr\\bin\\gcc.exe",
+        "C:\\msys32\\usr\\bin\\gcc.exe",
+        "C:\\mingw64\\bin\\gcc.exe",
+        "C:\\mingw32\\bin\\gcc.exe",
     ];
     
     for path in common_paths {
@@ -202,19 +200,35 @@ fn compile_with_c_backend(source: &str, input_path: &str, output_path: &str) -> 
             .with_context(|| format!("Failed to create output directory: {:?}", output_dir))?;
     }
     
-    let working_dir = c_file_path.parent().unwrap_or(Path::new("."));
+    // Asegurar que el working_dir sea absoluto
+    let working_dir = c_file_path.parent()
+        .unwrap_or(Path::new("."))
+        .canonicalize()
+        .unwrap_or_else(|_| c_file_path.parent().unwrap_or(Path::new(".")).to_path_buf());
     let c_file_name = c_file_path.file_name().unwrap_or_default();
     
-    // Paso 1: Generar ASM para inspección
-    println!("   ⚡ Paso 1: Generando ASM (para inspección)...");
+    // Paso 1: Generar ASM puro y limpio
+    println!("   ⚡ Paso 1: Generando ASM puro y limpio...");
     let mut cmd_asm = std::process::Command::new(&compiler);
-    cmd_asm.current_dir(working_dir)
+    cmd_asm.current_dir(&working_dir)
             .arg("-S")                    // Generar ASM
-            .arg("-masm=intel")           // Sintaxis Intel
             .arg("-O2")                   // Optimización
+            .arg("-fno-asynchronous-unwind-tables")  // Sin unwind tables (más limpio)
+            .arg("-fno-exceptions")       // Sin soporte de excepciones
+            .arg("-fno-stack-protector")  // Sin stack protector (más limpio)
+            .arg("-mno-red-zone")         // Sin red zone (más limpio para x86_64)
             .arg("-o")
             .arg(&asm_file)
             .arg(c_file_name);
+    
+    // Ajustar flags según el compilador
+    if compiler.contains("clang") {
+        // Clang: usar sintaxis Intel
+        cmd_asm.arg("-mllvm").arg("--x86-asm-syntax=intel");
+    } else {
+        // GCC: usar sintaxis Intel
+        cmd_asm.arg("-masm=intel");
+    }
     
     let output_asm = cmd_asm.output()
         .with_context(|| format!("Failed to execute {} for ASM", compiler))?;
@@ -225,18 +239,21 @@ fn compile_with_c_backend(source: &str, input_path: &str, output_path: &str) -> 
         eprintln!("   ⚠️  Advertencia: No se pudo generar ASM, pero continuando...");
     }
     
-    // Paso 2: Compilar directamente a EXE usando rutas absolutas
+    // Paso 2: Compilar directamente a EXE usando rutas relativas al working_dir
     println!("   ⚡ Paso 2: Compilando C → EXE...");
-    let exe_file_abs = fs::canonicalize(output_dir)
-        .unwrap_or_else(|_| output_dir.to_path_buf())
-        .join(PathBuf::from(&exe_file).file_name().unwrap_or_default());
+    // Usar nombre simple del EXE, no ruta absoluta compleja
+    let exe_file_name: String = PathBuf::from(&exe_file).file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("test.exe")
+        .to_string();
     
     let mut cmd_exe = std::process::Command::new(&compiler);
-    cmd_exe.current_dir(working_dir)
+    cmd_exe.current_dir(&working_dir)
             .arg("-O2")                   // Optimización
+            .arg("-std=c99")              // Estándar C99 para compatibilidad
             .arg("-o")
-            .arg(&exe_file_abs)
-            .arg(c_file_name);
+            .arg(&exe_file_name)          // Nombre simple
+            .arg(c_file_name);            // Nombre del archivo C
     
     let output_exe = cmd_exe.output()
         .with_context(|| format!("Failed to execute {} for EXE", compiler))?;
@@ -251,11 +268,12 @@ fn compile_with_c_backend(source: &str, input_path: &str, output_path: &str) -> 
         if !stdout.is_empty() {
             eprintln!("STDOUT:\n{}", stdout);
         }
-        
         return Err(anyhow::anyhow!("Compilación C → EXE falló."));
     }
     
-    println!("   ✅ EXE generado: {}", exe_file);
+    // Construir ruta completa del EXE generado
+    let exe_file_full = working_dir.join(&exe_file_name);
+    println!("   ✅ EXE generado: {}", exe_file_full.display());
     println!("   🎉 ADead → C → GCC/Clang → EXE (listo para ejecutar)");
     
     Ok(())

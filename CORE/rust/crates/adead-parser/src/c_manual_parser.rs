@@ -239,20 +239,71 @@ impl CManualParser {
                     statements.push(Stmt::Print(expr));
                 }
                 i += 1;
+            } else if line.contains(".") && line.contains("(") && line.contains(")") && !line.starts_with("print ") {
+                // Método: arr.append(x) - parsear como statement
+                match Self::parse_expr_from_text(line) {
+                    Ok(expr) => {
+                        if matches!(expr, Expr::MethodCall { .. }) {
+                            statements.push(Stmt::Expr(expr));
+                            i += 1;
+                            continue;
+                        }
+                        // Si no es MethodCall, puede ser otra cosa, continuar
+                    }
+                    Err(_) => {
+                        // Si falla el parsing, continuar con otras condiciones
+                    }
+                }
+                i += 1;
             } else if line.contains(" = ") && !line.starts_with("let ") {
-                // Asignación
+                // Asignación: variable = value o arr[0] = value
                 if let Some(eq_pos) = line.find(" = ") {
-                    let var_name = line[..eq_pos].trim().to_string();
-                    let value_text = line[eq_pos + 3..].trim();
-                    if let Ok(value_expr) = Self::parse_expr_from_text(value_text) {
-                        statements.push(Stmt::Expr(Expr::Assign {
-                            name: var_name,
-                            value: Box::new(value_expr),
-                        }));
+                    let left_side = line[..eq_pos].trim();
+                    let right_side = line[eq_pos + 3..].trim();
+                    
+                    // Verificar si es asignación a índice de array: arr[0] = value
+                    if left_side.contains('[') && left_side.ends_with(']') {
+                        if let Ok(index_expr) = Self::parse_expr_from_text(left_side) {
+                            if let Expr::Index { array, index } = index_expr {
+                                if let Ok(value_expr) = Self::parse_expr_from_text(right_side) {
+                                    // Crear una asignación especial para array index
+                                    // Usamos nombre especial que el generador C detectará
+                                    statements.push(Stmt::Expr(Expr::Assign {
+                                        name: "_array_set".to_string(), // Marcador especial
+                                        value: Box::new(Expr::BinaryOp {
+                                            op: BinOp::Eq, // Reutilizamos Eq como marcador
+                                            left: Box::new(Expr::Index {
+                                                array: array.clone(),
+                                                index: index.clone(),
+                                            }),
+                                            right: Box::new(value_expr),
+                                        }),
+                                    }));
+                                }
+                            }
+                        }
+                    } else {
+                        // Asignación normal: variable = value
+                        let var_name = left_side.to_string();
+                        if let Ok(value_expr) = Self::parse_expr_from_text(right_side) {
+                            statements.push(Stmt::Expr(Expr::Assign {
+                                name: var_name,
+                                value: Box::new(value_expr),
+                            }));
+                        }
                     }
                 }
                 i += 1;
             } else {
+                // Cualquier otra línea: intentar parsear como expresión
+                // Puede ser un método call o cualquier expresión válida
+                if let Ok(expr) = Self::parse_expr_from_text(line) {
+                    if matches!(expr, Expr::MethodCall { .. }) {
+                        // Es un método call, agregar como statement
+                        statements.push(Stmt::Expr(expr));
+                    }
+                    // Si no es MethodCall, lo ignoramos (podría ser solo un identificador)
+                }
                 i += 1;
             }
         }
@@ -266,6 +317,96 @@ impl CManualParser {
         
         if text.is_empty() {
             return Err("Empty expression".into());
+        }
+        
+        // Método: arr.append(x) - buscar .method_name( ANTES de llamadas a función
+        // Esto debe ir antes de parsear funciones normales
+        if let Some(dot_pos) = text.find('.') {
+            // Verificar que después del punto hay un método seguido de paréntesis
+            let after_dot = &text[dot_pos+1..];
+            if after_dot.contains('(') && text.ends_with(')') {
+                let object_str = text[..dot_pos].trim();
+                if let Some(args_start) = after_dot.find('(') {
+                    let method_name = after_dot[..args_start].trim();
+                    // args_text va desde después del '(' hasta el último ')' 
+                    // Como text.ends_with(')'), el último carácter de after_dot es ')'
+                    let args_text = if args_start + 1 < after_dot.len() {
+                        after_dot[args_start+1..after_dot.len()-1].trim()
+                    } else {
+                        ""
+                    };
+                    
+                    let object_expr = Self::parse_expr_from_text(object_str)?;
+                    let args = if args_text.is_empty() {
+                        Vec::new()
+                    } else {
+                        args_text.split(',')
+                            .map(|a| Self::parse_expr_from_text(a.trim()))
+                            .collect::<Result<Vec<_>, _>>()?
+                    };
+                    
+                    return Ok(Expr::MethodCall {
+                        object: Box::new(object_expr),
+                        method: method_name.to_string(),
+                        args,
+                    });
+                }
+            }
+        }
+        
+        // Llamada a función: len(arr) o función(args)
+        if text.contains('(') && text.ends_with(')') {
+            if let Some(paren_pos) = text.find('(') {
+                let name = text[..paren_pos].trim();
+                let args_text = &text[paren_pos+1..text.len()-1].trim();
+                
+                if !args_text.is_empty() {
+                    // Parsear argumentos separados por comas
+                    let args: Result<Vec<_>, _> = args_text.split(',')
+                        .map(|a| Self::parse_expr_from_text(a.trim()))
+                        .collect();
+                    return Ok(Expr::Call {
+                        module: None,
+                        name: name.to_string(),
+                        args: args?,
+                    });
+                } else {
+                    // Función sin argumentos
+                    return Ok(Expr::Call {
+                        module: None,
+                        name: name.to_string(),
+                        args: Vec::new(),
+                    });
+                }
+            }
+        }
+        
+        // Array literal: [1, 2, 3]
+        if text.starts_with('[') && text.ends_with(']') {
+            let inner = &text[1..text.len()-1].trim();
+            if inner.is_empty() {
+                return Ok(Expr::ArrayLiteral(Vec::new()));
+            }
+            let elements: Result<Vec<_>, _> = inner.split(',')
+                .map(|e| Self::parse_expr_from_text(e.trim()))
+                .collect();
+            return Ok(Expr::ArrayLiteral(elements?));
+        }
+        
+        // Array index: arr[0] o arr[i] (después de verificar métodos)
+        if let Some(bracket_pos) = text.rfind('[') {
+            if text.ends_with(']') {
+                let array_expr_str = &text[..bracket_pos].trim();
+                let index_str = &text[bracket_pos+1..text.len()-1].trim();
+                
+                let array_expr = Self::parse_expr_from_text(array_expr_str)?;
+                let index_expr = Self::parse_expr_from_text(index_str)?;
+                
+                return Ok(Expr::Index {
+                    array: Box::new(array_expr),
+                    index: Box::new(index_expr),
+                });
+            }
         }
         
         // Número

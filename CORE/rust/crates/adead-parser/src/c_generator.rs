@@ -22,12 +22,75 @@ impl CGenerator {
 
     /// Generar código C completo desde un programa ADead
     pub fn generate(&mut self, program: &Program) -> String {
+        // Resetear contador de variables temporales
+        self.variable_counter = 0;
         // Cabecera estándar de C
         self.output.push_str("#include <stdio.h>\n");
         self.output.push_str("#include <stdlib.h>\n");
         self.output.push_str("#include <stdint.h>\n");
         self.output.push_str("#include <stdbool.h>\n");
+        self.output.push_str("#include <string.h>\n");
         self.output.push_str("\n");
+        
+        // Estructura Array dinámica (estilo Python list)
+        self.output.push_str("// Estructura Array dinámica\n");
+        self.output.push_str("typedef struct {\n");
+        self.output.push_str("    int64_t* data;\n");
+        self.output.push_str("    size_t length;\n");
+        self.output.push_str("    size_t capacity;\n");
+        self.output.push_str("} Array;\n\n");
+        
+        // Funciones helper para Array
+        self.output.push_str("// Crear array vacío\n");
+        self.output.push_str("Array array_new(void) {\n");
+        self.output.push_str("    Array arr;\n");
+        self.output.push_str("    arr.length = 0;\n");
+        self.output.push_str("    arr.capacity = 4;\n");
+        self.output.push_str("    arr.data = (int64_t*)malloc(arr.capacity * sizeof(int64_t));\n");
+        self.output.push_str("    return arr;\n");
+        self.output.push_str("}\n\n");
+        
+        self.output.push_str("// Crear array desde valores iniciales\n");
+        self.output.push_str("Array array_from_values(size_t count, int64_t* values) {\n");
+        self.output.push_str("    Array arr;\n");
+        self.output.push_str("    arr.length = count;\n");
+        self.output.push_str("    arr.capacity = count > 4 ? count * 2 : 4;\n");
+        self.output.push_str("    arr.data = (int64_t*)malloc(arr.capacity * sizeof(int64_t));\n");
+        self.output.push_str("    memcpy(arr.data, values, count * sizeof(int64_t));\n");
+        self.output.push_str("    return arr;\n");
+        self.output.push_str("}\n\n");
+        
+        self.output.push_str("// Agregar elemento al array\n");
+        self.output.push_str("void array_append(Array* arr, int64_t value) {\n");
+        self.output.push_str("    if (arr->length >= arr->capacity) {\n");
+        self.output.push_str("        arr->capacity *= 2;\n");
+        self.output.push_str("        arr->data = (int64_t*)realloc(arr->data, arr->capacity * sizeof(int64_t));\n");
+        self.output.push_str("    }\n");
+        self.output.push_str("    arr->data[arr->length++] = value;\n");
+        self.output.push_str("}\n\n");
+        
+        self.output.push_str("// Obtener elemento por índice\n");
+        self.output.push_str("int64_t array_get(Array* arr, size_t index) {\n");
+        self.output.push_str("    if (index >= arr->length) {\n");
+        self.output.push_str("        fprintf(stderr, \"Error: índice fuera de rango\\n\");\n");
+        self.output.push_str("        exit(1);\n");
+        self.output.push_str("    }\n");
+        self.output.push_str("    return arr->data[index];\n");
+        self.output.push_str("}\n\n");
+        
+        self.output.push_str("// Establecer elemento por índice\n");
+        self.output.push_str("void array_set(Array* arr, size_t index, int64_t value) {\n");
+        self.output.push_str("    if (index >= arr->length) {\n");
+        self.output.push_str("        fprintf(stderr, \"Error: índice fuera de rango\\n\");\n");
+        self.output.push_str("        exit(1);\n");
+        self.output.push_str("    }\n");
+        self.output.push_str("    arr->data[index] = value;\n");
+        self.output.push_str("}\n\n");
+        
+        self.output.push_str("// Obtener longitud del array\n");
+        self.output.push_str("size_t array_len(Array* arr) {\n");
+        self.output.push_str("    return arr->length;\n");
+        self.output.push_str("}\n\n");
 
         // Separar funciones y código principal
         let mut functions = Vec::new();
@@ -96,14 +159,42 @@ impl CGenerator {
             }
             Stmt::Let { name, value, .. } => {
                 self.indent();
-                let value_code = self.generate_expr(value);
                 // Determinar tipo basado en el valor
-                let type_str = match value {
-                    Expr::Float(_) => "double",
-                    Expr::Bool(_) => "bool",
-                    _ => "int64_t",
-                };
-                self.output.push_str(&format!("{} {} = {};\n", type_str, name, value_code));
+                match value {
+                    Expr::ArrayLiteral(elements) => {
+                        if elements.is_empty() {
+                            self.output.push_str(&format!("Array {} = array_new();\n", name));
+                        } else {
+                            // Generar valores
+                            let values_code: Vec<String> = elements.iter()
+                                .map(|e| self.generate_expr(e))
+                                .collect();
+                            
+                            // Crear variable temporal para los valores
+                            let temp_var = format!("_init_arr_{}", self.variable_counter);
+                            self.variable_counter += 1;
+                            
+                            // Declarar array temporal estático
+                            self.output.push_str(&format!("int64_t {}[] = {{ {} }};\n", temp_var, values_code.join(", ")));
+                            self.indent();
+                            // Inicializar Array usando la variable temporal
+                            self.output.push_str(&format!("Array {} = array_from_values({}, {});\n", 
+                                name, elements.len(), temp_var));
+                        }
+                    }
+                    Expr::Float(_) => {
+                        let value_code = self.generate_expr(value);
+                        self.output.push_str(&format!("double {} = {};\n", name, value_code));
+                    }
+                    Expr::Bool(_) => {
+                        let value_code = self.generate_expr(value);
+                        self.output.push_str(&format!("bool {} = {};\n", name, value_code));
+                    }
+                    _ => {
+                        let value_code = self.generate_expr(value);
+                        self.output.push_str(&format!("int64_t {} = {};\n", name, value_code));
+                    }
+                }
             }
             Stmt::If { condition, then_body, else_body } => {
                 self.indent();
@@ -143,6 +234,21 @@ impl CGenerator {
             }
             Stmt::Expr(Expr::Assign { name, value }) => {
                 self.indent();
+                // Verificar si es asignación a índice de array: arr[0] = value
+                // Detectamos esto cuando name == "_array_set" (marcador especial del parser)
+                if name == "_array_set" {
+                    if let Expr::BinaryOp { left, right, .. } = value.as_ref() {
+                        if let Expr::Index { array, index } = left.as_ref() {
+                            let array_code = self.generate_expr(array);
+                            let index_code = self.generate_expr(index);
+                            let value_code = self.generate_expr(right);
+                            self.output.push_str(&format!("array_set(&{}, (size_t)({}), {});\n", 
+                                array_code, index_code, value_code));
+                            return;
+                        }
+                    }
+                }
+                // Asignación normal: variable = value
                 let value_code = self.generate_expr(value);
                 self.output.push_str(&format!("{} = {};\n", name, value_code));
             }
@@ -164,9 +270,12 @@ impl CGenerator {
             }
             Stmt::Expr(expr) => {
                 self.indent();
-                let _expr_code = self.generate_expr(expr);
-                // Las expresiones puras se evalúan pero no se usan (pueden tener side effects)
-                // self.output.push_str(&format!("{};\n", expr_code));
+                let expr_code = self.generate_expr(expr);
+                // Si es MethodCall (como arr.append()), generar como statement con punto y coma
+                if matches!(expr, Expr::MethodCall { .. }) {
+                    self.output.push_str(&format!("{};\n", expr_code));
+                }
+                // Otras expresiones se evalúan pero no se usan (pueden tener side effects)
             }
             Stmt::Return(Some(expr)) => {
                 self.indent();
@@ -211,13 +320,51 @@ impl CGenerator {
                 format!("({} {} {})", left_code, op_str, right_code)
             }
             Expr::Call { name, args, .. } => {
+                // Manejar funciones especiales como len()
+                if name == "len" && args.len() == 1 {
+                    // len(arr) -> array_len(&arr)
+                    let arg_code = self.generate_expr(&args[0]);
+                    return format!("array_len(&{})", arg_code);
+                }
+                
                 let args_code = args.iter()
                     .map(|arg| self.generate_expr(arg))
                     .collect::<Vec<_>>()
                     .join(", ");
                 format!("{}({})", name, args_code)
             }
+            Expr::MethodCall { object, method, args } => {
+                // Manejar métodos como arr.append(x)
+                if method == "append" && args.len() == 1 {
+                    // arr.append(x) -> array_append(&arr, x)
+                    let arr_code = self.generate_expr(object);
+                    let val_code = self.generate_expr(&args[0]);
+                    return format!("array_append(&{}, {})", arr_code, val_code);
+                }
+                
+                // Otros métodos (futuro)
+                let obj_code = self.generate_expr(object);
+                let args_code = args.iter()
+                    .map(|arg| self.generate_expr(arg))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("{}.{}({})", obj_code, method, args_code)
+            }
+            Expr::ArrayLiteral(_) => {
+                // ArrayLiteral no debería usarse directamente en expresiones
+                // Solo se usa en Stmt::Let, que lo maneja de forma especial
+                // Si llegamos aquí, es un error, pero generamos código de respaldo
+                "array_new()".to_string()
+            }
+            Expr::Index { array, index } => {
+                let array_code = self.generate_expr(array);
+                let index_code = self.generate_expr(index);
+                // Convertir índice a size_t (cast explícito)
+                format!("array_get(&{}, (size_t)({}))", array_code, index_code)
+            }
             Expr::Assign { name, value } => {
+                // Si es asignación a índice de array: arr[0] = value
+                // Necesitamos detectar esto de manera especial
                 let value_code = self.generate_expr(value);
                 format!("{} = {}", name, value_code)
             }

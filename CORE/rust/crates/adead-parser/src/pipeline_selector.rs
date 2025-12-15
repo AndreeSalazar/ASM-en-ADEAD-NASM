@@ -184,7 +184,7 @@ pub fn generate_asm_with_pipeline(
         RecommendedPipeline::ParserManualC => {
             // ADead → Parser Manual → C → GCC/Clang → ASM (flujo principal actual)
             // Usar parser manual y generador de C
-            let program = crate::c_manual_parser::parse_program_from_text(source)
+            let program = crate::c_manual_parser::CManualParser::parse_program(source)
                 .map_err(|e| format!("Parser manual error: {:?}", e))?;
             let c_code = crate::c_generator::generate_c_code(&program);
             // Retornar código C (GCC/Clang lo compila después)

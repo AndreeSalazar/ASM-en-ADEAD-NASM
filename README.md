@@ -605,7 +605,6 @@ while suma <= limite {
 ```
 
 **Lo que falta para desarrollo real:**
-- Arrays/listas
 - Funciones
 - Strings reales (más allá de literales)
 - Módulos/imports
@@ -623,6 +622,7 @@ Ver [docs/ESTADO-ACTUAL.md](docs/ESTADO-ACTUAL.md) para detalles completos.
 - ✅ **Estructuras de control** - `while` loops y `if` statements funcionando
 - ✅ **Bloques anidados** - `if` dentro de `while` funciona correctamente
 - ✅ **Output en tiempo real** - `fflush(stdout)` para ver progreso
+- ✅ **Arrays/Listas** - `let arr = [1, 2, 3]`, acceso `arr[0]`, `arr.length`, `arr.append(x)`, asignación `arr[0] = value`
 
 #### ✅ Arquitectura Técnica Actual
 - ✅ **Parser Manual** - Regex + Recursión para while/if
@@ -635,11 +635,21 @@ Ver [docs/ESTADO-ACTUAL.md](docs/ESTADO-ACTUAL.md) para detalles completos.
   - `test_10.ad` - ✅ Funciona (while con if, muestra 5 y 10)
   - `100mil_optimizado.ad` - ✅ Funciona (loop hasta 100k)
   - `1_billon_optimizado.ad` - ✅ Funciona (loop hasta 1 billón)
+  - Arrays - ✅ Funciona (`let arr = [1, 2, 3]`, `arr[0]`, `arr.length`, `arr.append(x)`)
+
+**Ejemplo de Arrays:**
+```adead
+let arr = [1, 2, 3]
+print arr[0]        // Imprime: 1
+print arr[1]        // Imprime: 2
+print len(arr)      // Imprime: 3
+arr.append(4)       // Agrega elemento
+arr[0] = 10         // Modifica elemento
+```
 
 ### 🎯 Lo que FALTA para "Listo para Desarrollo Real"
 
 #### 🔴 Críticos (Prioridad 1)
-- [ ] **Arrays/listas básicas** - `let arr = [1, 2, 3]`, acceso `arr[0]`, `arr.length`
 - [ ] **Strings reales** - Concatenación (`str1 + str2`), `str.length`, `str.substring()`
 - [ ] **Funciones** - `fn nombre(param1, param2) { ... }`, `return valor`, llamadas de función
 - [ ] **Sistema de módulos básico** - `import "archivo.ad"` para proyectos multi-archivo
@@ -708,14 +718,14 @@ cargo build --release
 
 ## 🎯 Roadmap: Hacia "Listo para Desarrollo"
 
-**Estado Actual:** Base funcional con while/if/variables (~35% del camino)
+**Estado Actual:** Base funcional con while/if/variables/arrays (~45% del camino)
 
-**Sprint 1 (2-3 semanas):** Arrays básicos + Funciones  
+**Sprint 1 (2-3 semanas):** ✅ Arrays básicos completado + Funciones  
 **Sprint 2 (2-3 semanas):** Strings reales + Módulos básicos  
 **Sprint 3 (1-2 semanas):** For loops + break/continue + Operadores lógicos  
 **Sprint 4 (2-3 semanas):** Librería estándar mínima + Tipos explícitos  
 
-**Total estimado: 10-15 semanas para ADead "Listo para Desarrollo Real"**
+**Total estimado: 8-12 semanas restantes para ADead "Listo para Desarrollo Real"**
 
 ---
 
