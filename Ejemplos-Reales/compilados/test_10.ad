@@ -1,0 +1,18 @@
+print "Iniciando test hasta 10..."
+print "Progreso: se imprimira cada 5"
+print ""
+
+let suma = 1
+let limite = 10
+let intervalo = 5
+
+while suma <= limite {
+    if suma % intervalo == 0 {
+        print suma
+    }
+    suma = suma + 1
+}
+
+print ""
+print "Llegamos a 10!"
+

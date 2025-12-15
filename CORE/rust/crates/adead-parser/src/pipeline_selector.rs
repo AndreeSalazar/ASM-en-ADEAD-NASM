@@ -2,7 +2,7 @@
  * Pipeline Selector Inteligente
  * 
  * Este módulo identifica el tipo de código ADead y selecciona
- * el mejor pipeline (D, Tree-sitter, Zig, Rust) para procesarlo
+ * el mejor pipeline (D, Zig, Rust, C, Parser Manual) para procesarlo
  * 
  * Flujo:
  * 1. Analizar código ADead
@@ -11,11 +11,13 @@
  * 4. Generar ASM puro y limpio
  * 5. Ejecutar
  * 
+ * Arquitectura: Zig + Rust + C + Parser Manual + D Language
+ * 
  * Autor: Eddi Andreé Salazar Matos
  * Fecha: Diciembre 2025
  */
 
-use crate::{tree_sitter_parser, zig_nasm_generator};
+use crate::zig_nasm_generator;
 use std::path::Path;
 
 /// Características detectadas en el código ADead
@@ -35,16 +37,16 @@ pub struct CodeFeatures {
 /// Tipo de pipeline recomendado
 #[derive(Debug, Clone, PartialEq)]
 pub enum RecommendedPipeline {
-    /// Tree-sitter → Rust → NASM (parsing robusto para estructuras complejas)
-    TreeSitterRust,
+    /// Parser Manual → C → GCC/Clang → ASM (flujo principal actual)
+    ParserManualC,
     /// Zig → NASM directo (máxima eficiencia para casos simples)
     ZigDirect,
     /// Zig → Rust → NASM (eficiente + seguro)
     ZigRust,
     /// D → Zig → NASM (metaprogramming + eficiencia)
     DZig,
-    /// D → Tree-sitter → Rust → NASM (máxima potencia)
-    DTreeSitterRust,
+    /// D → Zig → Rust → NASM (máxima potencia: metaprogramming + eficiencia + seguridad)
+    DZigRust,
     /// Rust directo (fallback completo)
     RustDirect,
 }
@@ -118,32 +120,32 @@ pub fn select_optimal_pipeline(features: &CodeFeatures) -> RecommendedPipeline {
     }
     
     // Caso 2: Estructuras complejas anidadas (while con if) - PRIORIDAD MÁXIMA
-    // Si tiene while Y if statements (bloques anidados), usar Tree-sitter
+    // Si tiene while Y if statements (bloques anidados), usar Parser Manual + C (principal)
     if (features.has_nested_blocks && features.has_while_loops && features.has_if_statements) ||
        (features.has_while_loops && features.has_if_statements) {
-        // Para máxima robustez: D → Tree-sitter → Rust
-        // Pero si D no está disponible, usar Tree-sitter → Rust
+        // Para máxima robustez: D → Zig → Rust → NASM
+        // Pero si D no está disponible, usar Parser Manual + C (flujo principal)
         #[cfg(feature = "d-language")]
         {
-            return RecommendedPipeline::DTreeSitterRust;
+            return RecommendedPipeline::DZigRust;
         }
         #[cfg(not(feature = "d-language"))]
         {
-            return RecommendedPipeline::TreeSitterRust;
+            return RecommendedPipeline::ParserManualC;
         }
     }
     
     // Caso 3: While loops simples (sin if anidado)
     if features.has_while_loops {
-        // Si Zig está disponible, usarlo. Si no, usar Tree-sitter
+        // Usar Parser Manual + C (flujo principal) o Zig si está disponible
         #[cfg(not(feature = "no-zig"))]
         {
             return RecommendedPipeline::ZigDirect;
         }
         #[cfg(feature = "no-zig")]
         {
-            // Zig no disponible, usar Tree-sitter
-            return RecommendedPipeline::TreeSitterRust;
+            // Zig no disponible, usar Parser Manual + C
+            return RecommendedPipeline::ParserManualC;
         }
     }
     
@@ -159,11 +161,11 @@ pub fn select_optimal_pipeline(features: &CodeFeatures) -> RecommendedPipeline {
     
     // Caso 6: If statements simples
     if features.has_if_statements && !features.has_nested_blocks {
-        return RecommendedPipeline::TreeSitterRust;
+        return RecommendedPipeline::ParserManualC;
     }
     
-    // Default: Zig directo (más eficiente)
-    RecommendedPipeline::ZigDirect
+    // Default: Parser Manual + C (flujo principal)
+    RecommendedPipeline::ParserManualC
 }
 
 /// Generar código ASM usando el pipeline seleccionado
@@ -179,12 +181,14 @@ pub fn generate_asm_with_pipeline(
                 .ok_or_else(|| "Zig directo falló".to_string())
         }
         
-        RecommendedPipeline::TreeSitterRust => {
-            // ADead → Tree-sitter → Rust → NASM
-            let mut parser = tree_sitter_parser::TreeSitterParser::new()
-                .map_err(|e| format!("Tree-sitter error: {:?}", e))?;
-            parser.generate_nasm_direct(source)
-                .map_err(|e| format!("Tree-sitter codegen error: {:?}", e))
+        RecommendedPipeline::ParserManualC => {
+            // ADead → Parser Manual → C → GCC/Clang → ASM (flujo principal actual)
+            // Usar parser manual y generador de C
+            let program = crate::c_manual_parser::parse_program_from_text(source)
+                .map_err(|e| format!("Parser manual error: {:?}", e))?;
+            let c_code = crate::c_generator::generate_c_code(&program);
+            // Retornar código C (GCC/Clang lo compila después)
+            Ok(format!("// Código C generado\n{}", c_code))
         }
         
         RecommendedPipeline::ZigRust => {
@@ -209,25 +213,28 @@ pub fn generate_asm_with_pipeline(
             }
         }
         
-        RecommendedPipeline::DTreeSitterRust => {
-            // ADead → D (metaprogramming) → Tree-sitter (parse) → Rust (validación) → NASM
-            // Por ahora, usar Tree-sitter → Rust (D se agregará después)
-            let mut parser = tree_sitter_parser::TreeSitterParser::new()
-                .map_err(|e| format!("Tree-sitter error: {:?}", e))?;
-            parser.generate_nasm_direct(source)
-                .map_err(|e| format!("Tree-sitter codegen error: {:?}", e))
+        RecommendedPipeline::DZigRust => {
+            // ADead → D (metaprogramming) → Zig → Rust (validación) → NASM
+            #[cfg(feature = "d-language")]
+            {
+                crate::d_zig_asm::compile_adead_to_asm_via_zig(source)
+                    .ok_or_else(|| "D → Zig → Rust pipeline falló".to_string())
+            }
+            #[cfg(not(feature = "d-language"))]
+            {
+                // Fallback a Zig → Rust si D no está disponible
+                zig_nasm_generator::generate_nasm_direct(source)
+                    .ok_or_else(|| "D no disponible, Zig → Rust falló".to_string())
+            }
         }
         
         RecommendedPipeline::RustDirect => {
             // ADead → Rust → NASM (fallback completo)
-            // Por ahora, usar Tree-sitter como fallback
-            match crate::tree_sitter_parser::TreeSitterParser::new() {
-                Ok(mut parser) => {
-                    parser.generate_nasm_direct(source)
-                        .map_err(|e| format!("Rust directo falló: {:?}", e))
-                }
-                Err(e) => Err(format!("Rust directo falló: {:?}", e))
-            }
+            // Usar parser Rust estándar
+            crate::parse_with_dir(source, None)
+                .map_err(|e| format!("Parser error: {:?}", e))?;
+            // Generar NASM usando el generador estándar
+            Err("NASM generation not yet implemented for this pipeline".to_string())
         }
     }
 }
@@ -331,7 +338,7 @@ mod tests {
             has_comparisons: true,
         };
         let pipeline = select_optimal_pipeline(&features);
-        assert!(matches!(pipeline, RecommendedPipeline::TreeSitterRust | RecommendedPipeline::DTreeSitterRust));
+        assert!(matches!(pipeline, RecommendedPipeline::ParserManualC | RecommendedPipeline::DZigRust));
     }
 }
 

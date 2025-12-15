@@ -1,8 +1,11 @@
-# 🔄 Flujo Completo de Compilación ADead
+# 🔄 Flujo Completo de Compilación ADead - OBSOLETO
 
-## 📋 Resumen Ejecutivo
+⚠️ **NOTA:** Este documento describe el flujo anterior con Zig/Tree-sitter.  
+✅ **Flujo Actual:** Ver [docs/FLUJO-ACTUAL.md](FLUJO-ACTUAL.md)
 
-**Flujo Establecido:**
+## 📋 Flujo Anterior (Histórico)
+
+**Flujo Anterior (Ya no usado):**
 ```
 ADead → Zig (parsea expresiones) → Rust (seguridad) → NASM → .exe
 ```

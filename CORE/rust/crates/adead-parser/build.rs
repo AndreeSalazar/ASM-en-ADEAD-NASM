@@ -1,7 +1,6 @@
 /**
  * Build script para adead-parser
- * Enlaza con el módulo D Language si está disponible
- * Compila Tree-sitter parser.c
+ * Enlaza con módulo D Language y biblioteca Zig si están disponibles
  */
 
 use std::env;
@@ -73,18 +72,8 @@ fn main() {
         println!("cargo:rustc-cfg=feature=\"no-zig\"");
     }
     
-    // Compilar Tree-sitter parser.c (nueva estructura: CORE/tree-sitter/)
-    let parser_c = workspace_root.join("CORE").join("tree-sitter").join("src").join("parser.c");
-    if parser_c.exists() {
-        cc::Build::new()
-            .file(&parser_c)
-            .include(workspace_root.join("CORE").join("tree-sitter").join("src"))
-            .compile("tree_sitter_adead");
-        println!("cargo:warning=Tree-sitter parser compilado correctamente");
-    } else {
-        println!("cargo:warning=Tree-sitter parser.c no encontrado en: {}", parser_c.display());
-        println!("cargo:warning=Genera el parser primero: cd CORE/tree-sitter && tree-sitter generate");
-    }
+    // Tree-sitter eliminado - ahora usamos Parser Manual Especializado
+    // No se compila parser.c de Tree-sitter
     
     // Compilar stub para ___chkstk_ms (necesario cuando se linkea código Zig)
     let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());

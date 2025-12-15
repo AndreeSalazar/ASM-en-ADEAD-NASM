@@ -1,138 +1,91 @@
 # 📚 Documentación de ADead
 
-Documentación organizada por categorías para facilitar la navegación.
+## 📋 Índice de Documentación
 
-## 📁 Estructura
+### ✅ Documentación Actualizada (Diciembre 2025)
 
-```
-docs/
-├── roadmap/          # Roadmap y progreso del proyecto
-├── testing/          # Documentación de testing
-├── windows/           # Documentación específica de Windows
-├── casos-de-uso/     # Casos de uso por dominio
-├── avances/          # Capacidades y avances técnicos
-├── aplicaciones/     # Aplicaciones posibles
-└── README.md         # Este archivo
-```
+1. **[FLUJO-ACTUAL.md](FLUJO-ACTUAL.md)** ⭐ **ACTUAL**
+   - Flujo completo actual: ADead → Parser Manual → C → GCC/Clang → ASM → EXE
+   - Documentación detallada del flujo funcional
 
----
+2. **[ESTADO-ACTUAL.md](ESTADO-ACTUAL.md)** ⭐ **ACTUAL**
+   - Estado completo del proyecto
+   - Qué funciona y qué no funciona
+   - Roadmap de lo que falta
 
-## 📖 Categorías
+3. **[CARACTERISTICAS-FUNCIONALES.md](CARACTERISTICAS-FUNCIONALES.md)** ⭐ **ACTUAL**
+   - Lista completa de características implementadas
+   - Ejemplos verificados
+   - Comparativa funcional vs necesario
 
-### 🗺️ Roadmap (`roadmap/`)
+### 📁 Carpetas de Documentación
 
-Planificación y seguimiento del proyecto:
+#### `/avances/` - Histórico de Avances
+Documentos históricos sobre implementaciones anteriores:
+- **ZIG-*.md** - Documentación sobre integración con Zig (obsoleto)
+- **FLOAT-*.md** - Planes de implementación de floats (pendiente)
+- **CAPACIDADES-ACTUALES.md** - Estado anterior (verificar si actual)
 
-- **`ROADMAP-PROFESIONAL.md`** - Roadmap completo de 6 meses
-- **`PROGRESO-SPRINT1.md`** - Progreso detallado del Sprint 1
+#### `/roadmap/` - Planificación
+- **ROADMAP-PROFESIONAL.md** - Plan de desarrollo profesional
+- **PROGRESO-SPRINT*.md** - Progreso de sprints anteriores
 
-**Contenido:**
-- Plan de desarrollo a 6 meses
-- Priorización de features
-- Métricas de progreso
-- Guías de implementación paso a paso
+#### `/testing/` - Testing
+- **ESTADO-TESTING.md** - Estado del sistema de testing
+- **TESTING-*.md** - Documentación de testing específico
 
----
+#### `/casos-de-uso/` - Casos de Uso
+Documentación sobre posibles aplicaciones de ADead:
+- Ciencias de datos
+- Sistemas embedded
+- Videojuegos
+- Comunicaciones/redes
+- Seguridad/criptografía
+- Educación
+- Herramientas/utilidades
 
-### 🧪 Testing (`testing/`)
+#### `/aplicaciones/` - Aplicaciones Posibles
+Ideas y planes para aplicaciones reales con ADead
 
-Documentación sobre testing y verificación:
+#### `/windows/` - Windows Específico
+Documentación sobre compatibilidad y problemas específicos de Windows
 
-- **`TESTING-ERROR-HANDLING.md`** - Testing de manejo de errores
-- **`ESTADO-TESTING.md`** - Estado actual de los tests
+### ⚠️ Documentación Obsoleta
 
-**Contenido:**
-- Estrategias de testing
-- Checklist de tests
-- Estado de implementación
-- Guías para agregar nuevos tests
+Los siguientes documentos pueden contener información obsoleta sobre Tree-sitter, Zig o arquitecturas anteriores:
 
----
+- `FLUJO-COMPLETO.md` - Actualizado para indicar que es histórico
+- `/avances/ZIG-*.md` - Documentación sobre Zig (no usado actualmente)
+- `/avances/INTEGRACION-ZIG-*.md` - Integración con Zig (obsoleto)
 
-### 🪟 Windows (`windows/`)
+**Nota:** La arquitectura actual usa **Parser Manual + Backend C**, no Tree-sitter/Zig/D.
 
-Documentación específica para Windows:
+### 🔍 Cómo Saber si un Documento Está Actualizado
 
-- **`WINDOWS-LINKER-FIX.md`** - Solución al error LNK1318
-- **`ANALISIS-WINDOWS-COMPLETO.md`** - Análisis completo del sistema Windows
+**Documentos actuales:**
+- ✅ Mencionan "Parser Manual" o "Backend C"
+- ✅ Mencionan "GCC/Clang"
+- ✅ Fecha: Diciembre 2025
+- ✅ Describen flujo: ADead → C → ASM → EXE
 
-**Contenido:**
-- Problemas conocidos y soluciones
-- Configuración de build system
-- Troubleshooting
-- Compatibilidad Windows x64
-
----
-
-### 🎯 Casos de Uso (`casos-de-uso/`)
-
-Documentación completa de casos de uso organizados por dominio:
-
-- **`01-CIENCIAS-DATOS.md`** - Análisis de datos, estadísticas, ML
-- **`02-SISTEMAS-EMBEDDED.md`** - Sistemas embebidos, drivers, IoT
-- **`03-VIDEOJUEGOS-GRAFICOS.md`** - Game engines, renderizado, gráficos
-- **`04-COMUNICACIONES-REDES.md`** - Protocolos, servidores, networking
-- **`05-SEGURIDAD-CRIPTOGRAFIA.md`** - Encriptación, hashing, seguridad
-- **`06-CIENCIA-INVESTIGACION.md`** - Simulaciones, física, matemáticas
-- **`07-EDUCACION-APRENDIZAJE.md`** - Enseñanza, compiladores educativos
-- **`08-HERRAMIENTAS-UTILIDADES.md`** - CLI tools, procesadores, parsers
-
-**Contenido:**
-- Casos de uso específicos por dominio
-- Ejemplos de código
-- Requisitos de features
-- Estado de viabilidad
+**Documentos obsoletos:**
+- ⚠️ Mencionan "Tree-sitter" como componente activo
+- ⚠️ Mencionan "Zig" como parte del flujo principal
+- ⚠️ Describen flujos complejos con múltiples lenguajes
+- ⚠️ Fecha anterior a Diciembre 2025
 
 ---
 
-### 🚀 Avances (`avances/`)
+## 📝 Convenciones de Documentación
 
-Documentación de capacidades técnicas y avances:
+### Estado de Características
+- ✅ **Funcional** - Implementado, probado y funcionando
+- 🔄 **En desarrollo** - Parcialmente implementado
+- ❌ **No implementado** - Falta por implementar
+- ⏳ **Pendiente** - Planificado pero no empezado
 
-- **`CAPACIDADES-ACTUALES.md`** - Features implementadas y funcionales
-- **`ARQUITECTURA-HIBRIDA.md`** - Arquitectura Zig + Rust
-
-**Contenido:**
-- Features disponibles actualmente
-- Estado de implementación
-- Arquitectura técnica
-- Métricas de progreso
-
----
-
-### 🌟 Aplicaciones (`aplicaciones/`)
-
-Lista exhaustiva de aplicaciones posibles:
-
-- **`APLICACIONES-POSIBLES.md`** - Catálogo completo de aplicaciones
-
-**Contenido:**
-- Aplicaciones por categoría
-- Aplicaciones por complejidad
-- Priorización
-- Casos de uso específicos
-
----
-
-## 🔍 Búsqueda Rápida
-
-### Por tema:
-
-- **Roadmap y planificación:** `roadmap/`
-- **Testing y verificación:** `testing/`
-- **Problemas de Windows:** `windows/`
-- **Progreso del Sprint 1:** `roadmap/PROGRESO-SPRINT1.md`
-- **Error LNK1318:** `windows/WINDOWS-LINKER-FIX.md`
-
----
-
-## 📝 Notas
-
-- La documentación se actualiza regularmente según el progreso del proyecto
-- Cada categoría tiene su propio README con más detalles
-- Para contribuir, ver `CONTRIBUTING.md` en la raíz del proyecto
-
----
-
-**Última actualización:** Diciembre 2025
-
+### Prioridades
+- 🔴 **Crítico** - Necesario para desarrollo básico
+- 🟠 **Esencial** - Necesario para desarrollo real
+- 🟡 **Importante** - Mejora significativa
+- 🔵 **Futuro** - Nice to have

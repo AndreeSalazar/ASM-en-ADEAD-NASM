@@ -1,0 +1,10 @@
+C:\Users\andre\OneDrive\Documentos\ASM en ADEAD\CORE\rust\target\debug\deps\ar_archive_writer-c6a0564850e5ecc0.d: C:\Users\andre\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\ar_archive_writer-0.2.0\src\lib.rs C:\Users\andre\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\ar_archive_writer-0.2.0\src\alignment.rs C:\Users\andre\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\ar_archive_writer-0.2.0\src\archive.rs C:\Users\andre\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\ar_archive_writer-0.2.0\src\archive_writer.rs
+
+C:\Users\andre\OneDrive\Documentos\ASM en ADEAD\CORE\rust\target\debug\deps\libar_archive_writer-c6a0564850e5ecc0.rlib: C:\Users\andre\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\ar_archive_writer-0.2.0\src\lib.rs C:\Users\andre\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\ar_archive_writer-0.2.0\src\alignment.rs C:\Users\andre\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\ar_archive_writer-0.2.0\src\archive.rs C:\Users\andre\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\ar_archive_writer-0.2.0\src\archive_writer.rs
+
+C:\Users\andre\OneDrive\Documentos\ASM en ADEAD\CORE\rust\target\debug\deps\libar_archive_writer-c6a0564850e5ecc0.rmeta: C:\Users\andre\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\ar_archive_writer-0.2.0\src\lib.rs C:\Users\andre\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\ar_archive_writer-0.2.0\src\alignment.rs C:\Users\andre\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\ar_archive_writer-0.2.0\src\archive.rs C:\Users\andre\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\ar_archive_writer-0.2.0\src\archive_writer.rs
+
+C:\Users\andre\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\ar_archive_writer-0.2.0\src\lib.rs:
+C:\Users\andre\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\ar_archive_writer-0.2.0\src\alignment.rs:
+C:\Users\andre\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\ar_archive_writer-0.2.0\src\archive.rs:
+C:\Users\andre\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\ar_archive_writer-0.2.0\src\archive_writer.rs:

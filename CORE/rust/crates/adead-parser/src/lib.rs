@@ -15,10 +15,9 @@ mod zig_struct_parser;
 mod zig_expr_parser;
 // Generador NASM directo desde Zig (flujo: ADead → Zig → NASM)
 pub mod zig_nasm_generator;
-// Parser robusto usando Tree-sitter (para estructuras complejas)
-// Soporta Tree-sitter → NASM directo (sin Rust AST)
-pub mod tree_sitter_parser;
-pub mod tree_sitter_nasm;
+// Parser manual especializado para C → Rust → ASM (reemplaza Tree-sitter)
+pub mod c_manual_parser;
+pub mod c_while_if_parser;
 
 // Resolución de módulos (Sprint 1.3 - Import básico)
 pub mod module_resolver;
@@ -33,6 +32,10 @@ pub mod d_zig_asm;
 
 // Selector inteligente de pipeline
 pub mod pipeline_selector;
+
+// Generador de código C (backend opcional)
+pub mod c_generator;
+pub mod c_to_nasm;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Expr {

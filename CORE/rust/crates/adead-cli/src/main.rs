@@ -5,6 +5,8 @@ use std::process::Command;
 use std::path::{Path, PathBuf};
 use std::env;
 
+mod c_compiler;
+
 #[derive(Parser)]
 #[command(name = "adeadc")]
 #[command(about = "ADead compiler: Python-like syntax to NASM", long_about = None)]
@@ -24,6 +26,10 @@ enum Commands {
         /// Archivo de salida (.asm) [opcional: se infiere del nombre]
         #[arg(short, long, value_name = "OUTPUT")]
         output: Option<String>,
+
+        /// Backend a usar: nasm (default), c (genera C y compila con GCC/Clang)
+        #[arg(long, default_value = "nasm")]
+        backend: String,
     },
     /// Paso 2: Ensamblar .asm -> .obj (NASM genera objeto)
     Assemble {
@@ -57,13 +63,212 @@ enum Commands {
     },
 }
 
+/// Compilar usando backend C: ADead → C → GCC/Clang → ASM
+/// Buscar compilador C (GCC o Clang) en el sistema
+fn find_c_compiler() -> Option<String> {
+    use std::process::Command;
+    use std::path::Path;
+    
+    // 1. Verificar variables de entorno personalizadas
+    if let Ok(gcc_path) = std::env::var("ADEAD_GCC_PATH") {
+        if Path::new(&gcc_path).exists() && Command::new(&gcc_path).arg("--version").output().is_ok() {
+            return Some(gcc_path);
+        }
+    }
+    if let Ok(clang_path) = std::env::var("ADEAD_CLANG_PATH") {
+        if Path::new(&clang_path).exists() && Command::new(&clang_path).arg("--version").output().is_ok() {
+            return Some(clang_path);
+        }
+    }
+    
+    // 2. Buscar en PATH
+    if Command::new("gcc").arg("--version").output().is_ok() {
+        return Some("gcc".to_string());
+    }
+    if Command::new("clang").arg("--version").output().is_ok() {
+        return Some("clang".to_string());
+    }
+    
+    // 3. Buscar en ubicaciones comunes de MSYS2/MinGW
+    let common_paths = vec![
+        // MSYS2 MINGW64
+        "C:\\msys64\\mingw64\\bin\\gcc.exe",
+        "C:\\msys32\\mingw64\\bin\\gcc.exe",
+        // MSYS2 UCRT64
+        "C:\\msys64\\ucrt64\\bin\\gcc.exe",
+        "C:\\msys32\\ucrt64\\bin\\gcc.exe",
+        // MSYS2 CLANG64
+        "C:\\msys64\\clang64\\bin\\gcc.exe",
+        // MSYS2 base
+        "C:\\msys64\\usr\\bin\\gcc.exe",
+        "C:\\msys32\\usr\\bin\\gcc.exe",
+        // MinGW-w64
+        "C:\\mingw64\\bin\\gcc.exe",
+        "C:\\mingw32\\bin\\gcc.exe",
+        // Clang
+        "C:\\Program Files\\LLVM\\bin\\clang.exe",
+        "C:\\Program Files (x86)\\LLVM\\bin\\clang.exe",
+    ];
+    
+    for path in common_paths {
+        if Path::new(path).exists() {
+            if Command::new(path).arg("--version").output().is_ok() {
+                return Some(path.to_string());
+            }
+        }
+    }
+    
+    // 4. Buscar en unidades del sistema (C:, D:, E:, etc.)
+    for drive_letter in b'A'..=b'Z' {
+        let drive = (drive_letter as char).to_string();
+        let test_paths = vec![
+            format!("{}\\msys64\\mingw64\\bin\\gcc.exe", drive),
+            format!("{}\\msys64\\ucrt64\\bin\\gcc.exe", drive),
+            format!("{}\\msys64\\clang64\\bin\\gcc.exe", drive),
+            format!("{}\\msys32\\mingw64\\bin\\gcc.exe", drive),
+        ];
+        
+        for test_path in test_paths {
+            if Path::new(&test_path).exists() {
+                if Command::new(&test_path).arg("--version").output().is_ok() {
+                    return Some(test_path);
+                }
+            }
+        }
+    }
+    
+    None
+}
+
+fn compile_with_c_backend(source: &str, input_path: &str, output_path: &str) -> Result<()> {
+    use adead_parser::{parse_with_dir, c_generator};
+    use std::path::Path;
+    
+    println!("   📝 Parseando código ADead...");
+    let input_path_obj = Path::new(input_path);
+    let current_dir = input_path_obj.parent();
+    
+    // PARA BACKEND C: Usar Parser Manual Especializado (parsea todo el código)
+    println!("   🔧 Usando Parser Manual Especializado para parsear código completo...");
+    
+    use adead_parser::c_manual_parser::CManualParser;
+    
+    // Parsear TODO el código con el parser manual
+    let program = match CManualParser::parse_program(source) {
+        Ok(prog) => {
+            println!("   ✅ Programa parseado correctamente con parser manual");
+            println!("   📊 Tiene {} statements", prog.statements.len());
+            prog
+        }
+        Err(e) => {
+            eprintln!("   ⚠️  Parser manual falló: {}, usando parser Rust como fallback", e);
+            // Fallback a parser Rust si el manual falla
+            parse_with_dir(source, current_dir)
+                .map_err(|e| anyhow::anyhow!("Parse error: {}", e))?
+        }
+    };
+    
+    println!("   🔧 Generando código C (intermedio)...");
+    let c_code = c_generator::generate_c_code(&program);
+    
+    // Guardar código C temporal (opcional, para debugging)
+    let c_file = output_path.replace(".asm", ".c");
+    fs::write(&c_file, &c_code)
+        .with_context(|| format!("Failed to write C file: {}", c_file))?;
+    println!("   ✅ Código C generado: {}", c_file);
+    
+    // FLUJO DIRECTO: C → GCC/Clang → ASM (sin Rust)
+    println!("   ⚡ Compilando C a ASM con GCC/Clang (directo)...");
+    
+    // Buscar compilador C
+    let compiler = find_c_compiler()
+        .ok_or_else(|| anyhow::anyhow!("No se encontró GCC ni Clang. Instala uno de ellos para usar el backend C."))?;
+    
+    println!("   🔍 Usando compilador: {}", compiler);
+    
+    // Compilar C directamente a EXE (más simple y directo)
+    // También generar ASM para inspección
+    let asm_file = output_path.to_string();
+    let exe_file = output_path.replace(".asm", ".exe");
+    
+    let c_file_path = PathBuf::from(&c_file);
+    let output_path_buf = PathBuf::from(output_path);
+    let output_dir = output_path_buf.parent()
+        .ok_or_else(|| anyhow::anyhow!("Invalid output path"))?;
+    
+    // Crear directorio de salida si no existe
+    if !output_dir.exists() {
+        fs::create_dir_all(output_dir)
+            .with_context(|| format!("Failed to create output directory: {:?}", output_dir))?;
+    }
+    
+    let working_dir = c_file_path.parent().unwrap_or(Path::new("."));
+    let c_file_name = c_file_path.file_name().unwrap_or_default();
+    
+    // Paso 1: Generar ASM para inspección
+    println!("   ⚡ Paso 1: Generando ASM (para inspección)...");
+    let mut cmd_asm = std::process::Command::new(&compiler);
+    cmd_asm.current_dir(working_dir)
+            .arg("-S")                    // Generar ASM
+            .arg("-masm=intel")           // Sintaxis Intel
+            .arg("-O2")                   // Optimización
+            .arg("-o")
+            .arg(&asm_file)
+            .arg(c_file_name);
+    
+    let output_asm = cmd_asm.output()
+        .with_context(|| format!("Failed to execute {} for ASM", compiler))?;
+    
+    if output_asm.status.success() {
+        println!("   ✅ ASM generado: {}", asm_file);
+    } else {
+        eprintln!("   ⚠️  Advertencia: No se pudo generar ASM, pero continuando...");
+    }
+    
+    // Paso 2: Compilar directamente a EXE usando rutas absolutas
+    println!("   ⚡ Paso 2: Compilando C → EXE...");
+    let exe_file_abs = fs::canonicalize(output_dir)
+        .unwrap_or_else(|_| output_dir.to_path_buf())
+        .join(PathBuf::from(&exe_file).file_name().unwrap_or_default());
+    
+    let mut cmd_exe = std::process::Command::new(&compiler);
+    cmd_exe.current_dir(working_dir)
+            .arg("-O2")                   // Optimización
+            .arg("-o")
+            .arg(&exe_file_abs)
+            .arg(c_file_name);
+    
+    let output_exe = cmd_exe.output()
+        .with_context(|| format!("Failed to execute {} for EXE", compiler))?;
+    
+    if !output_exe.status.success() {
+        let stderr = String::from_utf8_lossy(&output_exe.stderr);
+        let stdout = String::from_utf8_lossy(&output_exe.stdout);
+        eprintln!("   ❌ Error compilando C a EXE:");
+        if !stderr.is_empty() {
+            eprintln!("STDERR:\n{}", stderr);
+        }
+        if !stdout.is_empty() {
+            eprintln!("STDOUT:\n{}", stdout);
+        }
+        
+        return Err(anyhow::anyhow!("Compilación C → EXE falló."));
+    }
+    
+    println!("   ✅ EXE generado: {}", exe_file);
+    println!("   🎉 ADead → C → GCC/Clang → EXE (listo para ejecutar)");
+    
+    Ok(())
+}
+
 fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::Compile { input, output } => {
+        Commands::Compile { input, output, backend } => {
             println!("🔨 Paso 1: Compilando .ad -> .asm");
             println!("   Entrada: {}", input);
+            println!("   Backend: {}", backend);
             
             let mut source = fs::read_to_string(&input)
                 .with_context(|| format!("Failed to read input file: {}", input))?;
@@ -79,6 +284,12 @@ fn main() -> Result<()> {
                     .replace(".adead", ".asm")
                     .to_string()
             });
+
+            // BACKEND C: Generar C y compilar con GCC/Clang
+            if backend == "c" {
+                println!("   🔧 Usando backend C: ADead → C → GCC/Clang → ASM");
+                return compile_with_c_backend(&source, &input, &output_path);
+            }
 
             // FLUJO DIRECTO: ADead → Zig → NASM (para floats simples)
             // Detectar si es un programa simple con float: "print 3.14"
@@ -117,11 +328,11 @@ fn main() -> Result<()> {
             match adead_parser::pipeline_selector::process_adead_intelligent(&source) {
                 Ok((pipeline, nasm_code)) => {
                     let pipeline_name = match pipeline {
+                        adead_parser::pipeline_selector::RecommendedPipeline::ParserManualC => "Parser Manual → C → GCC/Clang → ASM",
                         adead_parser::pipeline_selector::RecommendedPipeline::ZigDirect => "Zig → NASM",
-                        adead_parser::pipeline_selector::RecommendedPipeline::TreeSitterRust => "Tree-sitter → Rust → NASM",
                         adead_parser::pipeline_selector::RecommendedPipeline::ZigRust => "Zig → Rust → NASM",
                         adead_parser::pipeline_selector::RecommendedPipeline::DZig => "D → Zig → NASM",
-                        adead_parser::pipeline_selector::RecommendedPipeline::DTreeSitterRust => "D → Tree-sitter → Rust → NASM",
+                        adead_parser::pipeline_selector::RecommendedPipeline::DZigRust => "D → Zig → Rust → NASM",
                         adead_parser::pipeline_selector::RecommendedPipeline::RustDirect => "Rust → NASM",
                     };
                     
@@ -158,24 +369,8 @@ fn main() -> Result<()> {
                     }
                 }
                 
-                // PRIORIDAD 2: Tree-sitter → NASM directo (fallback)
-                println!("   🌳 Fallback: Intentando Tree-sitter → NASM...");
-                match adead_parser::tree_sitter_parser::TreeSitterParser::new() {
-                    Ok(mut ts_parser) => {
-                        match ts_parser.generate_nasm_direct(&source) {
-                            Ok(nasm_code) => {
-                                if nasm_code.contains("loop") || nasm_code.contains("jmp") || nasm_code.len() > 500 {
-                                    fs::write(&output_path, nasm_code)
-                                        .with_context(|| format!("Failed to write output file: {}", output_path))?;
-                                    println!("✅ Compilado (Tree-sitter → NASM): {} -> {}", input, output_path);
-                                    return Ok(());
-                                }
-                            }
-                            Err(_) => {}
-                        }
-                    }
-                    Err(_) => {}
-                }
+                // PRIORIDAD 2: Parser Manual Especializado (fallback para estructuras complejas)
+                // Ya manejado por el parser Rust estándar + mejoras manuales si es necesario
             }
             
             // PRIORIDAD 2: Intentar Rust (con validación completa)
