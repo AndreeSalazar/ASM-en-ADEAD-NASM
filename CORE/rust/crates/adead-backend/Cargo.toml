@@ -1,0 +1,11 @@
+[package]
+name = "adead-backend"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+adead-parser = { path = "../adead-parser" }
+adead-common = { path = "../adead-common" }
+anyhow = { workspace = true }
+

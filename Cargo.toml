@@ -1,13 +1,13 @@
 [workspace]
-# ⚠️ NOTA: El código Rust está ahora en rust/crates/
+# ⚠️ NOTA: El código Rust está ahora en CORE/rust/crates/
 # Este archivo se mantiene en la raíz para compatibilidad
-# El workspace real está en rust/Cargo.toml
+# El workspace real está en CORE/rust/Cargo.toml
 members = [
-    "rust/crates/adead-cli",
-    "rust/crates/adead-common",
-    "rust/crates/adead-parser",
-    "rust/crates/adead-backend",
-    "rust/crates/adead-borrow",
+    "CORE/rust/crates/adead-cli",
+    "CORE/rust/crates/adead-common",
+    "CORE/rust/crates/adead-parser",
+    "CORE/rust/crates/adead-backend",
+    "CORE/rust/crates/adead-borrow",
 ]
 resolver = "2"
 

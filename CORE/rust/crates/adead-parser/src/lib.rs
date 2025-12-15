@@ -1,0 +1,1838 @@
+﻿use adead_common::{ADeadError, Result};
+use chumsky::prelude::*;
+
+// ═══════════════════════════════════════════════════════════════════════════
+// FLUJO ESTABLECIDO: ADead → Zig (parsea) → Rust (seguridad) → NASM → .exe
+// ═══════════════════════════════════════════════════════════════════════════
+// ZIG ES EL PARSER PRINCIPAL - Rust solo hace seguridad y codegen
+// Módulo FFI para parser Zig (PRINCIPAL)
+mod zig_ffi_parser;
+
+// Parser Rust solo como último recurso si Zig falla
+mod zig_struct_parser;
+
+// Parser de expresiones aritméticas usando Zig
+mod zig_expr_parser;
+// Generador NASM directo desde Zig (flujo: ADead → Zig → NASM)
+pub mod zig_nasm_generator;
+// Parser robusto usando Tree-sitter (para estructuras complejas)
+// Soporta Tree-sitter → NASM directo (sin Rust AST)
+pub mod tree_sitter_parser;
+pub mod tree_sitter_nasm;
+
+// Resolución de módulos (Sprint 1.3 - Import básico)
+pub mod module_resolver;
+
+// FFI para integración con D Language (metaprogramming avanzado)
+#[cfg(feature = "d-language")]
+pub mod d_ffi;
+
+// Pipeline D → Zig → ASM Directo
+#[cfg(feature = "d-language")]
+pub mod d_zig_asm;
+
+// Selector inteligente de pipeline
+pub mod pipeline_selector;
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum Expr {
+    Number(i64),
+    Float(f64),  // Literal flotante: 3.14, 2.5e10, etc.
+    Bool(bool),  // Literal booleano: true, false
+    String(String),
+    Ident(String),
+    BinaryOp {
+        op: BinOp,
+        left: Box<Expr>,
+        right: Box<Expr>,
+    },
+    Assign {
+        name: String,
+        value: Box<Expr>,
+    },
+    Call {
+        module: Option<String>,  // None = función local, Some("math") = math.factorial (Sprint 1.3)
+        name: String,
+        args: Vec<Expr>,
+    },
+    // Ownership y Borrowing (O0.2)
+    Borrow {
+        expr: Box<Expr>,
+        mutable: bool,  // false = &T, true = &mut T
+    },
+    Deref(Box<Expr>),  // *expr para dereferenciar
+    
+    // Option y Result Types (O0.4)
+    Some(Box<Expr>),           // Some(value)
+    None,                      // None (para Option)
+    Ok(Box<Expr>),             // Ok(value)
+    Err(Box<Expr>),            // Err(error)
+    Match {                     // match expr { pattern => body, ... }
+        expr: Box<Expr>,
+        arms: Vec<MatchArm>,
+    },
+    PropagateError(Box<Expr>), // expr? - Propaga error automáticamente
+    // Structs/Clases (Fase 1.2 - O1)
+    StructLiteral {             // StructName { field1: value1, field2: value2 }
+        name: String,
+        fields: Vec<(String, Expr)>,  // (field_name, value)
+    },
+    FieldAccess {               // expr.field_name
+        object: Box<Expr>,
+        field: String,
+    },
+    MethodCall {                // expr.method_name(args)
+        object: Box<Expr>,
+        method: String,
+        args: Vec<Expr>,
+    },
+    // Arrays (Sprint 1.2)
+    ArrayLiteral(Vec<Expr>),    // [1, 2, 3]
+    Index {                     // arr[0]
+        array: Box<Expr>,
+        index: Box<Expr>,
+    },
+}
+
+/// Par├ímetro de funci├│n con informaci├│n de borrowing
+#[derive(Debug, Clone, PartialEq)]
+pub struct FnParam {
+    pub name: String,
+    pub borrow_type: BorrowType,  // Tipo de borrowing del par├ímetro
+}
+
+/// Tipo de borrowing para par├ímetros de funci├│n
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum BorrowType {
+    Owned,      // Valor owned (por defecto)
+    Borrowed,   // &T - referencia inmutable
+    MutBorrowed, // &mut T - referencia mutable
+}
+
+/// Patr├│n para match expressions (O0.4)
+#[derive(Debug, Clone, PartialEq)]
+pub enum Pattern {
+    Some,       // Some(_)
+    None,       // None
+    Ok,         // Ok(_)
+    Err,        // Err(_)
+    Ident(String), // Variable binding: x
+    LiteralNumber(i64), // 42
+    LiteralString(String), // "hello"
+    Wildcard,   // _ (catch-all)
+}
+
+/// Brazo de match expression (O0.4)
+#[derive(Debug, Clone, PartialEq)]
+pub struct MatchArm {
+    pub pattern: Pattern,
+    pub body: Box<Expr>,
+}
+
+/// Nivel de visibilidad (O5 - Encapsulaci├│n)
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Visibility {
+    Private,  // Privado (por defecto) - solo visible en el m├│dulo actual
+    Public,   // P├║blico - visible desde cualquier lugar
+}
+
+impl Default for Visibility {
+    fn default() -> Self {
+        Visibility::Private  // Privado por defecto (m├ís seguro)
+    }
+}
+
+/// Campo de struct (Fase 1.2 - O3, O5 - Encapsulaci├│n)
+#[derive(Debug, Clone, PartialEq)]
+pub struct StructField {
+    pub visibility: Visibility,  // O5 - Visibilidad del campo
+    pub mutable: bool,  // true = mut field, false = inmutable (por defecto)
+    pub name: String,
+    pub ty: Option<String>,  // Tipo opcional (None = inferido)
+}
+
+/// M├®todo de struct (O2 - Constructores y Destructores, O5 - Encapsulaci├│n)
+#[derive(Debug, Clone, PartialEq)]
+pub struct StructMethod {
+    pub visibility: Visibility,  // O5 - Visibilidad del m├®todo
+    pub params: Vec<FnParam>,  // Par├ímetros del m├®todo
+    pub body: Vec<Stmt>,        // Cuerpo del m├®todo
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum BinOp {
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Mod,  // Módulo: a % b
+    Eq,
+    Ne,
+    Lt,
+    Le,
+    Gt,
+    Ge,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum Stmt {
+    Print(Expr),
+    Let {
+        mutable: bool,  // true = let mut, false = let (inmutable)
+        name: String,
+        value: Expr,
+    },
+    If {
+        condition: Expr,
+        then_body: Vec<Stmt>,
+        else_body: Option<Vec<Stmt>>,
+    },
+    While {
+        condition: Expr,
+        body: Vec<Stmt>,
+    },
+    Fn {
+        visibility: Visibility,  // Sprint 1.3 - Import básico: pub fn o fn (privada)
+        name: String,
+        params: Vec<FnParam>,  // Cambiado para soportar borrowing
+        body: Vec<Stmt>,
+    },
+    // Structs/Clases (Fase 1.2 - O1, O2 - RAII)
+    Struct {
+        name: String,
+        fields: Vec<StructField>,
+        init: Option<StructMethod>,      // Constructor (O2)
+        destroy: Option<StructMethod>,    // Destructor (O2.1 - Drop Trait)
+    },
+    Expr(Expr),
+    Return(Option<Expr>),
+    // Import básico (Sprint 1.3)
+    Import(String),  // import nombre_modulo
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Program {
+    pub statements: Vec<Stmt>,
+}
+
+pub fn parse(source: &str) -> Result<Program> {
+    parse_with_dir(source, None)
+}
+
+/// Parsear con directorio base para resolución de imports
+pub fn parse_with_dir(source: &str, current_dir: Option<&std::path::Path>) -> Result<Program> {
+    // PRE-PROCESADOR: Extraer structs del input antes del parsing principal
+    // Esto evita problemas con take_until que no funciona correctamente dentro del parser
+    
+    let (preprocessed_source, extracted_structs) = preprocess_extract_structs(source)?;
+    
+    let parser = program_parser();
+    match parser.parse(preprocessed_source.as_str()) {
+        Ok(mut program) => {
+            // Insertar los structs extraídos al inicio del programa
+            for stmt in extracted_structs {
+                program.statements.insert(0, stmt);
+            }
+            
+            // POST-PROCESADOR: Resolver imports (Sprint 1.3)
+            resolve_imports(&mut program, current_dir)?;
+            
+            Ok(program)
+        }
+        Err(errs) => {
+            let first = errs.first().unwrap();
+            // chumsky 0.9 uses usize for spans, approximate line/col
+            let (line, col) = (1, 1); // Simplified for MVP
+            Err(ADeadError::ParseError {
+                line,
+                col,
+                message: format!("{}", first),
+            })
+        }
+    }
+}
+
+/// Resolver imports en un programa parseado (Sprint 1.3)
+/// 
+/// Procesa todos los `Stmt::Import` y:
+/// 1. Resuelve la ruta del módulo
+/// 2. Parsea el módulo
+/// 3. Filtra solo funciones públicas
+/// 4. Combina statements en el programa principal
+fn resolve_imports(program: &mut Program, current_dir: Option<&std::path::Path>) -> Result<()> {
+    use std::collections::{HashSet, HashMap};
+    
+    // Extraer imports y parsear módulos
+    let mut imports_to_resolve = Vec::new();
+    let mut new_statements = Vec::new();
+    let mut module_functions: HashMap<String, Vec<String>> = HashMap::new(); // Para detectar colisiones
+    
+    for stmt in &program.statements {
+        if let Stmt::Import(module_name) = stmt {
+            imports_to_resolve.push(module_name.clone());
+        }
+    }
+    
+    // Resolver cada import (sin duplicados)
+    let mut resolved_modules = HashSet::new();
+    for module_name in imports_to_resolve {
+        if resolved_modules.contains(&module_name) {
+            continue; // Ya procesado - evitar imports duplicados
+        }
+        resolved_modules.insert(module_name.clone());
+        
+        // Parsear el módulo
+        let module_program = module_resolver::resolve_and_parse(&module_name, current_dir)?;
+        
+        // Agregar statements del módulo al programa
+        // Filtrar solo funciones públicas (Sprint 1.3 - Import básico)
+        let mut module_funcs = Vec::new();
+        for stmt in module_program.statements {
+            match &stmt {
+                Stmt::Fn { visibility, name, .. } => {
+                    // Solo agregar funciones públicas
+                    if *visibility == Visibility::Public {
+                        new_statements.push(stmt.clone());
+                        module_funcs.push(name.clone());
+                    }
+                }
+                // Otros statements (structs, etc.) se agregan siempre
+                _ => {
+                    new_statements.push(stmt);
+                }
+            }
+        }
+        
+        // Registrar funciones del módulo para detección de colisiones
+        if !module_funcs.is_empty() {
+            module_functions.insert(module_name.clone(), module_funcs);
+        }
+    }
+    
+    // Verificar colisiones de nombres (opcional - warning, no error)
+    // Por ahora solo verificamos, pero no bloqueamos
+    let all_function_names: Vec<String> = program.statements
+        .iter()
+        .filter_map(|s| {
+            if let Stmt::Fn { name, .. } = s {
+                Some(name.clone())
+            } else {
+                None
+            }
+        })
+        .collect();
+    
+    for (module_name, funcs) in &module_functions {
+        for func_name in funcs {
+            if all_function_names.contains(func_name) {
+                // Función local con mismo nombre que una importada
+                // Esto está bien si se usa namespace, pero es un warning
+                // Por ahora no hacemos nada, pero se podría agregar warning
+            }
+        }
+    }
+    
+    // Insertar statements de módulos al inicio (después de structs)
+    // Mantener orden: structs primero, luego funciones importadas, luego código local
+    for stmt in new_statements.into_iter().rev() {
+        program.statements.insert(0, stmt);
+    }
+    
+    Ok(())
+}
+
+/// Pre-procesador: Extrae structs del input y los reemplaza con marcadores
+fn preprocess_extract_structs(source: &str) -> Result<(String, Vec<Stmt>)> {
+    let mut result = String::new();
+    let mut extracted_structs = Vec::new();
+    
+    // Convertir a bytes para trabajar con posiciones
+    let source_bytes = source.as_bytes();
+    let mut byte_pos = 0;
+    
+    while byte_pos < source_bytes.len() {
+        // Buscar "struct " usando búsqueda de bytes
+        if let Some(struct_start_byte) = source[byte_pos..].find("struct ") {
+            let abs_start_byte = byte_pos + struct_start_byte;
+            
+            // Verificar que "struct" está al inicio de línea o después de whitespace
+            let is_at_start = abs_start_byte == 0;
+            let is_after_newline = abs_start_byte > 0 && {
+                let before_bytes = &source_bytes[..abs_start_byte];
+                if let Some(last_char) = source[..abs_start_byte].chars().last() {
+                    last_char == '\n' || last_char == '\r'
+                } else {
+                    false
+                }
+            };
+            
+            if is_at_start || is_after_newline {
+                // Encontramos un struct, intentar extraerlo usando posición de byte
+                match extract_struct(source, abs_start_byte) {
+                    Ok((struct_stmt, _struct_content, end_byte_pos)) => {
+                        extracted_structs.push(struct_stmt);
+                        // Copiar todo hasta el struct
+                        result.push_str(&source[byte_pos..abs_start_byte]);
+                        // Reemplazar el struct con una línea vacía (para mantener estructura)
+                        result.push_str("\n");
+                        // Continuar después del struct
+                        byte_pos = end_byte_pos;
+                        continue;
+                    }
+                    Err(_) => {
+                        // Si falla, dejar el struct en el input y continuar
+                        result.push_str(&source[byte_pos..=abs_start_byte]);
+                        byte_pos = abs_start_byte + 1;
+                        continue;
+                    }
+                }
+            }
+        }
+        
+        // No encontramos struct desde esta posición, avanzar
+        if byte_pos < source_bytes.len() {
+            // Copiar el byte actual como carácter
+            if let Some(ch) = source[byte_pos..].chars().next() {
+                result.push(ch);
+                byte_pos += ch.len_utf8();
+            } else {
+                byte_pos += 1;
+            }
+        } else {
+            break;
+        }
+    }
+    
+    // Si no encontramos structs, devolver el input original
+    if extracted_structs.is_empty() {
+        Ok((source.to_string(), Vec::new()))
+    } else {
+        Ok((result, extracted_structs))
+    }
+}
+
+/// Extraer un struct del input, retornando el Stmt parseado, el contenido, y la posición final (en bytes)
+fn extract_struct(source: &str, start_byte_pos: usize) -> Result<(Stmt, String, usize)> {
+    let rest = &source[start_byte_pos..];
+    
+    // Buscar "struct " seguido del nombre
+    if !rest.starts_with("struct ") {
+        return Err(ADeadError::ParseError {
+            line: 1,
+            col: 1,
+            message: "Expected 'struct'".to_string(),
+        });
+    }
+    
+    // Encontrar el nombre del struct (hasta whitespace o nueva línea)
+    let name_start = 7; // "struct ".len()
+    let name_end = rest[name_start..]
+        .find(|c: char| c.is_whitespace() || c == '\n')
+        .unwrap_or(rest.len() - name_start);
+    
+    let struct_name = rest[name_start..name_start + name_end].trim().to_string();
+    if struct_name.is_empty() {
+        return Err(ADeadError::ParseError {
+            line: 1,
+            col: 1,
+            message: "Expected struct name".to_string(),
+        });
+    }
+    
+    // Buscar el "end" final del struct
+    // Estrategia: buscar todos los "end" y encontrar el que está seguido de un keyword
+    let keywords = ["print", "let", "if", "while", "fn", "struct", "return"];
+    let mut search_pos = name_start + name_end;
+    let mut last_valid_end_pos = None;
+    
+    while let Some(pos) = rest[search_pos..].find("end") {
+        let abs_pos = search_pos + pos;
+        let after_end = abs_pos + 3;
+        
+        if after_end < rest.len() {
+            let after_end_str = &rest[after_end..];
+            let trimmed = after_end_str.trim_start_matches([' ', '\t']);
+            
+            // Verificar si viene nueva línea seguida de keyword o fin de input
+            if trimmed.starts_with('\n') || trimmed.starts_with("\r\n") {
+                let after_nl = trimmed.trim_start_matches(['\n', '\r']);
+                let after_nl_trimmed = after_nl.trim_start();
+                
+                // Verificar si viene un keyword o es fin de input
+                let is_final = if after_nl_trimmed.is_empty() {
+                    true // Fin de input
+                } else {
+                    keywords.iter().any(|kw| after_nl_trimmed.starts_with(kw))
+                };
+                
+                if is_final {
+                    last_valid_end_pos = Some(abs_pos);
+                    break; // Encontramos el final
+                }
+            }
+        }
+        
+        search_pos = abs_pos + 3;
+        if search_pos >= rest.len() {
+            break;
+        }
+    }
+    
+    let end_pos = last_valid_end_pos.ok_or_else(|| ADeadError::ParseError {
+        line: 1,
+        col: 1,
+        message: "No se encontró 'end' final para el struct".to_string(),
+    })?;
+    
+    // Extraer el contenido del struct completo (incluyendo el "end" final)
+    // rest ya contiene desde "struct Nombre" hasta después del último "end"
+    let full_struct = rest[..end_pos + 3].to_string(); // +3 para incluir "end"
+    
+    // ZIG ES EL PARSER PRINCIPAL - Intentar parsear con Zig primero
+    use zig_ffi_parser::parse_struct_with_zig_ffi;
+    if let Ok(stmt) = parse_struct_with_zig_ffi(&full_struct) {
+        let end_byte_pos = start_byte_pos + end_pos + 3;
+        return Ok((stmt, full_struct, end_byte_pos));
+    }
+    
+    // Fallback: Solo si Zig falla completamente, usar parser Rust
+    // (Esto no debería pasar si Zig está bien configurado)
+    match zig_struct_parser::parse_struct_from_string(&full_struct) {
+        Ok((parsed_name, fields, init, destroy)) => {
+            let stmt = Stmt::Struct {
+                name: parsed_name,
+                fields,
+                init,
+                destroy,
+            };
+            // Convertir la posición relativa a absoluta en bytes
+            // end_pos es relativo a 'rest', así que sumamos start_byte_pos
+            // +3 para incluir "end"
+            let end_byte_pos = start_byte_pos + end_pos + 3;
+            Ok((stmt, full_struct, end_byte_pos))
+        }
+        Err(e) => Err(ADeadError::ParseError {
+            line: 1,
+            col: 1,
+            message: format!("Error parseando struct: {}", e),
+        })
+    }
+}
+
+fn program_parser() -> impl Parser<char, Program, Error = Simple<char>> {
+    stmt_parser()
+        .padded()  // Permitir whitespace/newlines entre statements
+        .repeated()
+        .then_ignore(end().or_not())  // Permitir trailing whitespace/newlines
+        .map(|stmts| Program {
+            statements: stmts,
+        })
+}
+
+// Helper para detectar si una expresión contiene floats
+fn contains_float(expr: &Expr) -> bool {
+    match expr {
+        Expr::Float(_) => true,
+        Expr::BinaryOp { left, right, .. } => {
+            contains_float(left) || contains_float(right)
+        }
+        _ => false,
+    }
+}
+
+fn stmt_parser() -> impl Parser<char, Stmt, Error = Simple<char>> + Clone {
+    recursive(|stmt| {
+        let ident = text::ident().padded();
+        let expr = expr_parser();
+        // Los parsers de expr se clonan cuando se necesitan, pero ahora usan Zig directamente
+        let expr_for_print = expr.clone();
+        let expr_for_while = expr.clone();
+        let expr_for_expr_stmt = expr.clone();
+
+        // Print statement: Intentar Rust primero para booleanos, luego Zig para otros casos
+        // CRÍTICO: Rust parser debe usarse primero para booleanos ya que Zig no los soporta
+        let print = just("print")
+            .padded()
+            .ignore_then(
+                // Capturar la expresión como string para decidir qué parser usar
+                none_of("\n")
+                    .repeated()
+                    .at_least(1)
+                    .collect::<String>()
+                    .padded()
+                    .try_map({
+                        let expr_clone = expr.clone(); // Clonar el parser de Rust
+                        move |expr_str: String, span| {
+                            let trimmed = expr_str.trim();
+                            // CRÍTICO: Detectar booleanos PRIMERO (antes de Zig)
+                            // Zig no soporta booleanos todavía, así que crear directamente Expr::Bool
+                            if trimmed == "true" {
+                                Ok(Expr::Bool(true))
+                            } else if trimmed == "false" {
+                                Ok(Expr::Bool(false))
+                            } else {
+                                // Para otros casos: Intentar Zig PRIMERO para floats e integer expressions
+                                if let Some(zig_expr) = zig_expr_parser::parse_expr_with_zig(trimmed) {
+                                    Ok(zig_expr)
+                                } else {
+                                    // Si Zig falla, intentar Rust parser
+                                    expr_clone.clone().parse(trimmed)
+                                        .map_err(|_| Simple::custom(span, format!("Parse error: could not parse expression '{}'", trimmed)))
+                                }
+                            }
+                        }
+                    })
+            )
+            .map(Stmt::Print)
+            .labelled("print statement");
+
+        let let_stmt = just("let")
+            .padded()
+            .then(just("mut").padded().or_not())  // Opcional "mut"
+            .then(ident.clone())
+            .then_ignore(just("=").padded())
+            .then(expr.clone())
+            .map(|(((_, mutable), name), value)| Stmt::Let {
+                mutable: mutable.is_some(),  // true si hay "mut", false si no
+                name,
+                value,
+            });
+
+        let return_stmt = just("return")
+            .padded()
+            .ignore_then(expr.clone().or_not())
+            .map(Stmt::Return);
+
+        let if_stmt = just("if")
+            .padded()
+            .ignore_then(expr.clone())
+            .then(
+                just("{")
+                    .padded()
+                    .ignore_then(stmt.clone().repeated())
+                    .then_ignore(just("}").padded()),
+            )
+            .then(
+                just("else")
+                    .padded()
+                    .ignore_then(
+                        just("{")
+                            .padded()
+                            .ignore_then(stmt.clone().repeated())
+                            .then_ignore(just("}").padded()),
+                    )
+                    .or_not(),
+            )
+            .map(|((condition, then_body), else_body)| Stmt::If {
+                condition,
+                then_body,
+                else_body,
+            });
+
+        // While statement: Parser robusto para estructuras anidadas
+        // CRÍTICO: El parser recursivo ya maneja bloques anidados correctamente
+        // El problema puede estar en el orden de precedencia o en cómo se parsea el cierre
+        let while_stmt = just("while")
+            .padded()
+            .ignore_then(
+                expr_for_while.clone()
+                    .padded()
+            )
+            .then(
+                // Parsear bloque: el parser recursivo ya maneja if/while anidados
+                just("{")
+                    .padded()
+                    .ignore_then(
+                        // IMPORTANTE: stmt.clone() ya es recursivo, así que maneja if/while dentro
+                        // Usar .padded() para permitir newlines entre statements dentro del bloque
+                        stmt.clone()
+                            .padded()
+                            .repeated()
+                            .collect::<Vec<_>>()
+                    )
+                    .then_ignore(just("}").padded())
+            )
+            .map(|(condition, body)| Stmt::While {
+                condition,
+                body,
+            })
+            .labelled("while statement");
+
+        // Parser para par├ímetros de funci├│n (soporta borrowing)
+        let fn_param = just("&")
+            .padded()
+            .then(just("mut").padded().or_not())
+            .then(ident.clone())
+            .map(|((_, mutable), name)| FnParam {
+                name,
+                borrow_type: if mutable.is_some() {
+                    BorrowType::MutBorrowed
+                } else {
+                    BorrowType::Borrowed
+                },
+            })
+            .or(ident.clone().map(|name| FnParam {
+                name,
+                borrow_type: BorrowType::Owned,
+            }));
+
+        // Parser para funciones con visibilidad opcional (Sprint 1.3 - Import básico)
+        let fn_stmt = just("pub")
+            .padded()
+            .or_not()
+            .then(just("fn")
+                .padded()
+                .ignore_then(ident.clone())
+                .then(
+                    just("(")
+                        .padded()
+                        .ignore_then(
+                            fn_param
+                                .separated_by(just(",").padded())
+                                .allow_trailing(),
+                        )
+                        .then_ignore(just(")").padded()),
+                )
+                .then(
+                    just("{")
+                        .padded()
+                        .ignore_then(stmt.clone().repeated())
+                        .then_ignore(just("}").padded()),
+                ))
+            .map(|(visibility, ((name, params), body))| Stmt::Fn {
+                visibility: if visibility.is_some() { 
+                    Visibility::Public 
+                } else { 
+                    Visibility::Private 
+                },
+                name,
+                params,
+                body,
+            });
+
+        // Struct definition (Fase 1.2 - O1, O5 - Encapsulaci├│n)
+        let struct_field = just("pub")
+            .padded()
+            .or_not()
+            .then(just("mut").padded().or_not())
+            .then(ident.clone())
+            .then(
+                just(":")
+                    .padded()
+                    .ignore_then(text::ident())
+                    .or_not(),
+            )
+            .map(|(((visibility, mutable), name), ty)| StructField {
+                visibility: if visibility.is_some() { Visibility::Public } else { Visibility::Private },
+                mutable: mutable.is_some(),
+                name,
+                ty,
+            });
+
+        // Parser para m├®todos de struct (init, destroy) - O5: soporta pub
+        let struct_method = just("pub")
+            .padded()
+            .or_not()
+            .then(just("init")
+                .padded()
+                .map(|_| "init".to_string())
+                .or(just("destroy")
+                    .padded()
+                    .map(|_| "destroy".to_string())))
+            .then(
+                just("(")
+                    .padded()
+                    .ignore_then(
+                        fn_param
+                            .separated_by(just(",").padded())
+                            .allow_trailing(),
+                    )
+                    .then_ignore(just(")").padded()),
+            )
+            .then(
+                just("{")
+                    .padded()
+                    .ignore_then(stmt.clone().repeated())
+                    .then_ignore(just("}").padded()),
+            )
+            .map(|(((visibility, method_name), params), body)| {
+                let vis = if visibility.is_some() { Visibility::Public } else { Visibility::Private };
+                (method_name, StructMethod { visibility: vis, params, body })
+            });
+
+        // INTEGRACIÓN ZIG: Parser de structs usando parser Zig-style
+        // SOLUCIÓN SIMPLIFICADA: Capturar caracteres línea por línea hasta encontrar
+        // el patrón "end" seguido de nueva línea y luego un keyword de statement
+        // o fin de input. Esto identifica el "end" final del struct.
+        
+        // INTEGRACIÓN ZIG: Parser de structs usando parser Zig-style
+        // SOLUCIÓN DEFINITIVA: Capturar caracteres con take_until hasta "end\n"
+        // y luego procesar el string manualmente para encontrar el "end" correcto
+        
+        let struct_stmt = just("struct")
+            .padded()
+            .ignore_then(ident.clone())
+            .then(
+                // ESTRATEGIA: Capturar caracteres hasta encontrar "end\n" (cualquier end)
+                // Luego procesar manualmente el string para encontrar el "end" FINAL
+                // que está seguido de un keyword (print, let, etc.)
+                
+                take_until(
+                    just("end")
+                        .then(just("\n").or(just("\r\n")))
+                )
+                .map(|(chars, _)| {
+                    chars.into_iter().collect::<String>()
+                })
+                .try_map(|content: String, span| {
+                    // Procesar manualmente el string para encontrar el "end" FINAL
+                    // que está seguido de "\n" + keyword (print, let, etc.)
+                    let keywords = ["print", "let", "if", "while", "fn", "struct", "return"];
+                    
+                    // Buscar todas las ocurrencias de "end" y verificar cuál es el final
+                    let mut search_pos = 0;
+                    let mut last_valid_end_pos = None;
+                    
+                    while let Some(pos) = content[search_pos..].find("end") {
+                        let abs_pos = search_pos + pos;
+                        let after_end = abs_pos + 3;
+                        
+                        if after_end < content.len() {
+                            let rest = &content[after_end..];
+                            // Eliminar whitespace después de "end"
+                            let trimmed = rest.trim_start_matches([' ', '\t']);
+                            
+                            // Verificar si viene nueva línea seguida de keyword
+                            if trimmed.starts_with('\n') || trimmed.starts_with("\r\n") {
+                                let after_nl = trimmed.trim_start_matches(['\n', '\r']);
+                                let after_nl_trimmed = after_nl.trim_start();
+                                
+                                // Verificar si viene un keyword
+                                for keyword in &keywords {
+                                    if after_nl_trimmed.starts_with(keyword) {
+                                        last_valid_end_pos = Some(abs_pos);
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                        
+                        search_pos = abs_pos + 3;
+                        if search_pos >= content.len() {
+                            break;
+                        }
+                    }
+                    
+                    // Si encontramos un "end" válido, usar solo hasta ese punto
+                    if let Some(end_pos) = last_valid_end_pos {
+                        Ok(content[..end_pos].to_string())
+                    } else {
+                        // No encontramos patrón, buscar el último "end" (final del archivo)
+                        if let Some(last_end) = content.rfind("end") {
+                            Ok(content[..last_end].to_string())
+                        } else {
+                            Err(Simple::custom(span, "No se encontró 'end' para cerrar el struct"))
+                        }
+                    }
+                })
+            )
+            .then_ignore(just("end").padded())
+            .try_map(|(name, content), span| {
+                // Reconstruir el struct completo para el parser Zig
+                let full_struct = format!("struct {}\n{}end", name, content.trim());
+                
+                // Parsear con parser Zig-style
+                match zig_struct_parser::parse_struct_from_string(&full_struct) {
+                    Ok((parsed_name, fields, init, destroy)) => {
+                        Ok(Stmt::Struct {
+                            name: parsed_name,
+                            fields,
+                            init,
+                            destroy,
+                        })
+                    }
+                    Err(e) => {
+                        Err(Simple::custom(span, format!("Zig parser error: {}", e)))
+                    }
+                }
+            })
+            .labelled("struct statement (Zig parser)");
+
+        // Assignment: ident = expr (as statement)
+        let assign_stmt = ident
+            .clone()
+            .then_ignore(just("=").padded())
+            .then(expr.clone())
+            .map(|(name, value)| Stmt::Expr(Expr::Assign {
+                name,
+                value: Box::new(value),
+            }));
+
+        let expr_stmt = expr_for_expr_stmt.map(Stmt::Expr);
+
+        // Import statement (Sprint 1.3)
+        let import_stmt = just("import")
+            .padded()
+            .ignore_then(text::ident())
+            .map(Stmt::Import)
+            .labelled("import statement");
+
+        // IMPORTANTE: Orden de precedencia crítico para parsing correcto
+        // struct_stmt debe estar ANTES de expr_stmt para tener precedencia
+        // Import debe estar antes de expr_stmt también para evitar conflictos
+        // CRÍTICO: while_stmt e if_stmt deben estar ANTES de assign_stmt y expr_stmt
+        // para evitar que se parseen mal las condiciones y bloques
+        // El orden correcto es: keywords primero, luego expresiones simples
+        // CRÍTICO: while_stmt debe estar PRIMERO para tener máxima precedencia
+        while_stmt  // PRIMERO: máxima precedencia para while
+            .or(if_stmt)      // SEGUNDO: if también tiene alta precedencia
+            .or(struct_stmt)
+            .or(import_stmt)
+            .or(print)
+            .or(let_stmt)
+            .or(fn_stmt)
+            .or(return_stmt)
+            .or(assign_stmt)
+            .or(expr_stmt)
+            .padded()
+    })
+}
+
+fn expr_parser() -> impl Parser<char, Expr, Error = Simple<char>> + Clone {
+        // ZIG ES EL PARSER PRINCIPAL - Intentar parsear con Zig primero para TODAS las expresiones
+        recursive(|expr| {
+            // Definir literales primero (number, float, string)
+        // Parser para literales flotantes (debe venir ANTES de number para que 3.14 se parse como float)
+        // Maneja: 3.14, .5, 5., 2.5e10, 1e-5
+        // Estrategia: usar then_ignore para consumir el punto explícitamente
+        // CRÍTICO: El problema es que text::digits() consume "3" antes de verificar el punto
+        // Solución: Usar un parser que verifica el punto ANTES de consumir
+        // Estrategia: leer dígitos con lookahead para ver si viene un punto
+        // Parser de float: 3.14, 5.0, etc.
+        // SOLUCIÓN DEFINITIVA: Usar un parser que lea el patrón completo
+        // Importante: text::digits() lee dígitos y se detiene en el primer no-dígito
+        // Luego verificamos si ese carácter es un punto, y si es, seguimos leyendo
+        // Parser de float: 3.14, 5.0, etc.
+        // SOLUCIÓN DEFINITIVA: Usar text::int() que lee dígitos y luego verificar punto
+        // text::int() consume dígitos pero se detiene antes de consumir el siguiente carácter
+        // Luego verificamos si ese carácter es un punto
+        let float_with_int_part = text::int(10)
+            .then(just('.').then(text::digits(10).or_not()))  // Punto seguido de dígitos opcionales
+            .try_map(|(int_part, (_, dec_opt)), span| {
+                let dec = dec_opt.unwrap_or_default();
+                let float_str = if dec.is_empty() {
+                    format!("{}.0", int_part)  // 5. -> 5.0
+                } else {
+                    format!("{}.{}", int_part, dec)
+                };
+                float_str.parse::<f64>()
+                    .map_err(|_| Simple::custom(span, format!("Invalid float literal: {}", float_str)))
+            })
+            .map(Expr::Float)
+            .labelled("float");
+        
+        // También manejar .5 (sin parte entera)
+        let float_without_int_part = just('.')
+            .ignore_then(text::digits(10))  // .5
+            .then(
+                just('e').or(just('E'))
+                    .ignore_then(
+                        just('+').or(just('-')).or_not()
+                            .then(text::int(10))
+                            .map(|(sign, num): (Option<char>, String)| {
+                                if sign == Some('-') {
+                                    format!("-{}", num)
+                                } else {
+                                    num
+                                }
+                            })
+                    )
+                    .or_not()
+            )
+            .try_map(|(dec_part, exp_part), span| {
+                let float_str = format!("0.{}", dec_part);
+                let float_str = match exp_part {
+                    Some(exp) => format!("{}e{}", float_str, exp),
+                    None => float_str,
+                };
+                float_str.parse::<f64>()
+                    .map_err(|_| Simple::custom(span, "Invalid float literal"))
+            })
+            .map(Expr::Float)
+            .labelled("float");
+        
+        // Combinar ambos parsers de float
+        let float_literal = float_with_int_part
+            .or(float_without_int_part);
+
+        // Parser para números enteros (solo enteros puros, sin punto)
+        // Nota: Como float_literal viene primero en atom, los floats ya se parsean como floats
+        // Solo llegamos aquí si NO es un float
+        // Parser para números enteros (solo enteros puros, sin punto)
+        // CRÍTICO: Este parser solo se ejecuta si float_literal falló
+        // Verificamos explícitamente que NO viene un punto después
+        let number = text::digits(10)
+            .then(just('.').not())  // Asegurar que NO viene un punto después
+            .map(|(s, _): (String, _)| s.parse::<i64>().unwrap())
+            .map(Expr::Number)
+            .labelled("number");
+
+        let string = just('"')
+            .ignore_then(none_of('"').repeated())
+            .then_ignore(just('"'))
+            .collect::<String>()
+            .map(Expr::String)
+            .labelled("string");
+
+        // Array literal: [1, 2, 3] (Sprint 1.2)
+        let array_literal = just('[')
+            .padded()
+            .ignore_then(
+                expr.clone()
+                    .separated_by(just(',').padded())
+                    .allow_trailing(),
+            )
+            .then_ignore(just(']').padded())
+            .map(Expr::ArrayLiteral)
+            .labelled("array literal");
+
+        // Identificador - filtrar keywords para evitar que "while", "if", etc. se parseen como identificadores
+        let ident = text::ident()
+            .try_map(|s: String, span| {
+                // Keywords que NO deben parsearse como identificadores
+                let keywords = ["while", "if", "let", "print", "fn", "struct", "return", "true", "false", "Some", "None", "Ok", "Err", "match", "end"];
+                if keywords.contains(&s.as_str()) {
+                    Err(Simple::custom(span, format!("'{}' is a keyword and cannot be used as an identifier", s)))
+                } else {
+                    Ok(Expr::Ident(s))
+                }
+            })
+            .labelled("identifier");
+
+        // Borrowing: &expr o &mut expr
+        let borrow = just("&")
+            .padded()
+            .then(just("mut").padded().or_not())
+            .then(expr.clone())
+            .map(|((_, mutable), expr)| Expr::Borrow {
+                expr: Box::new(expr),
+                mutable: mutable.is_some(),
+            })
+            .labelled("borrow");
+
+        // Dereferencing: *expr
+        let deref = just("*")
+            .padded()
+            .ignore_then(expr.clone())
+            .map(|e| Expr::Deref(Box::new(e)))
+            .labelled("deref");
+
+        // Option/Result constructors (O0.4)
+        let some = just("Some")
+            .padded()
+            .ignore_then(
+                expr.clone()
+                    .delimited_by(just("(").padded(), just(")").padded())
+            )
+            .map(|e| Expr::Some(Box::new(e)))
+            .labelled("Some");
+
+        let none = just("None")
+            .padded()
+            .map(|_| Expr::None)
+            .labelled("None");
+
+        let ok = just("Ok")
+            .padded()
+            .ignore_then(
+                expr.clone()
+                    .delimited_by(just("(").padded(), just(")").padded())
+            )
+            .map(|e| Expr::Ok(Box::new(e)))
+            .labelled("Ok");
+
+        let err = just("Err")
+            .padded()
+            .ignore_then(
+                expr.clone()
+                    .delimited_by(just("(").padded(), just(")").padded())
+            )
+            .map(|e| Expr::Err(Box::new(e)))
+            .labelled("Err");
+
+        // Struct literal (Fase 1.2 - O1)
+        // StructName { field1: value1, field2: value2 }
+        let struct_literal = text::ident()
+            .then(
+                just("{")
+                    .padded()
+                    .ignore_then(
+                        text::ident()
+                            .then_ignore(just(":").padded())
+                            .then(expr.clone())
+                            .map(|(field_name, value)| (field_name, value))
+                            .separated_by(just(",").padded())
+                            .allow_trailing(),
+                    )
+                    .then_ignore(just("}").padded()),
+            )
+            .map(|(struct_name, fields)| {
+                Expr::StructLiteral {
+                    name: struct_name,
+                    fields,
+                }
+            })
+            .labelled("struct literal");
+
+        // Parser para booleanos: true, false
+        // CRÍTICO: Debe venir ANTES de ident para que "true" no se parse como identificador
+        // Usar just() con .padded() y verificar que no es seguido de caracteres alfanuméricos
+        // Alternativa: usar lookahead negativo para asegurar que "true" no es parte de "trueVar"
+        let bool_literal = just("true")
+            .then(text::ident().not().to(()))  // Asegurar que no es seguido de identificador
+            .map(|_| Expr::Bool(true))
+            .labelled("true")
+            .padded()
+            .or(just("false")
+                .then(text::ident().not().to(()))  // Asegurar que no es seguido de identificador
+                .map(|_| Expr::Bool(false))
+                .labelled("false")
+                .padded());
+
+        let atom = float_literal.clone()  // Floats PRIMERO para que 3.14 se parse como float, no como 3
+            .or(number)  // Numbers después para evitar conflicto con floats
+            .or(bool_literal)  // Booleanos después de numbers pero antes de string
+            .or(string)
+            .or(array_literal)  // Array literal antes de borrow
+            .or(borrow)  // Borrow debe ir ANTES de ident para que &x se parse como Borrow, no como Call
+            .or(deref)
+            .or(some.clone())
+            .or(none.clone())
+            .or(ok.clone())
+            .or(err.clone())
+            .or(struct_literal)
+            .or(ident.clone())
+            .or(expr
+                .clone()
+                .delimited_by(just("(").padded(), just(")").padded()));
+
+        // Parser para nombres con namespace: modulo.funcion o solo funcion (Sprint 1.3)
+        let qualified_name = text::ident()
+            .then(
+                just(".")
+                    .padded()
+                    .ignore_then(text::ident())
+                    .or_not()
+            )
+            .map(|(first, second)| {
+                if let Some(second) = second {
+                    // modulo.funcion
+                    (Some(first), second)
+                } else {
+                    // solo funcion (sin módulo)
+                    (None, first)
+                }
+            });
+
+        let call = qualified_name
+            .then(
+                just("(")
+                    .padded()
+                    .ignore_then(
+                        expr.clone()
+                            .separated_by(just(",").padded())
+                            .allow_trailing(),
+                    )
+                    .then_ignore(just(")").padded()),
+            )
+            .map(|((module, name), args)| Expr::Call {
+                module,
+                name,
+                args,
+            })
+            .or(atom);
+
+        // Match expression (O0.4)
+        let pattern = recursive(|_pattern| {
+            let some_pattern = just("Some").padded().to(Pattern::Some);
+            let none_pattern = just("None").padded().to(Pattern::None);
+            let ok_pattern = just("Ok").padded().to(Pattern::Ok);
+            let err_pattern = just("Err").padded().to(Pattern::Err);
+            let wildcard = just("_").padded().to(Pattern::Wildcard);
+            let ident_pattern = text::ident().map(Pattern::Ident);
+            let number_pattern = text::int(10)
+                .map(|s: String| s.parse::<i64>().unwrap())
+                .map(Pattern::LiteralNumber);
+            let string_pattern = just('"')
+                .ignore_then(none_of('"').repeated())
+                .then_ignore(just('"'))
+                .collect::<String>()
+                .map(Pattern::LiteralString);
+            
+            some_pattern
+                .or(none_pattern)
+                .or(ok_pattern)
+                .or(err_pattern)
+                .or(wildcard)
+                .or(number_pattern)
+                .or(string_pattern)
+                .or(ident_pattern)
+                .labelled("pattern")
+        });
+
+        let match_arm = pattern
+            .then_ignore(just("=>").padded())
+            .then(expr.clone())
+            .map(|(pat, body)| MatchArm {
+                pattern: pat,
+                body: Box::new(body),
+            })
+            .labelled("match arm");
+
+        let match_expr = just("match")
+            .padded()
+            .ignore_then(expr.clone())
+            .then(
+                just("{")
+                    .padded()
+                    .ignore_then(
+                        match_arm
+                            .separated_by(just(",").padded())
+                            .allow_trailing()
+                    )
+                    .then_ignore(just("}").padded())
+            )
+            .map(|(expr, arms)| Expr::Match {
+                expr: Box::new(expr),
+                arms,
+            })
+            .labelled("match");
+
+        let unary = call
+            .or(match_expr);
+
+        // Aplicar field/method access despu├®s de call/match (Fase 1.2 - O1, O4)
+        let with_access = unary
+            .then(
+                just(".")
+                    .padded()
+                    .ignore_then(text::ident())
+                    .then(
+                        just("(")
+                            .padded()
+                            .ignore_then(
+                                expr.clone()
+                                    .separated_by(just(",").padded())
+                                    .allow_trailing(),
+                            )
+                            .then_ignore(just(")").padded())
+                            .or_not(),
+                    )
+                    .repeated(),
+            )
+            .foldl(|obj, (name, args)| {
+                if let Some(args) = args {
+                    // Method call
+                    Expr::MethodCall {
+                        object: Box::new(obj),
+                        method: name,
+                        args,
+                    }
+                } else {
+                    // Field access
+                    Expr::FieldAccess {
+                        object: Box::new(obj),
+                        field: name,
+                    }
+                }
+            });
+
+        // Indexación: arr[0] (Sprint 1.2)
+        let with_index = with_access
+            .then(
+                just('[')
+                    .padded()
+                    .ignore_then(expr.clone())
+                    .then_ignore(just(']').padded())
+                    .repeated(),
+            )
+            .foldl(|arr, idx| Expr::Index {
+                array: Box::new(arr),
+                index: Box::new(idx),
+            });
+
+        // Operador ? para propagación de errores (expr?)
+        let with_propagate = with_index
+            .then(just("?").padded().or_not())
+            .map(|(expr, has_question)| {
+                if has_question.is_some() {
+                    Expr::PropagateError(Box::new(expr))
+                } else {
+                    expr
+                }
+            });
+
+        let product = with_propagate
+            .clone()
+            .then(
+                just("*")
+                    .padded()
+                    .to(BinOp::Mul)
+                    .or(just("/").padded().to(BinOp::Div))
+                    .or(just("%").padded().to(BinOp::Mod))
+                    .then(with_propagate.clone())
+                    .repeated(),
+            )
+            .foldl(|l, (op, r)| Expr::BinaryOp {
+                op,
+                left: Box::new(l),
+                right: Box::new(r),
+            });
+
+        let sum = product
+            .clone()
+            .then(
+                just("+")
+                    .padded()
+                    .to(BinOp::Add)
+                    .or(just("-").padded().to(BinOp::Sub))
+                    .then(product.clone())
+                    .repeated(),
+            )
+            .foldl(|l, (op, r)| Expr::BinaryOp {
+                op,
+                left: Box::new(l),
+                right: Box::new(r),
+            });
+
+        // Intentar usar Zig primero para expresiones con comparaciones
+        // Zig parsea mejor: <, <=, >, >=, ==, !=
+        // IMPORTANTE: Los operadores de dos caracteres (<=, >=, ==, !=) DEBEN ir antes de los de un carácter (<, >)
+        let comparison = sum
+            .clone()
+            .then(
+                just("<=").padded().to(BinOp::Le)
+                    .or(just(">=").padded().to(BinOp::Ge))
+                    .or(just("==").padded().to(BinOp::Eq))
+                    .or(just("!=").padded().to(BinOp::Ne))
+                    .or(just("<").padded().to(BinOp::Lt))
+                    .or(just(">").padded().to(BinOp::Gt))
+                    .then(sum.clone())
+                    .repeated(),
+            )
+            .foldl(|l, (op, r)| Expr::BinaryOp {
+                op,
+                left: Box::new(l),
+                right: Box::new(r),
+            });
+
+        // ZIG ES EL PARSER PRINCIPAL - Intentar parsear con Zig primero
+        // Capturar toda la expresión restante y parsearla con Zig
+        // Nota: Esto es complejo dentro de un parser recursivo, así que usamos el parser Rust
+        // y Zig se usa directamente en print/while donde capturamos el string completo
+        // IMPORTANTE: sum debe estar antes de comparison para evitar loops
+        sum.clone()
+            .or(comparison) // Comparaciones después de sum
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_print() {
+        let src = r#"print "Hola Mundo""#;
+        let program = parse(src).unwrap();
+        assert_eq!(
+            program.statements,
+            vec![Stmt::Print(Expr::String("Hola Mundo".to_string()))]
+        );
+    }
+
+    #[test]
+    fn test_parse_let() {
+        let src = r#"let x = 42"#;
+        let program = parse(src).unwrap();
+        assert_eq!(
+            program.statements,
+            vec![Stmt::Let {
+                mutable: false,  // Inmutable por defecto
+                name: "x".to_string(),
+                value: Expr::Number(42)
+            }]
+        );
+    }
+
+    #[test]
+    fn test_parse_if() {
+        let src = r#"
+            if 5 > 3 {
+                print "yes"
+            }
+        "#;
+        let program = parse(src).unwrap();
+        assert!(matches!(&program.statements[0], Stmt::If { .. }));
+    }
+
+    #[test]
+    fn test_parse_borrow() {
+        let src = r#"let r = &x"#;
+        let program = parse(src).unwrap();
+        if let Stmt::Let { value, .. } = &program.statements[0] {
+            assert!(matches!(value, Expr::Borrow { mutable: false, .. }));
+        } else {
+            panic!("Expected Let statement");
+        }
+    }
+
+    #[test]
+    fn test_parse_mut_borrow() {
+        let src = r#"let r = &mut x"#;
+        let program = parse(src).unwrap();
+        if let Stmt::Let { value, .. } = &program.statements[0] {
+            assert!(matches!(value, Expr::Borrow { mutable: true, .. }));
+        } else {
+            panic!("Expected Let statement");
+        }
+    }
+
+    #[test]
+    fn test_parse_deref() {
+        let src = r#"let val = *ptr"#;
+        let program = parse(src).unwrap();
+        if let Stmt::Let { value, .. } = &program.statements[0] {
+            assert!(matches!(value, Expr::Deref(_)));
+        } else {
+            panic!("Expected Let statement");
+        }
+    }
+
+    #[test]
+    fn test_parse_fn_with_borrow_param() {
+        let src = r#"
+            fn imprimir(&texto) {
+                print texto
+            }
+        "#;
+        let program = parse(src).unwrap();
+        if let Stmt::Fn { params, .. } = &program.statements[0] {
+            assert_eq!(params.len(), 1);
+            assert_eq!(params[0].name, "texto");
+            assert_eq!(params[0].borrow_type, BorrowType::Borrowed);
+        } else {
+            panic!("Expected Fn statement");
+        }
+    }
+
+    #[test]
+    fn test_parse_fn_with_mut_borrow_param() {
+        let src = r#"
+            fn modificar(&mut valor) {
+                valor = 10
+            }
+        "#;
+        let program = parse(src).unwrap();
+        if let Stmt::Fn { params, .. } = &program.statements[0] {
+            assert_eq!(params.len(), 1);
+            assert_eq!(params[0].name, "valor");
+            assert_eq!(params[0].borrow_type, BorrowType::MutBorrowed);
+        } else {
+            panic!("Expected Fn statement");
+        }
+    }
+
+    // ========== Tests para Option/Result (O0.4) ==========
+    
+    #[test]
+    fn test_parse_some() {
+        let src = r#"let x = Some(42)"#;
+        let program = parse(src).unwrap();
+        if let Stmt::Let { value, .. } = &program.statements[0] {
+            assert!(matches!(value, Expr::Some(_)));
+            if let Expr::Some(inner) = value {
+                assert!(matches!(inner.as_ref(), Expr::Number(42)));
+            }
+        } else {
+            panic!("Expected Let statement");
+        }
+    }
+
+    #[test]
+    fn test_parse_none() {
+        let src = r#"let x = None"#;
+        let program = parse(src).unwrap();
+        if let Stmt::Let { value, .. } = &program.statements[0] {
+            assert!(matches!(value, Expr::None));
+        } else {
+            panic!("Expected Let statement");
+        }
+    }
+
+    #[test]
+    fn test_parse_ok() {
+        let src = r#"let x = Ok(10)"#;
+        let program = parse(src).unwrap();
+        if let Stmt::Let { value, .. } = &program.statements[0] {
+            assert!(matches!(value, Expr::Ok(_)));
+            if let Expr::Ok(inner) = value {
+                assert!(matches!(inner.as_ref(), Expr::Number(10)));
+            }
+        } else {
+            panic!("Expected Let statement");
+        }
+    }
+
+    #[test]
+    fn test_parse_err() {
+        let src = r#"let x = Err("error")"#;
+        let program = parse(src).unwrap();
+        if let Stmt::Let { value, .. } = &program.statements[0] {
+            assert!(matches!(value, Expr::Err(_)));
+            if let Expr::Err(inner) = value {
+                assert!(matches!(inner.as_ref(), Expr::String(_)));
+            }
+        } else {
+            panic!("Expected Let statement");
+        }
+    }
+
+    #[test]
+    fn test_parse_match_simple() {
+        let src = r#"
+            match x {
+                Some => 1,
+                None => 0
+            }
+        "#;
+        let program = parse(src).unwrap();
+        if let Stmt::Expr(Expr::Match { expr, arms }) = &program.statements[0] {
+            assert!(matches!(expr.as_ref(), Expr::Ident(_)));
+            assert_eq!(arms.len(), 2);
+            assert!(matches!(arms[0].pattern, Pattern::Some));
+            assert!(matches!(arms[1].pattern, Pattern::None));
+        } else {
+            panic!("Expected Match expression");
+        }
+    }
+
+    #[test]
+    fn test_parse_match_with_bindings() {
+        let src = r#"
+            match resultado {
+                Ok => "success",
+                Err => "error",
+                _ => "unknown"
+            }
+        "#;
+        let program = parse(src).unwrap();
+        if let Stmt::Expr(Expr::Match { arms, .. }) = &program.statements[0] {
+            assert_eq!(arms.len(), 3);
+            assert!(matches!(arms[0].pattern, Pattern::Ok));
+            assert!(matches!(arms[1].pattern, Pattern::Err));
+            assert!(matches!(arms[2].pattern, Pattern::Wildcard));
+        } else {
+            panic!("Expected Match expression");
+        }
+    }
+
+    #[test]
+    fn test_parse_match_with_literals() {
+        let src = r#"
+            match x {
+                0 => "zero",
+                1 => "one",
+                _ => "other"
+            }
+        "#;
+        let program = parse(src).unwrap();
+        if let Stmt::Expr(Expr::Match { arms, .. }) = &program.statements[0] {
+            assert_eq!(arms.len(), 3);
+            assert!(matches!(arms[0].pattern, Pattern::LiteralNumber(0)));
+            assert!(matches!(arms[1].pattern, Pattern::LiteralNumber(1)));
+            assert!(matches!(arms[2].pattern, Pattern::Wildcard));
+        } else {
+            panic!("Expected Match expression");
+        }
+    }
+
+    #[test]
+    fn test_parse_nested_some() {
+        let src = r#"let x = Some(Some(42))"#;
+        let program = parse(src).unwrap();
+        if let Stmt::Let { value, .. } = &program.statements[0] {
+            assert!(matches!(value, Expr::Some(_)));
+            if let Expr::Some(inner) = value {
+                assert!(matches!(inner.as_ref(), Expr::Some(_)));
+            }
+        } else {
+            panic!("Expected Let statement");
+        }
+    }
+
+    // ========== Tests para Structs (Fase 1.2) ==========
+    
+    #[test]
+    fn test_parse_struct_definition() {
+        let src = r#"
+            struct Persona {
+                nombre: string,
+                edad: int64
+            }
+        "#;
+        let program = parse(src).unwrap();
+        if let Stmt::Struct { name, fields, init, destroy } = &program.statements[0] {
+            assert_eq!(name, "Persona");
+            assert_eq!(fields.len(), 2);
+            assert_eq!(fields[0].name, "nombre");
+            assert_eq!(fields[0].mutable, false);  // Inmutable por defecto
+            assert_eq!(fields[0].visibility, Visibility::Private);  // Privado por defecto (O5)
+            assert_eq!(fields[1].name, "edad");
+            assert_eq!(fields[1].visibility, Visibility::Private);  // Privado por defecto (O5)
+            assert!(init.is_none());  // Sin constructor
+            assert!(destroy.is_none());  // Sin destructor
+        } else {
+            panic!("Expected Struct statement");
+        }
+    }
+
+    #[test]
+    fn test_parse_struct_with_mutable_fields() {
+        let src = r#"
+            struct Contador {
+                mut valor: int64
+            }
+        "#;
+        let program = parse(src).unwrap();
+        if let Stmt::Struct { fields, init, destroy, .. } = &program.statements[0] {
+            assert_eq!(fields[0].mutable, true);  // Campo mutable
+            assert_eq!(fields[0].visibility, Visibility::Private);  // Privado por defecto (O5)
+            assert!(init.is_none());  // Sin constructor
+            assert!(destroy.is_none());  // Sin destructor
+        } else {
+            panic!("Expected Struct statement");
+        }
+    }
+
+    #[test]
+    fn test_parse_struct_literal() {
+        let src = r#"
+            let p = Persona {
+                nombre: "Juan",
+                edad: 25
+            }
+        "#;
+        let program = parse(src).unwrap();
+        if let Stmt::Let { value, .. } = &program.statements[0] {
+            assert!(matches!(value, Expr::StructLiteral { .. }));
+            if let Expr::StructLiteral { name, fields } = value {
+                assert_eq!(name, "Persona");
+                assert_eq!(fields.len(), 2);
+                assert_eq!(fields[0].0, "nombre");
+                assert_eq!(fields[1].0, "edad");
+            }
+        } else {
+            panic!("Expected Let statement");
+        }
+    }
+
+    #[test]
+    fn test_parse_field_access() {
+        let src = r#"
+            let nombre = p.nombre
+        "#;
+        let program = parse(src).unwrap();
+        if let Stmt::Let { value, .. } = &program.statements[0] {
+            assert!(matches!(value, Expr::FieldAccess { .. }));
+            if let Expr::FieldAccess { object, field } = value {
+                assert!(matches!(object.as_ref(), Expr::Ident(_)));
+                assert_eq!(field, "nombre");
+            }
+        } else {
+            panic!("Expected Let statement");
+        }
+    }
+
+    #[test]
+    fn test_parse_method_call() {
+        let src = r#"
+            let resultado = objeto.metodo(10, 20)
+        "#;
+        let program = parse(src).unwrap();
+        if let Stmt::Let { value, .. } = &program.statements[0] {
+            assert!(matches!(value, Expr::MethodCall { .. }));
+            if let Expr::MethodCall { object, method, args } = value {
+                assert!(matches!(object.as_ref(), Expr::Ident(_)));
+                assert_eq!(method, "metodo");
+                assert_eq!(args.len(), 2);
+            }
+        } else {
+            panic!("Expected Let statement");
+        }
+    }
+
+    #[test]
+    fn test_parse_propagate_error_operator() {
+        // Test del operador ? para propagación de errores
+        let src = r#"let valor = funcion()?"#;
+        let program = parse(src).unwrap();
+        if let Stmt::Let { value, .. } = &program.statements[0] {
+            assert!(matches!(value, Expr::PropagateError(_)));
+            if let Expr::PropagateError(inner) = value {
+                // El inner debe ser una llamada a función
+                assert!(matches!(inner.as_ref(), Expr::Call { .. }));
+            }
+        } else {
+            panic!("Expected Let statement with PropagateError");
+        }
+    }
+
+    #[test]
+    fn test_parse_propagate_error_with_method_call() {
+        // Test de propagación con método: objeto.metodo()?
+        let src = r#"let resultado = objeto.metodo()?"#;
+        let program = parse(src).unwrap();
+        if let Stmt::Let { value, .. } = &program.statements[0] {
+            assert!(matches!(value, Expr::PropagateError(_)));
+        } else {
+            panic!("Expected Let statement with PropagateError");
+        }
+    }
+
+    #[test]
+    fn test_parse_propagate_error_with_ok() {
+        // Test de propagación con Ok(): Ok(42)?
+        let src = r#"let valor = Ok(42)?"#;
+        let program = parse(src).unwrap();
+        if let Stmt::Let { value, .. } = &program.statements[0] {
+            assert!(matches!(value, Expr::PropagateError(_)));
+            if let Expr::PropagateError(inner) = value {
+                // El inner debe ser Ok(42)
+                assert!(matches!(inner.as_ref(), Expr::Ok(_)));
+            }
+        } else {
+            panic!("Expected Let statement with PropagateError");
+        }
+    }
+
+    #[test]
+    fn test_parse_propagate_error_chained() {
+        // Test de múltiples propagaciones: funcion1()? + funcion2()?
+        let src = r#"let suma = funcion1()? + funcion2()?"#;
+        let program = parse(src).unwrap();
+        if let Stmt::Let { value, .. } = &program.statements[0] {
+            // Debe ser una BinaryOp con PropagateError en ambos lados
+            assert!(matches!(value, Expr::BinaryOp { .. }));
+        } else {
+            panic!("Expected Let statement with BinaryOp");
+        }
+    }
+
+    // ========== Tests para Arrays (Sprint 1.2) ==========
+    
+    #[test]
+    fn test_parse_array_literal() {
+        // Test de literal de array: [1, 2, 3]
+        let src = r#"let arr = [1, 2, 3]"#;
+        let program = parse(src).unwrap();
+        if let Stmt::Let { value, .. } = &program.statements[0] {
+            assert!(matches!(value, Expr::ArrayLiteral(_)));
+            if let Expr::ArrayLiteral(elements) = value {
+                assert_eq!(elements.len(), 3);
+                assert!(matches!(elements[0], Expr::Number(1)));
+                assert!(matches!(elements[1], Expr::Number(2)));
+                assert!(matches!(elements[2], Expr::Number(3)));
+            }
+        } else {
+            panic!("Expected Let statement with ArrayLiteral");
+        }
+    }
+
+    #[test]
+    fn test_parse_array_literal_empty() {
+        // Test de array vacío: []
+        let src = r#"let arr = []"#;
+        let program = parse(src).unwrap();
+        if let Stmt::Let { value, .. } = &program.statements[0] {
+            assert!(matches!(value, Expr::ArrayLiteral(_)));
+            if let Expr::ArrayLiteral(elements) = value {
+                assert_eq!(elements.len(), 0);
+            }
+        } else {
+            panic!("Expected Let statement with empty ArrayLiteral");
+        }
+    }
+
+    #[test]
+    fn test_parse_array_index() {
+        // Test de indexación: arr[0]
+        let src = r#"let valor = arr[0]"#;
+        let program = parse(src).unwrap();
+        if let Stmt::Let { value, .. } = &program.statements[0] {
+            assert!(matches!(value, Expr::Index { .. }));
+            if let Expr::Index { array, index } = value {
+                assert!(matches!(array.as_ref(), Expr::Ident(_)));
+                assert!(matches!(index.as_ref(), Expr::Number(0)));
+            }
+        } else {
+            panic!("Expected Let statement with Index");
+        }
+    }
+
+    #[test]
+    fn test_parse_array_index_nested() {
+        // Test de indexación anidada: arr[i][j]
+        let src = r#"let valor = matriz[i][j]"#;
+        let program = parse(src).unwrap();
+        if let Stmt::Let { value, .. } = &program.statements[0] {
+            assert!(matches!(value, Expr::Index { .. }));
+            if let Expr::Index { array, index } = value {
+                // El array debe ser otro Index
+                assert!(matches!(array.as_ref(), Expr::Index { .. }));
+                if let Expr::Index { array: inner_array, index: inner_index } = array.as_ref() {
+                    assert!(matches!(inner_array.as_ref(), Expr::Ident(_)));
+                    assert!(matches!(inner_index.as_ref(), Expr::Ident(_)));
+                }
+                assert!(matches!(index.as_ref(), Expr::Ident(_)));
+            }
+        } else {
+            panic!("Expected Let statement with nested Index");
+        }
+    }
+
+    #[test]
+    fn test_parse_array_literal_with_expressions() {
+        // Test de array con expresiones: [1 + 2, 3 * 4]
+        let src = r#"let arr = [1 + 2, 3 * 4]"#;
+        let program = parse(src).unwrap();
+        if let Stmt::Let { value, .. } = &program.statements[0] {
+            assert!(matches!(value, Expr::ArrayLiteral(_)));
+            if let Expr::ArrayLiteral(elements) = value {
+                assert_eq!(elements.len(), 2);
+                assert!(matches!(elements[0], Expr::BinaryOp { .. }));
+                assert!(matches!(elements[1], Expr::BinaryOp { .. }));
+            }
+        } else {
+            panic!("Expected Let statement with ArrayLiteral containing expressions");
+        }
+    }
+
+    #[test]
+    fn test_parse_chained_field_access() {
+        let src = r#"
+            let valor = objeto.campo.subcampo
+        "#;
+        let program = parse(src).unwrap();
+        if let Stmt::Let { value, .. } = &program.statements[0] {
+            assert!(matches!(value, Expr::FieldAccess { .. }));
+            if let Expr::FieldAccess { object, field } = value {
+                assert_eq!(field, "subcampo");
+                // El object deber├¡a ser otro FieldAccess
+                assert!(matches!(object.as_ref(), Expr::FieldAccess { .. }));
+            }
+        } else {
+            panic!("Expected Let statement");
+        }
+    }
+}
+

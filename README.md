@@ -13,76 +13,246 @@ Simple sintaxis estilo Python • Rendimiento nativo
 
 </div>
 
-## 🔄 Arquitectura Triple: Zig + Tree-sitter + Rust
+## 🔄 Arquitectura Inteligente Cuádruple: Tree-sitter + Zig + D Language + Rust
 
-**ADead utiliza una arquitectura única de 3 lenguajes/herramientas que trabajan juntos, solos o independientemente según las necesidades:**
+**ADead utiliza una arquitectura inteligente única de 4 lenguajes/herramientas que analiza automáticamente el código fuente y selecciona el mejor pipeline según las características detectadas, trabajando solos, combinados o independientemente hasta generar código ASM puro y optimizado para la CPU:**
 
 ### 🌳 Tree-sitter + Rust → NASM (ASM)
 **Para estructuras complejas** (while/if anidados, parsing robusto):
 ```
 ADead Source (.ad)
   ↓
-Tree-sitter (parsing robusto con error recovery)
+┌─────────────────────────────────────┐
+│  Tree-sitter (parsing robusto)      │
+│  • Error recovery automático        │
+│  • Bloques anidados                 │
+│  • Genera AST Tree-sitter           │
+└─────────────────────────────────────┘
+  ↓ (AST Tree-sitter)
+┌─────────────────────────────────────┐
+│  Rust (conversión + validación)     │
+│  • AST Tree-sitter → AST Rust      │
+│  • Validación memoria               │
+│  • Type checking                    │
+│  • Codegen → NASM                   │
+└─────────────────────────────────────┘
   ↓
-Rust (conversión AST + validación + codegen)
+┌─────────────────────────────────────┐
+│  NASM (Assembly x86_64)            │
+│  • Código ASM puro                 │
+└─────────────────────────────────────┘
   ↓
-NASM (Assembly x86_64)
-  ↓
-Ejecutable (.exe)
+✅ Ejecutable (.exe) → CPU Directo
 ```
-**Ventajas:** Parsing robusto de estructuras anidadas, error recovery automático
-**Uso:** Loops complejos, estructuras anidadas, programas grandes
+**Ventajas:** Parsing robusto de estructuras anidadas, error recovery automático  
+**Uso:** Loops complejos, estructuras anidadas, programas grandes  
+**Trabaja:** Independiente o combinado con otros
 
-### 🚀 Zig → NASM Directo (ASM)
+### ⚡ Zig → NASM Directo (ASM)
 **Para casos simples** (floats, expresiones aritméticas básicas):
 ```
 ADead Source (.ad)
   ↓
-Zig (parsea y genera ASM directamente)
+┌─────────────────────────────────────┐
+│  Zig (parsea y genera ASM)         │
+│  • Comptime (compile-time)          │
+│  • Parsing eficiente                │
+│  • Generación ASM directa           │
+│  • Sin overhead                     │
+└─────────────────────────────────────┘
   ↓
-NASM (Assembly x86_64)
+┌─────────────────────────────────────┐
+│  NASM (Assembly x86_64)            │
+│  • Código ASM puro                 │
+└─────────────────────────────────────┘
   ↓
-Ejecutable (.exe)
+✅ Ejecutable (.exe) → CPU Directo
 ```
-**Ventajas:** Máxima eficiencia, sin overhead de validación
-**Uso:** Floats simples, expresiones aritméticas puras, máxima performance
+**Ventajas:** Máxima eficiencia, sin overhead de validación  
+**Uso:** Floats simples, expresiones aritméticas puras, máxima performance  
+**Trabaja:** Independiente (solo) o combinado con Rust
 
 ### 🔒 Zig → Rust → NASM (ASM)
 **Para código que requiere validación** (variables, funciones, structs):
 ```
 ADead Source (.ad)
   ↓
-Zig (parsea expresiones eficientemente)
+┌─────────────────────────────────────┐
+│  Zig (parsing eficiente)            │
+│  • Comptime evaluation              │
+│  • Expresiones aritméticas          │
+│  • Genera datos estructurados       │
+└─────────────────────────────────────┘
+  ↓ (Datos estructurados)
+┌─────────────────────────────────────┐
+│  Rust (validación + seguridad)      │
+│  • Validación memoria               │
+│  • Type checking                    │
+│  • Borrow checker                   │
+│  • Codegen → NASM                   │
+└─────────────────────────────────────┘
   ↓
-Rust (validación de memoria, type checking, seguridad)
+┌─────────────────────────────────────┐
+│  NASM (Assembly x86_64)            │
+│  • Código ASM puro                 │
+└─────────────────────────────────────┘
   ↓
-NASM (Assembly x86_64)
-  ↓
-Ejecutable (.exe)
+✅ Ejecutable (.exe) → CPU Directo
 ```
-**Ventajas:** Seguridad garantizada, validación completa, parsing eficiente
-**Uso:** Variables, funciones, structs, OOP, expresiones complejas
+**Ventajas:** Seguridad garantizada, validación completa, parsing eficiente  
+**Uso:** Variables, funciones, structs, OOP, expresiones complejas  
+**Trabaja:** Cooperación Zig + Rust (2 lenguajes)
 
 ### 🛠️ Rust Directo → NASM (ASM)
 **Para casos especiales** (fallback cuando otros fallan):
 ```
 ADead Source (.ad)
   ↓
-Rust (parser Chumsky completo + validación)
+┌─────────────────────────────────────┐
+│  Rust (parser Chumsky completo)     │
+│  • Parser completo en Rust          │
+│  • Validación completa              │
+│  • Type checking                    │
+│  • Codegen → NASM                   │
+└─────────────────────────────────────┘
   ↓
-NASM (Assembly x86_64)
+┌─────────────────────────────────────┐
+│  NASM (Assembly x86_64)            │
+│  • Código ASM puro                 │
+└─────────────────────────────────────┘
   ↓
-Ejecutable (.exe)
+✅ Ejecutable (.exe) → CPU Directo
 ```
-**Ventajas:** Parser completo en Rust, fallback robusto
-**Uso:** Sintaxis compleja, casos edge, último recurso
+**Ventajas:** Parser completo en Rust, fallback robusto  
+**Uso:** Sintaxis compleja, casos edge, último recurso  
+**Trabaja:** Independiente (solo Rust)
 
-### 🔄 Selección Automática de Flujo
+### 🔷 D Language → NASM (ASM) ⭐ NUEVO
+**Para metaprogramming avanzado** (CTFE, templates, generación ASM optimizada):
+```
+ADead Source (.ad)
+  ↓
+┌─────────────────────────────────────┐
+│  D Language (metaprogramming)       │
+│  • CTFE (Compile-Time Execution)    │
+│  • Templates avanzados              │
+│  • Validación compile-time          │
+│  • Optimización automática          │
+│  • Genera código ASM directamente   │
+└─────────────────────────────────────┘
+  ↓
+┌─────────────────────────────────────┐
+│  NASM (Assembly x86_64)            │
+│  • Código ASM puro optimizado      │
+└─────────────────────────────────────┘
+  ↓
+✅ Ejecutable (.exe) → CPU Directo
+```
+**Ventajas:** Metaprogramming más poderoso, CTFE, generación ASM optimizada  
+**Uso:** Generación de código avanzada, optimizaciones, metaprogramming complejo  
+**Trabaja:** Independiente (solo D) o combinado con Rust
 
-El compilador elige automáticamente el mejor flujo:
-1. **Primero intenta:** Tree-sitter (parsing robusto)
-2. **Si falla, intenta:** Zig → Rust (eficiente + seguro)
-3. **Si falla, intenta:** Zig directo (máximo rendimiento)
+### 🌟 Tree-sitter + D Language + Rust → NASM (ASM) ⭐ NUEVO
+**Para máxima potencia** (parsing robusto + metaprogramming + seguridad):
+```
+ADead Source (.ad)
+  ↓
+┌─────────────────────────────────────┐
+│  Tree-sitter (parsing robusto)      │
+│  • Estructuras complejas            │
+│  • Error recovery                   │
+└─────────────────────────────────────┘
+  ↓ (AST Tree-sitter)
+┌─────────────────────────────────────┐
+│  D Language (metaprogramming)       │
+│  • CTFE: Validación compile-time    │
+│  • Templates: Generación ASM        │
+│  • Optimización automática          │
+└─────────────────────────────────────┘
+  ↓ (ASM mejorado)
+┌─────────────────────────────────────┐
+│  Rust (seguridad final)             │
+│  • Validación memoria               │
+│  • Codegen NASM final               │
+└─────────────────────────────────────┘
+  ↓
+┌─────────────────────────────────────┐
+│  NASM (Assembly x86_64)            │
+│  • Código ASM puro optimizado      │
+└─────────────────────────────────────┘
+  ↓
+✅ Ejecutable (.exe) → CPU Directo
+```
+**Ventajas:** Combinación de parsing robusto + metaprogramming + seguridad  
+**Uso:** Proyectos grandes, máxima optimización, código crítico  
+**Trabaja:** Cooperación de 3 lenguajes (Tree-sitter + D + Rust)
+
+### 🤖 Sistema de Selección Inteligente
+
+**ADead utiliza un Pipeline Selector Inteligente que analiza automáticamente el código fuente y selecciona el mejor flujo de compilación:**
+
+1. **Análisis Automático**: Detecta características del código (while loops, if statements, anidamiento, variables, expresiones, complejidad)
+2. **Selección Óptima**: Elige el mejor pipeline según las características detectadas
+3. **Generación Optimizada**: Genera código ASM puro y limpio
+4. **Fallback Inteligente**: Si un pipeline falla, intenta automáticamente otros pipelines
+
+El compilador elige automáticamente el mejor flujo según el código:
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  ADead Source (.ad)                                         │
+└─────────────────────────────────────────────────────────────┘
+                          ↓
+        ┌─────────────────┴─────────────────┐
+        │  Análisis del código fuente       │
+        └─────────────────┬─────────────────┘
+                          ↓
+    ┌─────────────────────┼─────────────────────┐
+    │                     │                     │
+    ↓                     ↓                     ↓
+┌─────────┐        ┌──────────┐        ┌──────────┐
+│ Complejo│        │ Simple   │        │ Crítico  │
+│ (loops, │        │ (floats, │        │ (necesita│
+│  ifs)   │        │ expres.) │        │  optim.) │
+└────┬────┘        └────┬─────┘        └────┬─────┘
+     │                  │                    │
+     ↓                  ↓                    ↓
+┌─────────┐        ┌──────────┐        ┌──────────┐
+│Tree-    │        │ Zig →    │        │ D → NASM │
+│sitter   │        │ NASM     │        │ (directo)│
+└────┬────┘        └────┬─────┘        └────┬─────┘
+     │                  │                    │
+     ↓                  ↓                    ↓
+┌─────────┐        ┌──────────┐        ┌──────────┐
+│ D + Rust│        │ Rust     │        │ Rust     │
+│(meta+   │        │(valid.)  │        │(final)   │
+│ valid.) │        └────┬─────┘        └────┬─────┘
+└────┬────┘             │                    │
+     │                  │                    │
+     └──────────────────┴────────────────────┘
+                        ↓
+              ┌─────────────────────┐
+              │  NASM (ASM puro)    │
+              │  • Código assembly  │
+              │  • Optimizado       │
+              └─────────────────────┘
+                        ↓
+              ┌─────────────────────┐
+              │  Ejecutable (.exe)  │
+              └─────────────────────┘
+                        ↓
+              ⚡ CPU Directo ⚡
+```
+
+**Lógica de Selección Inteligente:**
+1. **Análisis del código:** Detecta características (while, if, anidamiento, variables, expresiones, complejidad)
+2. **Selección automática según características:**
+   - Código simple → Zig → NASM directo (máxima eficiencia)
+   - While loops → Zig → NASM directo (optimizado para loops)
+   - Estructuras anidadas → Tree-sitter → Rust → NASM (parsing robusto)
+   - Expresiones con variables → Zig → Rust → NASM (validación necesaria)
+   - Proyectos grandes → D → Tree-sitter → Rust → NASM (máxima potencia)
+3. **Fallback automático:** Si un pipeline falla, intenta automáticamente otros en orden de robustez
 4. **Último recurso:** Rust directo (compatibilidad total)
 
 **Ver documentación completa:** [docs/FLUJO-COMPLETO.md](docs/FLUJO-COMPLETO.md)
@@ -112,12 +282,13 @@ ADead es un lenguaje de programación que combina la simplicidad de Python con e
   - ✅ Precisión Float64 verificada (~15-17 dígitos decimales)
 
 #### ✅ Arquitectura Técnica Sólida
-- ✅ **Arquitectura Triple: Zig + Tree-sitter + Rust** - Parsing robusto + eficiente + seguro
+- ✅ **Arquitectura Cuádruple: Tree-sitter + Zig + D Language + Rust** - Parsing robusto + eficiente + metaprogramming + seguro
   - **🌳 Tree-sitter:** Parsing robusto de estructuras complejas (while/if anidados)
   - **⚡ Zig:** Parsing eficiente y generación directa a ASM para casos simples
+  - **🔷 D Language:** Metaprogramming avanzado, CTFE, templates, generación ASM optimizada ⭐ **NUEVO**
   - **🔒 Rust:** Validación de memoria, type checking, seguridad y codegen NASM
 - ✅ **Flujos múltiples inteligentes** - Selección automática del mejor parser según el código
-- ✅ **Generación NASM x86_64** - Funcional en Windows/Linux
+- ✅ **Generación NASM x86_64** - Código ASM puro → CPU directo
 - ✅ **CLI modular profesional** - `compile`, `assemble`, `link`, `run`
 - ✅ **Floats completamente funcionales** - Literales, expresiones, operaciones verificadas
 
@@ -377,9 +548,171 @@ let result = add(5, 3)
   - Generación de código NASM optimizado
   - Parser de fallback (Chumsky) para compatibilidad total
 
-### Proceso de Compilación Completo
+### Proceso de Compilación Completo: De Sintaxis a CPU
 
-**ADead utiliza múltiples flujos que trabajan juntos, solos o independientemente según las necesidades:**
+**ADead utiliza múltiples flujos que trabajan solos, en parejas, tríos o todos juntos según las necesidades, hasta generar código ASM puro para la CPU:**
+
+```
+╔═══════════════════════════════════════════════════════════════════════╗
+║                    ARQUITECTURA CUÁDRUPLE                             ║
+║            Tree-sitter + Zig + D Language + Rust                      ║
+╚═══════════════════════════════════════════════════════════════════════╝
+
+┌─────────────────────────────────────────────────────────────────────┐
+│  ENTRADA: ADead Source (.ad)                                        │
+│  • Sintaxis estilo Python                                           │
+│  • Simple y legible                                                 │
+└─────────────────────────────────────────────────────────────────────┘
+                          ↓
+┌─────────────────────────────────────────────────────────────────────┐
+│  FASE 1: SELECCIÓN DEL FLUJO OPTIMAL                                │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐          │
+│  │ Complejo │  │ Simple   │  │ Crítico  │  │ Fallback │          │
+│  │ (loops)  │  │ (floats) │  │ (optim.) │  │          │          │
+│  └──────────┘  └──────────┘  └──────────┘  └──────────┘          │
+└─────────────────────────────────────────────────────────────────────┘
+                          ↓
+        ┌─────────────────┴─────────────────┐
+        │  Múltiples flujos disponibles     │
+        └─────────────────┬─────────────────┘
+                          ↓
+    ═══════════════════════════════════════════════════════════════
+    FLUJO 1: SOLO (Trabaja Independiente)
+    ═══════════════════════════════════════════════════════════════
+    
+    ┌─────────────┐      ┌─────────────┐      ┌─────────────┐
+    │ Tree-sitter │  OR  │    Zig      │  OR  │ D Language  │  OR  │  Rust  │
+    │   (solo)    │      │   (solo)    │      │   (solo)    │      │ (solo) │
+    └──────┬──────┘      └──────┬──────┘      └──────┬──────┘      └───┬───┘
+           │                    │                     │                 │
+           └────────────────────┴─────────────────────┴─────────────────┘
+                                 │
+                                 ↓
+                    ┌─────────────────────┐
+                    │  NASM (ASM puro)    │
+                    └─────────────────────┘
+                                 │
+                                 ↓
+                    ⚡ CPU Directo ⚡
+    
+    ═══════════════════════════════════════════════════════════════
+    FLUJO 2: PAREJAS (Cooperación de 2 lenguajes)
+    ═══════════════════════════════════════════════════════════════
+    
+    ┌──────────────┐      ┌──────────────┐      ┌──────────────┐
+    │Tree-sitter → │      │   Zig →      │      │   D →        │
+    │    Rust      │  OR  │    Rust      │  OR  │    Rust      │
+    └──────┬───────┘      └──────┬───────┘      └──────┬───────┘
+           │                     │                      │
+           ↓                     ↓                      ↓
+    ┌──────────────┐      ┌──────────────┐      ┌──────────────┐
+    │   Rust       │      │   Rust       │      │   Rust       │
+    │ (codegen)    │      │ (validación) │      │ (seguridad)  │
+    └──────┬───────┘      └──────┬───────┘      └──────┬───────┘
+           │                     │                      │
+           └─────────────────────┴──────────────────────┘
+                                 │
+                                 ↓
+                    ┌─────────────────────┐
+                    │  NASM (ASM puro)    │
+                    └─────────────────────┘
+                                 │
+                                 ↓
+                    ⚡ CPU Directo ⚡
+    
+    ═══════════════════════════════════════════════════════════════
+    FLUJO 3: TRÍOS (Cooperación de 3 lenguajes) ⭐ MÁXIMA POTENCIA
+    ═══════════════════════════════════════════════════════════════
+    
+    ┌──────────────┐
+    │Tree-sitter   │ → Parsing robusto
+    └──────┬───────┘
+           │ (AST)
+           ↓
+    ┌──────────────┐
+    │ D Language   │ → Metaprogramming + CTFE + Optimización
+    └──────┬───────┘
+           │ (ASM mejorado)
+           ↓
+    ┌──────────────┐
+    │   Rust       │ → Validación final + Codegen NASM
+    └──────┬───────┘
+           │
+           ↓
+    ┌──────────────┐
+    │  NASM (ASM)  │ → Código Assembly puro optimizado
+    └──────┬───────┘
+           │
+           ↓
+    ┌──────────────┐
+    │ Ejecutable   │ → .exe listo para ejecutar
+    └──────┬───────┘
+           │
+           ↓
+    ⚡ CPU Directo ⚡ → Máxima Performance
+
+    ═══════════════════════════════════════════════════════════════
+    FLUJO 4: CUÁDRUPLE (Todos juntos) 🚀 MÁXIMA ROBUSTEZ
+    ═══════════════════════════════════════════════════════════════
+    
+    ┌──────────────┐
+    │Tree-sitter   │ → Parsing robusto (estructuras complejas)
+    └──────┬───────┘
+           │
+           ↓
+    ┌──────────────┐      ┌──────────────┐
+    │    Zig       │ ───→ │ D Language   │ → Parsing eficiente +
+    │ (complementa)│      │ (metaprog)   │   metaprogramming
+    └──────────────┘      └──────┬───────┘
+                                 │
+                                 ↓
+    ┌───────────────────────────────────┐
+    │         Rust                      │
+    │  • Validación memoria             │
+    │  • Type checking                  │
+    │  • Codegen NASM final             │
+    └───────────────┬───────────────────┘
+                    │
+                    ↓
+    ┌───────────────────────────────────┐
+    │    NASM (Assembly x86_64)        │
+    │    • Código ASM puro             │
+    │    • Optimizado por D            │
+    │    • Validado por Rust           │
+    └───────────────┬───────────────────┘
+                    │
+                    ↓
+    ┌───────────────────────────────────┐
+    │    Ejecutable (.exe)              │
+    │    • Sin dependencias             │
+    │    • Performance nativa           │
+    └───────────────┬───────────────────┘
+                    │
+                    ↓
+            ⚡ CPU Directo ⚡
+            (Rendimiento máximo)
+```
+
+**Compatibilidad y Modos de Trabajo:**
+
+| Combinación | Lenguajes | Cuándo se usa | Ventajas |
+|-------------|-----------|---------------|----------|
+| **Solo** | Tree-sitter | Estructuras complejas | Parsing robusto |
+| **Solo** | Zig | Expresiones simples | Máxima eficiencia |
+| **Solo** | D Language | Metaprogramming | CTFE + Templates |
+| **Solo** | Rust | Fallback | Compatibilidad total |
+| **Pareja** | Tree-sitter + Rust | Estructuras + seguridad | Robusto + seguro |
+| **Pareja** | Zig + Rust | Eficiencia + seguridad | Rápido + seguro |
+| **Pareja** | D + Rust | Metaprogramming + seguridad | Potente + seguro |
+| **Trío** | Tree + D + Rust | Máxima potencia | Robusto + potente + seguro |
+| **Cuádruple** | Todos juntos | Proyectos críticos | Todo lo anterior |
+
+**Ventajas de la Arquitectura Cuádruple:**
+- ✅ **Flexibilidad:** Cada lenguaje puede trabajar solo o combinado
+- ✅ **Robustez:** Múltiples fallbacks si algo falla
+- ✅ **Performance:** Selección automática del flujo más eficiente
+- ✅ **Seguridad:** Validación en múltiples capas
+- ✅ **ASM Puro:** Código assembly directo para la CPU, sin overhead
 
 #### 🌳 Flujo 1: Tree-sitter → Rust → NASM (Parsing Robusto)
 **Para estructuras complejas y programas grandes:**
@@ -481,11 +814,14 @@ ADead Source: (cualquier código complejo)
 ```
 
 **Selección Automática Inteligente:**
-El compilador prueba los flujos en orden de robustez:
-1. **🌳 Tree-sitter** (más robusto) - Para estructuras complejas
-2. **⚡ Zig → Rust** (eficiente + seguro) - Para código con validación
-3. **⚡ Zig directo** (máximo rendimiento) - Para casos simples
-4. **🛠️ Rust directo** (fallback) - Último recurso
+El compilador prueba los flujos en orden de robustez y potencia:
+1. **🌳 Tree-sitter + 🔷 D + 🔒 Rust** (máxima potencia) - Para proyectos grandes y críticos
+2. **🌳 Tree-sitter + 🔒 Rust** (robusto + seguro) - Para estructuras complejas
+3. **🔷 D + 🔒 Rust** (metaprogramming + seguridad) - Para código que necesita optimización
+4. **⚡ Zig + 🔒 Rust** (eficiente + seguro) - Para código con validación
+5. **⚡ Zig directo** (máximo rendimiento) - Para casos simples
+6. **🔷 D directo** (metaprogramming puro) - Para generación ASM avanzada
+7. **🛠️ Rust directo** (fallback) - Último recurso
 
 **Ejemplo Práctico - Estructura Compleja:**
 ```adead
@@ -504,14 +840,18 @@ while suma <= limite {
 4. **Rust genera NASM:** Código assembly con loops y condiciones
 5. **NASM compila:** Genera `.obj` → Linker → `.exe`
 
-**Ventajas de la Arquitectura Triple:**
-- ✅ **🌳 Tree-sitter:** Parsing robusto de estructuras complejas (while/if anidados)
-- ✅ **⚡ Zig:** Máxima eficiencia para casos simples (sin overhead)
+**Ventajas de la Arquitectura Inteligente Cuádruple:**
+- ✅ **🤖 Pipeline Selector Inteligente:** Analiza código automáticamente y selecciona el mejor pipeline
+- ✅ **🌳 Tree-sitter:** Parsing robusto de estructuras complejas (while/if anidados) con error recovery
+- ✅ **⚡ Zig:** Máxima eficiencia para casos simples y while loops optimizados (sin overhead)
+- ✅ **🔷 D Language:** Metaprogramming avanzado, CTFE, templates, generación ASM optimizada ⭐ **NUEVO**
 - ✅ **🔒 Rust:** Seguridad garantizada y validación completa
-- ✅ **🛠️ Fallback:** Siempre hay un parser que funciona
-- ✅ **Selección automática:** El compilador elige el mejor flujo
+- ✅ **🛠️ Fallback Inteligente:** Sistema automático de fallbacks si un pipeline falla
+- ✅ **Selección automática optimizada:** El compilador analiza y elige el mejor flujo automáticamente
+- ✅ **Optimizaciones:** Limpieza de código ASM redundante, formato consistente
 - ✅ **Rendimiento nativo:** Ejecutable final sin dependencias
-- ✅ **Flexibilidad máxima:** Cada herramienta trabaja sola o combinada según necesidad
+- ✅ **Flexibilidad máxima:** Cada herramienta trabaja sola, en parejas, tríos o todos juntos
+- ✅ **ASM Puro y Limpio:** Código assembly optimizado directo para la CPU, máximo rendimiento
 
 ### Comandos Modulares
 
@@ -686,9 +1026,11 @@ Copyright (c) 2025 Eddi Andreé Salazar Matos
 
 <div align="center">
 
-**Hecho con ❤️ en Rust y Zig = "Adead" por Eddi Andreé Salazar Matos**
+**Hecho con ❤️ en 4 lenguajes: Tree-sitter + Zig + D Language + Rust = "Adead" por Eddi Andreé Salazar Matos**
 
 ⚡ *ADead - Simple syntax, powerful performance* ⚡
+
+**Arquitectura Inteligente Cuádruple:** Selección automática del mejor pipeline
 
 *11 de Diciembre de 2025*
 

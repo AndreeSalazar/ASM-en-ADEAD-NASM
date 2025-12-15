@@ -1,0 +1,22 @@
+[package]
+name = "adead-parser"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+chumsky = { workspace = true }
+adead-common = { path = "../adead-common" }
+anyhow = { workspace = true }
+tree-sitter = "0.21"
+cc = "1.0"
+
+[build-dependencies]
+cc = "1.0"
+# Build script para linkear con biblioteca Zig y Tree-sitter
+
+[features]
+default = []
+d-language = []
+no-zig = []  # Feature activada automáticamente por build.rs si Zig no está disponible
+

@@ -1,0 +1,3 @@
+cargo:rustc-link-lib=msvcrt
+cargo:rustc-link-search=native=C:\Users\andre\OneDrive\Documentos\ASM en ADEAD\zig/zig-out/lib
+cargo:rerun-if-changed=C:\Users\andre\OneDrive\Documentos\ASM en ADEAD\zig/zig-out/lib\adead_zig.lib

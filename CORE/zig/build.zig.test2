@@ -1,0 +1,21 @@
+// Test 2: Acceder a través de mod
+const std = @import("std");
+
+pub fn build(b: *std.Build) void {
+    const target = b.standardTargetOptions(.{});
+    const optimize = b.standardOptimizeOption(.{});
+    
+    const root_mod = b.addModule("root", .{
+        .root_source_file = .{ .path = "src/main.zig" },
+    });
+    
+    const lib = b.addStaticLibrary(.{
+        .name = "adead_zig",
+        .root_source_file = root_mod.root_source_file.?,
+        .target = target,
+        .optimize = optimize,
+    });
+    
+    b.installArtifact(lib);
+}
+
