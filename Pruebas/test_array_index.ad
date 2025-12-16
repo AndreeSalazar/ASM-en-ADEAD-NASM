@@ -1,0 +1,9 @@
+; Test: arr.index(x)
+let arr = [10, 20, 30, 40]
+let idx1 = arr.index(20)    ; Debe retornar 1
+let idx2 = arr.index(40)    ; Debe retornar 3
+let idx3 = arr.index(99)    ; Debe retornar -1 (no encontrado)
+print idx1
+print idx2
+print idx3
+

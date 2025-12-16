@@ -1,0 +1,5 @@
+; Test: s.lower()
+let s = "HOLA MUNDO"
+let lower = s.lower()
+print lower
+

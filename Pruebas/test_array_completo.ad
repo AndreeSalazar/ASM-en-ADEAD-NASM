@@ -1,0 +1,33 @@
+; Test completo: Todos los métodos de arrays
+let arr = [5, 2, 8, 1, 9]
+
+; Insertar
+arr.insert(0, 0)     ; [0, 5, 2, 8, 1, 9]
+print arr[0]        ; 0
+
+; Contar
+let count = arr.count(2)  ; 1
+print count
+
+; Buscar índice
+let idx = arr.index(8)    ; 3
+print idx
+
+; Ordenar
+arr.sort()          ; [0, 1, 2, 5, 8, 9]
+print arr[0]        ; 0
+print arr[1]        ; 1
+print arr[2]        ; 2
+
+; Invertir
+arr.reverse()       ; [9, 8, 5, 2, 1, 0]
+print arr[0]        ; 9
+print arr[5]        ; 0
+
+; Eliminar
+arr.remove(5)       ; Eliminar 5
+print arr[2]        ; Debe ser 2 (ya no hay 5)
+
+; Longitud final
+print len(arr)      ; Debe ser 5
+

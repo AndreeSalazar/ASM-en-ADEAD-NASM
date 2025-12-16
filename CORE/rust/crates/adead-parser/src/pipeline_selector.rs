@@ -141,16 +141,50 @@ pub fn generate_asm_with_pipeline(
                     // Verificar que el ASM tiene contenido válido (NASM o GAS)
                     if asm_code.contains("section") || asm_code.contains(".text") || 
                        asm_code.contains(".globl") || asm_code.contains("main:") ||
+                       asm_code.contains(".intel_syntax") || asm_code.contains("push") ||
                        asm_code.len() > 100 {
                         // Limpiar ASM usando Rust Cleaner
                         Ok(crate::clean_asm::clean_asm(&asm_code))
                     } else {
-                        Ok(format!("// Código C++ generado\n{}", cpp_code))
+                        // ASM no válido - retornar error descriptivo en lugar de código C++
+                        Err(format!(
+                            "El compilador C++ generó código que no parece ser ASM válido.\n\
+                            Longitud del código generado: {} bytes\n\
+                            Contenido (primeras 200 líneas):\n{}\n\n\
+                            Posibles causas:\n\
+                            1. El compilador C++ no está funcionando correctamente\n\
+                            2. El código C++ generado tiene errores\n\
+                            3. El compilador no soporta las opciones usadas\n\n\
+                            Código C++ generado (para diagnóstico):\n{}",
+                            asm_code.len(),
+                            asm_code.lines().take(200).collect::<Vec<_>>().join("\n"),
+                            cpp_code.lines().take(50).collect::<Vec<_>>().join("\n")
+                        ))
                     }
                 }
                 Err(e) => {
-                    eprintln!("   ⚠️  No se pudo compilar C++ a ASM: {}, retornando código C++", e);
-                    Ok(format!("// Código C++ generado\n{}", cpp_code))
+                    // Mejorar mensaje de error con información útil
+                    let compiler_info = find_cpp_compiler_for_pipeline()
+                        .map(|c| format!("Compilador encontrado: {}", c))
+                        .unwrap_or_else(|| "No se encontró ningún compilador C++".to_string());
+                    
+                    Err(format!(
+                        "No se pudo compilar C++ a ASM.\n\n\
+                        Error: {}\n\n\
+                        {}\n\n\
+                        Verifica que:\n\
+                        1. GCC++ o Clang++ está instalado\n\
+                        2. El compilador está en PATH o en una ruta común\n\
+                        3. El código C++ generado es válido\n\n\
+                        Rutas comunes verificadas:\n\
+                        - C:\\Program Files\\LLVM\\bin\\clang++.exe\n\
+                        - C:\\msys64\\mingw64\\bin\\g++.exe\n\
+                        - C:\\msys64\\clang64\\bin\\clang++.exe\n\n\
+                        Código C++ generado (primeras 30 líneas para diagnóstico):\n{}",
+                        e,
+                        compiler_info,
+                        cpp_code.lines().take(30).collect::<Vec<_>>().join("\n")
+                    ))
                 }
             }
         }
@@ -357,13 +391,76 @@ fn compile_cpp_to_asm_for_pipeline(cpp_code: &str, input_path: &str) -> Result<S
     
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
+        let stdout = String::from_utf8_lossy(&output.stdout);
         let _ = fs::remove_file(&cpp_file);
-        return Err(format!("Compilation failed: {}", stderr));
+        
+        // Mejorar mensaje de error con más contexto
+        let error_msg = if stderr.is_empty() && !stdout.is_empty() {
+            format!("Compilation failed (sin stderr, pero stdout contiene): {}", stdout)
+        } else if stderr.len() > 2000 {
+            // Truncar stderr muy largo
+            format!("Compilation failed: {}... (truncado, {} caracteres totales)", 
+                &stderr[..2000], stderr.len())
+        } else {
+            format!("Compilation failed: {}", stderr)
+        };
+        
+        return Err(format!(
+            "{}\n\n\
+            Compilador usado: {}\n\
+            Archivo C++ temporal: {}\n\
+            Comando ejecutado: {} -S {} -O2 ... -o {} {}\n\n\
+            Sugerencias:\n\
+            1. Verifica que el código C++ generado es válido\n\
+            2. Verifica que el compilador soporta C++20/C++17\n\
+            3. Intenta compilar manualmente el archivo temporal para más detalles",
+            error_msg,
+            compiler,
+            cpp_file.display(),
+            compiler,
+            cpp_std,
+            asm_file.display(),
+            cpp_file.display()
+        ));
     }
     
     // Leer ASM generado
     let asm = fs::read_to_string(&asm_file)
-        .map_err(|e| format!("Failed to read ASM file: {}", e))?;
+        .map_err(|e| format!("Failed to read ASM file: {} (archivo: {})", e, asm_file.display()))?;
+    
+    // Verificar que el ASM tiene contenido válido antes de retornar
+    if asm.is_empty() {
+        let _ = fs::remove_file(&cpp_file);
+        let _ = fs::remove_file(&asm_file);
+        return Err(format!(
+            "El compilador generó un archivo ASM vacío.\n\
+            Compilador: {}\n\
+            Archivo ASM: {}\n\
+            Esto puede indicar un problema con el compilador o las opciones usadas.",
+            compiler,
+            asm_file.display()
+        ));
+    }
+    
+    // Verificar que contiene al menos algunas instrucciones ASM básicas
+    let has_asm_content = asm.contains("section") || asm.contains(".text") || 
+                         asm.contains(".globl") || asm.contains("main:") ||
+                         asm.contains(".intel_syntax") || asm.contains("push") ||
+                         asm.contains("mov") || asm.contains("call") ||
+                         asm.contains("ret");
+    
+    if !has_asm_content && asm.len() < 100 {
+        let _ = fs::remove_file(&cpp_file);
+        let _ = fs::remove_file(&asm_file);
+        return Err(format!(
+            "El archivo ASM generado no parece contener código ASM válido.\n\
+            Longitud: {} bytes\n\
+            Contenido (primeras 500 caracteres):\n{}\n\n\
+            Esto puede indicar que el compilador no generó ASM correctamente.",
+            asm.len(),
+            &asm.chars().take(500).collect::<String>()
+        ));
+    }
     
     // Limpiar archivos temporales
     let _ = fs::remove_file(&cpp_file);

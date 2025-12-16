@@ -164,10 +164,13 @@ impl CppGenerator {
                         self.output.push_str("#endif\n");
                     }
                     Expr::Ident(name) => {
+                        // Detectar si es string o número
+                        let is_string = self.is_string_expr(expr);
+                        let format_str = if is_string { "{:s}" } else { "{:d}" };
                         // C++20: usar std::format si está disponible, sino cout
                         self.output.push_str("#if __cplusplus >= 202002L\n");
                         self.indent();
-                        self.output.push_str(&format!("cout << std::format(\"{}\\n\", {});\n", "{:d}", name));
+                        self.output.push_str(&format!("cout << std::format(\"{}\\n\", {});\n", format_str, name));
                         self.indent();
                         self.output.push_str("#else\n");
                         self.indent();
@@ -177,10 +180,13 @@ impl CppGenerator {
                     }
                     _ => {
                         let expr_code = self.generate_expr(expr);
+                        // Detectar si es string o número
+                        let is_string = self.is_string_expr(expr);
+                        let format_str = if is_string { "{:s}" } else { "{:d}" };
                         // C++20: usar std::format si está disponible, sino cout
                         self.output.push_str("#if __cplusplus >= 202002L\n");
                         self.indent();
-                        self.output.push_str(&format!("cout << std::format(\"{}\\n\", {});\n", "{:d}", expr_code));
+                        self.output.push_str(&format!("cout << std::format(\"{}\\n\", {});\n", format_str, expr_code));
                         self.indent();
                         self.output.push_str("#else\n");
                         self.indent();
@@ -221,21 +227,27 @@ impl CppGenerator {
                         self.output.push_str(&format!("string {} = {};\n", name, value_code));
                     }
                     _ => {
-                        let value_code = self.generate_expr(value);
-                        // C++20: usar consteval para constantes simples (más estricto que constexpr)
-                        // C++17: usar constexpr para constantes simples
-                        if self.is_constant_expr(value) {
-                            self.output.push_str("#if __cplusplus >= 202002L\n");
-                            self.indent();
-                            self.output.push_str(&format!("consteval int64_t {} = {};\n", name, value_code));
-                            self.indent();
-                            self.output.push_str("#else\n");
-                            self.indent();
-                            self.output.push_str(&format!("constexpr int64_t {} = {};\n", name, value_code));
-                            self.indent();
-                            self.output.push_str("#endif\n");
+                        // Verificar si es una expresión de string (concatenación, etc.)
+                        if self.is_string_expr(value) {
+                            let value_code = self.generate_expr(value);
+                            self.output.push_str(&format!("string {} = {};\n", name, value_code));
                         } else {
-                            self.output.push_str(&format!("int64_t {} = {};\n", name, value_code));
+                            let value_code = self.generate_expr(value);
+                            // C++20: usar consteval para constantes simples (más estricto que constexpr)
+                            // C++17: usar constexpr para constantes simples
+                            if self.is_constant_expr(value) {
+                                self.output.push_str("#if __cplusplus >= 202002L\n");
+                                self.indent();
+                                self.output.push_str(&format!("consteval int64_t {} = {};\n", name, value_code));
+                                self.indent();
+                                self.output.push_str("#else\n");
+                                self.indent();
+                                self.output.push_str(&format!("constexpr int64_t {} = {};\n", name, value_code));
+                                self.indent();
+                                self.output.push_str("#endif\n");
+                            } else {
+                                self.output.push_str(&format!("int64_t {} = {};\n", name, value_code));
+                            }
                         }
                     }
                 }
@@ -486,6 +498,15 @@ impl CppGenerator {
                 // C++: arr[index] (directo, sin función helper)
                 format!("{}[{}]", array_code, index_code)
             }
+            Expr::Slice { object, start, end } => {
+                // Slicing de strings: s[0:4] -> s.substr(0, 4)
+                // En C++, substr(start, length) donde length = end - start
+                let obj_code = self.generate_expr(object);
+                let start_code = self.generate_expr(start);
+                let end_code = self.generate_expr(end);
+                // Generar: obj.substr(start, end - start)
+                format!("{}.substr({}, {} - {})", obj_code, start_code, end_code, start_code)
+            }
             Expr::Assign { name, value } => {
                 let value_code = self.generate_expr(value);
                 format!("{} = {}", name, value_code)
@@ -502,6 +523,59 @@ impl CppGenerator {
             Expr::Number(_) | Expr::Float(_) | Expr::Bool(_) => true,
             Expr::BinaryOp { left, right, .. } => {
                 self.is_constant_expr(left) && self.is_constant_expr(right)
+            }
+            _ => false,
+        }
+    }
+
+    /// Verificar si una expresión es de tipo string
+    /// Detecta strings literales, variables string, y concatenaciones de strings
+    fn is_string_expr(&self, expr: &Expr) -> bool {
+        match expr {
+            Expr::String(_) => true,
+            Expr::Ident(name) => {
+                // Verificar si es una variable string conocida
+                // Heurística mejorada:
+                // 1. Si el nombre es solo 's' (variable común para strings)
+                // 2. Si el nombre empieza con 's' seguido de un número o letra (s1, s2, str1, etc.)
+                // 3. Si contiene "str", "text", "msg" en el nombre
+                // 4. Nombres comunes como "texto", "mensaje"
+                let lower_name = name.to_lowercase();
+                name == "s"  // Variable común 's' para strings (una sola letra)
+                || (name.starts_with('s') && name.len() > 1 && name.chars().nth(1).map_or(false, |c| c.is_alphanumeric()))
+                || lower_name.contains("str")
+                || lower_name.contains("text")
+                || lower_name.contains("msg")
+                || lower_name == "texto"
+                || lower_name == "mensaje"
+            }
+            Expr::BinaryOp { op: BinOp::Add, left, right } => {
+                // Concatenación de strings: si al menos uno de los operandos es string,
+                // asumimos que es concatenación de strings (C++ permite string + string)
+                // Verificamos ambos lados para mayor precisión
+                match (left.as_ref(), right.as_ref()) {
+                    (Expr::String(_), _) | (_, Expr::String(_)) => true,
+                    (Expr::Ident(_), Expr::Ident(_)) => {
+                        // Si ambos son identificadores, verificamos si alguno parece string
+                        self.is_string_expr(left) || self.is_string_expr(right)
+                    }
+                    _ => {
+                        // Si alguno de los operandos es string, el resultado es string
+                        self.is_string_expr(left) || self.is_string_expr(right)
+                    }
+                }
+            }
+            Expr::Call { name, .. } => {
+                // Algunas funciones retornan strings (futuro)
+                name == "to_string" || name.contains("string")
+            }
+            Expr::MethodCall { method, .. } => {
+                // Métodos de strings retornan strings (futuro)
+                matches!(method.as_str(), "upper" | "lower" | "slice" | "substring")
+            }
+            Expr::Slice { object, .. } => {
+                // Slicing siempre retorna string: s[0:4] -> string
+                self.is_string_expr(object)
             }
             _ => false,
         }

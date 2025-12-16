@@ -1,0 +1,5 @@
+; Test: len(s) para strings
+let s = "holamundo"
+let length = len(s)
+print length
+

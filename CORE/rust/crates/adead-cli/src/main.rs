@@ -3,8 +3,42 @@ use clap::{Parser, Subcommand};
 use std::fs;
 use std::path::PathBuf;
 
+// Helper function para detectar si el código tiene strings avanzados
+fn has_advanced_strings(source: &str) -> bool {
+    // Detectar operaciones de strings avanzadas
+    source.contains("\"") ||  // String literals
+    source.contains("+") && (source.contains("let") || source.contains("s")) ||  // Concatenación
+    source.contains("[") && source.contains(":") ||  // Slicing s[0:4]
+    source.contains(".upper()") || source.contains(".lower()") ||  // Métodos de strings
+    source.contains("len(")  // len(s)
+}
+
+// Helper function para usar backend NASM directo
+fn compile_with_nasm_backend(source: &str, input_path: &str, output_path: &str) -> Result<()> {
+    println!("   🎯 Usando backend NASM directo (strings avanzados detectados)...");
+    
+    // Parsear código ADead
+    let program = adead_parser::parse(source)
+        .map_err(|e| anyhow::anyhow!("Parser error: {:?}", e))?;
+    
+    // Generar NASM usando el backend directo
+    let mut generator = adead_backend::CodeGenerator::new();
+    let nasm_code = generator.generate(&program)
+        .map_err(|e| anyhow::anyhow!("NASM generation error: {:?}", e))?;
+    
+    fs::write(output_path, nasm_code)
+        .with_context(|| format!("Failed to write output file: {}", output_path))?;
+    println!("✅ Compilado (NASM directo): {} -> {}", input_path, output_path);
+    Ok(())
+}
+
 // Helper function para usar pipeline inteligente
 fn compile_with_intelligent_pipeline(source: &str, input_path: &str, output_path: &str) -> Result<()> {
+    // Si detecta strings avanzados, usar NASM directo
+    if has_advanced_strings(source) {
+        return compile_with_nasm_backend(source, input_path, output_path);
+    }
+    
     println!("   🔍 Analizando código ADead y seleccionando pipeline óptimo...");
     
     match adead_parser::pipeline_selector::process_adead_intelligent(source) {
@@ -97,6 +131,10 @@ fn main() -> Result<()> {
                 .with_context(|| format!("Failed to read input file: {}", input.display()))?;
             
             match backend.as_str() {
+                "nasm" | "direct" => {
+                    // Usar backend NASM directo
+                    compile_with_nasm_backend(&source, &input.display().to_string(), &output_path.display().to_string())?;
+                }
                 "cpp" | "c++" => {
                     // Usar pipeline C++ directamente
                     let pipeline = adead_parser::pipeline_selector::RecommendedPipeline::ParserManualCpp;
@@ -116,7 +154,7 @@ fn main() -> Result<()> {
                     compile_with_c_backend(&source, &input.display().to_string(), &output_path.display().to_string())?;
                 }
                 "auto" | _ => {
-                    // Usar pipeline inteligente (detecta automáticamente)
+                    // Usar pipeline inteligente (detecta automáticamente strings y usa NASM directo)
                     compile_with_intelligent_pipeline(&source, &input.display().to_string(), &output_path.display().to_string())?;
                 }
             }

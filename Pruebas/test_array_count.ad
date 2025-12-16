@@ -1,0 +1,9 @@
+; Test: arr.count(x)
+let arr = [1, 2, 2, 3, 2, 4]
+let count1 = arr.count(2)   ; Debe retornar 3
+let count2 = arr.count(1)   ; Debe retornar 1
+let count3 = arr.count(99)  ; Debe retornar 0
+print count1
+print count2
+print count3
+

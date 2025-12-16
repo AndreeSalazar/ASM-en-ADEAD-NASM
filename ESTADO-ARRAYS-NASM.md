@@ -122,7 +122,14 @@
 
 ---
 
-## 🎯 Próximos Pasos
+## 🎯 Próximos Pasos hacia Python Style TOTAL
+
+### 🎯 Meta Principal: Python Style → NASM Directo
+
+Según `meta.md`, el objetivo es **sintaxis estilo Python que genere NASM puro directamente**, sin pasar por C++.
+
+**Estado Actual:** ✅ Arrays funcionan con NASM directo  
+**Objetivo:** Completar todas las funcionalidades estilo Python
 
 ### Prioridad 1: Métodos Estilo Python ✅ COMPLETADO
 1. ✅ **Parser:** Detección de `arr.append(x)` y `arr.pop()` como `MethodCall` (ya existía)
@@ -130,17 +137,59 @@
 3. ✅ **Parser:** Detección de `len(arr)` como built-in (ya existía)
 4. ✅ **NASM Backend:** Generación de código NASM para built-in `len()`
 
-### Prioridad 2: Testing
+### Prioridad 2: Completar Métodos Array Estilo Python 🔥
+
+**Métodos faltantes para Python Style TOTAL:**
+
+- [ ] `arr.insert(i, x)` - Insertar en posición específica
+- [ ] `arr.remove(x)` - Eliminar primera ocurrencia
+- [ ] `arr.index(x)` - Encontrar índice de valor
+- [ ] `arr.count(x)` - Contar ocurrencias
+- [ ] `arr.sort()` - Ordenar array
+- [ ] `arr.reverse()` - Invertir orden
+
+**Funciones helper NASM requeridas:**
+- [ ] `array_insert(index, value)` - Insertar en posición específica
+- [ ] `array_remove(value)` - Eliminar primera ocurrencia
+- [ ] `array_index(value)` - Encontrar índice de valor
+- [ ] `array_count(value)` - Contar ocurrencias
+- [ ] `array_sort()` - Ordenar array
+- [ ] `array_reverse()` - Invertir orden
+
+### Prioridad 3: Testing
 1. Crear tests para `array_new`, `array_from_values`, `array_get`, `array_set`
 2. Crear tests para `array_append`, `array_pop`, `array_len`
 3. Crear tests para `ArrayLiteral` y `Index` (lectura y asignación)
 4. Crear tests para métodos estilo Python (`arr.append()`, `arr.pop()`)
 5. Crear tests para built-in `len(arr)`
+6. Crear tests para métodos faltantes (`insert`, `remove`, `index`, `count`, `sort`, `reverse`)
 
-### Prioridad 3: Optimizaciones
+### Prioridad 4: Optimizaciones
 1. Optimizar `array_append` para evitar realloc frecuentes
 2. Agregar `array_reserve(capacity)` para pre-reservar espacio
 3. Optimizar copia de datos en `array_from_values` (usar rep movsq)
+4. Optimizar `array_sort` con algoritmo eficiente (quicksort o mergesort)
+
+### Prioridad 5: Integración con Strings Avanzados 🔥
+
+**Para Python Style TOTAL, necesitamos:**
+
+- [ ] Arrays de strings: `let arr = ["hola", "mundo"]`
+- [ ] Métodos de arrays con strings: `arr.append("nuevo")`
+- [ ] Slicing de arrays: `arr[0:3]` (subarray)
+- [ ] Concatenación de arrays: `arr1 + arr2`
+
+**Resultado Esperado:**
+```ad
+let arr = [1, 2, 3]
+arr.append(4)
+arr.insert(0, 0)
+arr.sort()
+arr.reverse()
+print arr[0]
+print len(arr)
+```
+↓ Genera NASM directo completo estilo Python
 
 ---
 

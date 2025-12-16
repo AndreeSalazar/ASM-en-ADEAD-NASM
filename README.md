@@ -655,7 +655,18 @@ while suma <= limite {
 - Strings reales (más allá de literales)
 - Módulos/imports
 
-Ver [docs/ESTADO-ACTUAL.md](docs/ESTADO-ACTUAL.md) para detalles completos.
+**🎯 Meta Principal: Python Style TOTAL → NASM Directo**
+
+Según `meta.md`, el objetivo es **sintaxis estilo Python que genere NASM puro directamente**, sin pasar por C++.
+
+**Progreso hacia Python Style TOTAL:**
+- ✅ Arrays básicos: 60% completado (6/10 métodos)
+- ⏳ Strings avanzados: 0% completado (crítico)
+- ⚡ Funciones completas: 40% completado
+- ⚡ Módulos: 0% completado
+
+Ver [METAS-PYTHON-STYLE-TOTAL.md](METAS-PYTHON-STYLE-TOTAL.md) para detalles completos de las metas.  
+Ver [docs/ESTADO-ACTUAL.md](docs/ESTADO-ACTUAL.md) para detalles completos del estado actual.
 
 ### 🎯 Lo que YA TIENE ADead (Funcional y Verificado)
 
@@ -738,6 +749,17 @@ arr.reverse()       // Invierte array
 - **GCC++ o Clang++** (`g++` o `clang++` en PATH) - **REQUERIDO** para compilar C++ → ASM
 - **NASM o GAS** (as) - Para ensamblar código ASM → .o
 - **Zig** (opcional pero recomendado) - Linker alternativo más fácil de instalar
+
+**Verificar herramientas instaladas:**
+```powershell
+# Verificar todo el stack completo
+.\VERIFICAR-STACK-COMPLETO.ps1
+
+# O verificar individualmente:
+.\VERIFICAR-GCC-CLANG.ps1    # Verificar GCC/Clang
+.\VERIFICAR-NASM.ps1         # Verificar NASM
+.\VERIFICAR-ZIG-LINKER.ps1   # Verificar Zig
+```
 
 ### Instalación
 
@@ -838,7 +860,58 @@ ejecutar_con_zig.bat test_strings_basico.ad
 - [Características Funcionales](docs/CARACTERISTICAS-FUNCIONALES.md) ⭐ - Qué funciona y qué falta
 - [Análisis Potencial C++ Completo](ANALISIS-POTENCIAL-CPP-COMPLETO.md) ⭐ - Stack completo C++ explicado
 - [Historial Zig Linker y C++17/C++20](HISTORIAL-ZIG-CPP.md) ⭐ - Historial completo de decisiones arquitectónicas
+- [Investigación Stack Completo](INVESTIGACION-STACK-COMPLETO.md) ⭐ - Investigación detallada de GCC/Clang, Zig y NASM
 - [Índice de Documentación](docs/README.md) - Guía de toda la documentación
+
+---
+
+## 🎯 Roadmap: Hacia Python Style TOTAL
+
+**Estado Actual:** Base funcional con while/if/variables/arrays + Stack completo C++ (~60% del camino)
+
+### 🎯 Meta Principal: Python Style → NASM Directo
+
+**Objetivo:** Sintaxis estilo Python que genere NASM puro directamente, sin pasar por C++.
+
+**Pipeline Objetivo:**
+```
+ADead → NASM Directo → ASM Final
+```
+
+**Pipeline Actual:**
+```
+ADead → C++ Generator → GCC++/Clang++ → Rust Cleaner → ASM
+```
+
+### 📊 Progreso hacia Python Style TOTAL
+
+**Fase 1: Arrays Completos** 🔥 PRIORIDAD ALTA
+- ✅ Arrays básicos: 60% completado (6/10 métodos)
+- ⏳ Métodos faltantes: `insert`, `remove`, `index`, `count`, `sort`, `reverse`
+- **Tiempo estimado:** 1-2 semanas
+
+**Fase 2: Strings Avanzados** 🔥 PRIORIDAD ALTA
+- ⏳ Estructura String dinámica en NASM
+- ⏳ Concatenación dinámica (`s1 + s2`)
+- ⏳ Slicing (`s[0:4]`)
+- ⏳ Métodos (`s.upper()`, `s.lower()`, `s.len()`)
+- **Tiempo estimado:** 2-3 semanas
+
+**Fase 3: Funciones Completas** ⚡ PRIORIDAD MEDIA
+- ⚡ Stack frames mejorados: 40% completado
+- ⏳ Múltiples parámetros (> 4)
+- ⏳ Recursión profunda
+- **Tiempo estimado:** 2-3 semanas
+
+**Fase 4: Módulos** ⚡ PRIORIDAD MEDIA
+- ⏳ Generación NASM inline de módulos
+- ⏳ Linking de módulos
+- ⏳ Namespaces
+- **Tiempo estimado:** 2 semanas
+
+**Total estimado: 6-10 semanas para Python Style TOTAL**
+
+Ver [METAS-PYTHON-STYLE-TOTAL.md](METAS-PYTHON-STYLE-TOTAL.md) para detalles completos.
 
 ---
 

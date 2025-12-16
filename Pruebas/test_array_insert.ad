@@ -1,0 +1,9 @@
+; Test: arr.insert(i, x)
+let arr = [1, 2, 3]
+arr.insert(0, 0)    ; Insertar 0 al inicio
+print arr[0]        ; Debe imprimir 0
+print arr[1]        ; Debe imprimir 1
+print arr[2]        ; Debe imprimir 2
+print arr[3]        ; Debe imprimir 3
+print len(arr)      ; Debe imprimir 4
+

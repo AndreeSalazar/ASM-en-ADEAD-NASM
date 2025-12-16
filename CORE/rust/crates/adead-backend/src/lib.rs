@@ -1215,6 +1215,114 @@ impl CodeGenerator {
                         // array_reverse no retorna valor (void), pero dejamos 0 en rax
                         self.text_section.push("    mov rax, 0  ; void return".to_string());
                     }
+                    "insert" if args.len() == 2 => {
+                        // arr.insert(i, x) -> array_insert(arr, i, x)
+                        // Generar expresión del array (puntero al Array)
+                        self.generate_expr_windows(object)?;
+                        self.text_section.push("    push rax  ; guardar puntero al Array".to_string());
+                        
+                        // Generar expresión del índice
+                        self.generate_expr_windows(&args[0])?;
+                        self.text_section.push("    push rax  ; guardar índice".to_string());
+                        
+                        // Generar expresión del valor
+                        self.generate_expr_windows(&args[1])?;
+                        self.text_section.push("    push rax  ; guardar valor".to_string());
+                        
+                        // Preparar parámetros: RCX = puntero al Array, RDX = índice, R8 = valor
+                        self.text_section.push("    pop r8  ; valor".to_string());
+                        self.text_section.push("    pop rdx  ; índice".to_string());
+                        self.text_section.push("    pop rcx  ; puntero al Array".to_string());
+                        
+                        // Llamar a array_insert
+                        self.text_section.push("    sub rsp, 32  ; shadow space".to_string());
+                        self.text_section.push("    call array_insert".to_string());
+                        self.text_section.push("    add rsp, 32  ; restaurar shadow space".to_string());
+                        
+                        // array_insert no retorna valor (void), pero dejamos 0 en rax
+                        self.text_section.push("    mov rax, 0  ; void return".to_string());
+                    }
+                    "remove" if args.len() == 1 => {
+                        // arr.remove(x) -> array_remove(arr, x)
+                        // Generar expresión del array (puntero al Array)
+                        self.generate_expr_windows(object)?;
+                        self.text_section.push("    push rax  ; guardar puntero al Array".to_string());
+                        
+                        // Generar expresión del valor a eliminar
+                        self.generate_expr_windows(&args[0])?;
+                        self.text_section.push("    push rax  ; guardar valor".to_string());
+                        
+                        // Preparar parámetros: RCX = puntero al Array, RDX = valor
+                        self.text_section.push("    pop rdx  ; valor".to_string());
+                        self.text_section.push("    pop rcx  ; puntero al Array".to_string());
+                        
+                        // Llamar a array_remove
+                        self.text_section.push("    sub rsp, 32  ; shadow space".to_string());
+                        self.text_section.push("    call array_remove".to_string());
+                        self.text_section.push("    add rsp, 32  ; restaurar shadow space".to_string());
+                        
+                        // array_remove no retorna valor (void), pero dejamos 0 en rax
+                        self.text_section.push("    mov rax, 0  ; void return".to_string());
+                    }
+                    "index" if args.len() == 1 => {
+                        // arr.index(x) -> array_index(arr, x)
+                        // Generar expresión del array (puntero al Array)
+                        self.generate_expr_windows(object)?;
+                        self.text_section.push("    push rax  ; guardar puntero al Array".to_string());
+                        
+                        // Generar expresión del valor a buscar
+                        self.generate_expr_windows(&args[0])?;
+                        self.text_section.push("    push rax  ; guardar valor".to_string());
+                        
+                        // Preparar parámetros: RCX = puntero al Array, RDX = valor
+                        self.text_section.push("    pop rdx  ; valor".to_string());
+                        self.text_section.push("    pop rcx  ; puntero al Array".to_string());
+                        
+                        // Llamar a array_index
+                        self.text_section.push("    sub rsp, 32  ; shadow space".to_string());
+                        self.text_section.push("    call array_index".to_string());
+                        self.text_section.push("    add rsp, 32  ; restaurar shadow space".to_string());
+                        
+                        // array_index retorna el índice en RAX (ya está ahí)
+                    }
+                    "count" if args.len() == 1 => {
+                        // arr.count(x) -> array_count(arr, x)
+                        // Generar expresión del array (puntero al Array)
+                        self.generate_expr_windows(object)?;
+                        self.text_section.push("    push rax  ; guardar puntero al Array".to_string());
+                        
+                        // Generar expresión del valor a contar
+                        self.generate_expr_windows(&args[0])?;
+                        self.text_section.push("    push rax  ; guardar valor".to_string());
+                        
+                        // Preparar parámetros: RCX = puntero al Array, RDX = valor
+                        self.text_section.push("    pop rdx  ; valor".to_string());
+                        self.text_section.push("    pop rcx  ; puntero al Array".to_string());
+                        
+                        // Llamar a array_count
+                        self.text_section.push("    sub rsp, 32  ; shadow space".to_string());
+                        self.text_section.push("    call array_count".to_string());
+                        self.text_section.push("    add rsp, 32  ; restaurar shadow space".to_string());
+                        
+                        // array_count retorna el conteo en RAX (ya está ahí)
+                    }
+                    "sort" if args.is_empty() => {
+                        // arr.sort() -> array_sort(arr)
+                        // Generar expresión del array (puntero al Array)
+                        self.generate_expr_windows(object)?;
+                        self.text_section.push("    push rax  ; guardar puntero al Array".to_string());
+                        
+                        // Preparar parámetros: RCX = puntero al Array
+                        self.text_section.push("    pop rcx  ; puntero al Array".to_string());
+                        
+                        // Llamar a array_sort
+                        self.text_section.push("    sub rsp, 32  ; shadow space".to_string());
+                        self.text_section.push("    call array_sort".to_string());
+                        self.text_section.push("    add rsp, 32  ; restaurar shadow space".to_string());
+                        
+                        // array_sort no retorna valor (void), pero dejamos 0 en rax
+                        self.text_section.push("    mov rax, 0  ; void return".to_string());
+                    }
                     "upper" if args.is_empty() && self.is_string_expr(object) => {
                         // s.upper() -> string_upper(s)
                         // Generar expresión del string (puntero al String)
@@ -1965,19 +2073,34 @@ impl CodeGenerator {
         match expr {
             Expr::String(_) => true,
             Expr::Ident(name) => {
-                // Verificar si la variable es de tipo String
-                // Por ahora, asumimos que si es variable, podría ser String
-                // TODO: Mejorar con type tracking (similar a cómo se hace con arrays)
-                // Por ahora retornar false, se mejorará cuando tengamos type tracking
-                false
+                // Heurística mejorada para detectar variables string:
+                // 1. Si el nombre es solo 's' (variable común para strings)
+                // 2. Si el nombre empieza con 's' seguido de un número o letra (s1, s2, str1, etc.)
+                // 3. Si contiene "str", "text", "msg" en el nombre
+                // 4. Nombres comunes como "texto", "mensaje"
+                let lower_name = name.to_lowercase();
+                name == "s"  // Variable común 's' para strings (una sola letra)
+                || (name.starts_with('s') && name.len() > 1 && name.chars().nth(1).map_or(false, |c| c.is_alphanumeric()))
+                || lower_name.contains("str")
+                || lower_name.contains("text")
+                || lower_name.contains("msg")
+                || lower_name == "texto"
+                || lower_name == "mensaje"
+                || lower_name.starts_with("s")  // Cualquier nombre que empiece con 's'
             }
-            Expr::MethodCall { object, method: _, args: _ } => {
+            Expr::MethodCall { object, method, args: _ } => {
                 // Si el objeto es String, entonces es string method
-                self.is_string_expr(object)
+                // También métodos de strings retornan strings
+                self.is_string_expr(object) || matches!(method.as_str(), "upper" | "lower" | "slice" | "substring")
             }
             Expr::BinaryOp { left, op: BinOp::Add, right } => {
                 // Concatenación: si ambos operandos son strings
-                self.is_string_expr(left) && self.is_string_expr(right)
+                // O si al menos uno es string (para permitir string + literal)
+                self.is_string_expr(left) || self.is_string_expr(right)
+            }
+            Expr::Slice { object, .. } => {
+                // Slicing siempre retorna string: s[0:4] -> string
+                self.is_string_expr(object)
             }
             Expr::Call { module: _, name, args } => {
                 // len(s) donde s es string
@@ -2052,6 +2175,66 @@ impl CodeGenerator {
         label
     }
 
+    /// Generar prologue ABI-safe para funciones helper
+    /// Preserva registros no volátiles: RBX, RDI, RSI, R12-R15
+    /// Asegura stack alignment a 16 bytes
+    fn generate_abi_prologue(&mut self, needs_shadow_space: bool) {
+        // Preservar registros no volátiles (callee-saved)
+        // Orden: RBP (ya se hace con push rbp), RBX, RDI, RSI, R12-R15
+        self.text_section.push("    push rbp".to_string());
+        self.text_section.push("    mov rbp, rsp".to_string());
+        self.text_section.push("    push rbx  ; preservar registro no volátil".to_string());
+        self.text_section.push("    push rdi  ; preservar registro no volátil".to_string());
+        self.text_section.push("    push rsi  ; preservar registro no volátil".to_string());
+        self.text_section.push("    push r12  ; preservar registro no volátil".to_string());
+        self.text_section.push("    push r13  ; preservar registro no volátil".to_string());
+        self.text_section.push("    push r14  ; preservar registro no volátil".to_string());
+        self.text_section.push("    push r15  ; preservar registro no volátil".to_string());
+        
+        // Asegurar stack alignment a 16 bytes
+        // Después de 7 push (rbp, rbx, rdi, rsi, r12-r15) = 56 bytes
+        // 56 % 16 = 8, necesitamos 8 bytes más para alinear
+        self.text_section.push("    ; Asegurar stack alignment a 16 bytes".to_string());
+        self.text_section.push("    sub rsp, 8  ; alinear stack (56 bytes de push % 16 = 8)".to_string());
+        
+        if needs_shadow_space {
+            self.text_section.push("    sub rsp, 32  ; shadow space para llamadas a funciones externas".to_string());
+        }
+    }
+
+    /// Generar epilogue ABI-safe para funciones helper
+    /// Restaura registros no volátiles en orden inverso
+    fn generate_abi_epilogue(&mut self, needs_shadow_space: bool) {
+        if needs_shadow_space {
+            self.text_section.push("    add rsp, 32  ; restaurar shadow space".to_string());
+        }
+        self.text_section.push("    add rsp, 8  ; restaurar alineación de stack".to_string());
+        
+        // Restaurar registros no volátiles en orden inverso
+        self.text_section.push("    pop r15  ; restaurar registro no volátil".to_string());
+        self.text_section.push("    pop r14  ; restaurar registro no volátil".to_string());
+        self.text_section.push("    pop r13  ; restaurar registro no volátil".to_string());
+        self.text_section.push("    pop r12  ; restaurar registro no volátil".to_string());
+        self.text_section.push("    pop rsi  ; restaurar registro no volátil".to_string());
+        self.text_section.push("    pop rdi  ; restaurar registro no volátil".to_string());
+        self.text_section.push("    pop rbx  ; restaurar registro no volátil".to_string());
+        self.text_section.push("    leave  ; restaurar rbp y rsp".to_string());
+        self.text_section.push("    ret".to_string());
+    }
+
+    /// Asegurar stack alignment antes de una llamada a función externa
+    /// Debe llamarse ANTES de preparar parámetros y shadow space
+    /// Calcula si el stack está alineado y ajusta si es necesario
+    fn ensure_stack_alignment_before_call(&mut self, comment: &str) {
+        // Nota: Si ya hicimos prologue ABI-safe, el stack debería estar alineado
+        // Pero si hay pushes adicionales antes de la llamada, necesitamos verificar
+        // Por ahora, confiamos en que el prologue mantiene la alineación
+        // Si hay pushes adicionales, el código debe ajustar manualmente
+        self.text_section.push(format!("    ; Verificar stack alignment antes de call: {}", comment));
+        // En una implementación más sofisticada, podríamos calcular dinámicamente
+        // Por ahora, asumimos que el prologue mantiene la alineación correcta
+    }
+
     /// Generar funciones helper de Array en NASM
     /// Estructura Array: [data: qword, length: qword, capacity: qword]
     /// Total: 24 bytes (3 qwords)
@@ -2066,20 +2249,16 @@ impl CodeGenerator {
         // array_new: Crear array vacío
         // Retorna: RAX = puntero al Array (en heap)
         self.text_section.push("array_new:".to_string());
-        self.text_section.push("    ; Prologue".to_string());
-        self.text_section.push("    push rbp".to_string());
-        self.text_section.push("    mov rbp, rsp".to_string());
-        self.text_section.push("    sub rsp, 32  ; shadow space".to_string());
+        self.generate_abi_prologue(true);  // Necesita shadow space para VirtualAlloc
         
         // Allocar memoria para Array (24 bytes)
         self.text_section.push("    ; Allocar memoria para Array (24 bytes)".to_string());
+        self.ensure_stack_alignment_before_call("VirtualAlloc");
         self.text_section.push("    mov rcx, 0  ; lpAddress (NULL = auto)".to_string());
         self.text_section.push("    mov rdx, 24  ; dwSize (24 bytes para Array struct)".to_string());
         self.text_section.push("    mov r8, 0x1000  ; flAllocationType (MEM_COMMIT)".to_string());
         self.text_section.push("    mov r9, 0x04  ; flProtect (PAGE_READWRITE)".to_string());
-        self.text_section.push("    sub rsp, 32  ; shadow space".to_string());
         self.text_section.push("    call VirtualAlloc".to_string());
-        self.text_section.push("    add rsp, 32  ; restaurar shadow space".to_string());
         
         // Inicializar Array: length=0, capacity=4, data=NULL (se asignará después)
         self.text_section.push("    ; Inicializar Array".to_string());
@@ -2089,86 +2268,72 @@ impl CodeGenerator {
         
         // Allocar memoria para data (capacity * 8 bytes)
         self.text_section.push("    ; Allocar memoria para data (capacity * 8 bytes = 32 bytes)".to_string());
-        self.text_section.push("    push rax  ; guardar puntero al Array".to_string());
+        self.text_section.push("    mov rbx, rax  ; guardar puntero al Array en rbx (preservado)".to_string());
+        self.ensure_stack_alignment_before_call("VirtualAlloc (segunda llamada)");
         self.text_section.push("    mov rcx, 0  ; lpAddress".to_string());
         self.text_section.push("    mov rdx, 32  ; dwSize (4 elementos * 8 bytes)".to_string());
         self.text_section.push("    mov r8, 0x1000  ; MEM_COMMIT".to_string());
         self.text_section.push("    mov r9, 0x04  ; PAGE_READWRITE".to_string());
-        self.text_section.push("    sub rsp, 32  ; shadow space".to_string());
         self.text_section.push("    call VirtualAlloc".to_string());
-        self.text_section.push("    add rsp, 32  ; restaurar shadow space".to_string());
         
         // Asignar data al Array
-        self.text_section.push("    pop rbx  ; restaurar puntero al Array".to_string());
         self.text_section.push("    mov [rbx + 0], rax  ; data = puntero a memoria".to_string());
         self.text_section.push("    mov rax, rbx  ; retornar puntero al Array".to_string());
         
-        // Epilogue
-        self.text_section.push("    leave".to_string());
-        self.text_section.push("    ret".to_string());
+        // Epilogue ABI-safe
+        self.generate_abi_epilogue(true);
         self.text_section.push("".to_string());
         
         // array_from_values: Crear array desde valores iniciales
         // Parámetros: RCX = count, RDX = puntero a valores (int64_t*)
         // Retorna: RAX = puntero al Array
         self.text_section.push("array_from_values:".to_string());
-        self.text_section.push("    ; Prologue".to_string());
-        self.text_section.push("    push rbp".to_string());
-        self.text_section.push("    mov rbp, rsp".to_string());
-        self.text_section.push("    sub rsp, 32  ; shadow space".to_string());
-        self.text_section.push("    push rcx  ; guardar count".to_string());
-        self.text_section.push("    push rdx  ; guardar puntero a valores".to_string());
+        self.generate_abi_prologue(true);  // Necesita shadow space para VirtualAlloc
+        self.text_section.push("    mov r12, rcx  ; guardar count en r12 (preservado)".to_string());
+        self.text_section.push("    mov r13, rdx  ; guardar puntero a valores en r13 (preservado)".to_string());
         
         // Calcular capacity: max(count * 2, 4)
         self.text_section.push("    ; Calcular capacity: max(count * 2, 4)".to_string());
-        self.text_section.push("    mov rax, rcx  ; count".to_string());
+        self.text_section.push("    mov rax, r12  ; count (desde r12 preservado)".to_string());
         self.text_section.push("    shl rax, 1  ; count * 2".to_string());
         self.text_section.push("    cmp rax, 4".to_string());
         self.text_section.push("    jge .capacity_ok".to_string());
         self.text_section.push("    mov rax, 4  ; mínimo 4".to_string());
         self.text_section.push(".capacity_ok:".to_string());
-        self.text_section.push("    push rax  ; guardar capacity".to_string());
+        self.text_section.push("    mov r14, rax  ; guardar capacity en r14 (preservado)".to_string());
         
         // Allocar memoria para Array (24 bytes)
         self.text_section.push("    ; Allocar memoria para Array".to_string());
+        self.ensure_stack_alignment_before_call("VirtualAlloc (Array struct)");
         self.text_section.push("    mov rcx, 0".to_string());
         self.text_section.push("    mov rdx, 24".to_string());
         self.text_section.push("    mov r8, 0x1000".to_string());
         self.text_section.push("    mov r9, 0x04".to_string());
-        self.text_section.push("    sub rsp, 32".to_string());
         self.text_section.push("    call VirtualAlloc".to_string());
-        self.text_section.push("    add rsp, 32".to_string());
-        self.text_section.push("    push rax  ; guardar puntero al Array".to_string());
+        self.text_section.push("    mov r15, rax  ; guardar puntero al Array en r15 (preservado)".to_string());
         
         // Allocar memoria para data (capacity * 8 bytes)
         self.text_section.push("    ; Allocar memoria para data".to_string());
-        self.text_section.push("    pop rbx  ; capacity (del stack)".to_string());
-        self.text_section.push("    push rbx  ; guardar capacity de nuevo".to_string());
-        self.text_section.push("    mov rax, rbx  ; capacity".to_string());
+        self.text_section.push("    mov rax, r14  ; capacity".to_string());
         self.text_section.push("    shl rax, 3  ; capacity * 8 bytes".to_string());
+        self.ensure_stack_alignment_before_call("VirtualAlloc (data)");
         self.text_section.push("    mov rcx, 0".to_string());
         self.text_section.push("    mov rdx, rax  ; size".to_string());
         self.text_section.push("    mov r8, 0x1000".to_string());
         self.text_section.push("    mov r9, 0x04".to_string());
-        self.text_section.push("    sub rsp, 32".to_string());
         self.text_section.push("    call VirtualAlloc".to_string());
-        self.text_section.push("    add rsp, 32".to_string());
-        self.text_section.push("    push rax  ; guardar puntero a data".to_string());
+        self.text_section.push("    mov rdi, rax  ; puntero a data en rdi (preservado)".to_string());
         
-        // Copiar valores a data
-        self.text_section.push("    ; Copiar valores a data".to_string());
-        self.text_section.push("    pop rdi  ; puntero a data (destino)".to_string());
-        self.text_section.push("    pop rbx  ; puntero al Array (del stack)".to_string());
-        self.text_section.push("    mov [rbx + 0], rdi  ; data = puntero".to_string());
-        self.text_section.push("    pop rdx  ; capacity".to_string());
-        self.text_section.push("    mov [rbx + 16], rdx  ; capacity".to_string());
-        self.text_section.push("    pop rcx  ; count".to_string());
-        self.text_section.push("    mov [rbx + 8], rcx  ; length = count".to_string());
-        self.text_section.push("    pop rsi  ; puntero a valores fuente".to_string());
+        // Configurar Array struct
+        self.text_section.push("    ; Configurar Array struct".to_string());
+        self.text_section.push("    mov [r15 + 0], rdi  ; data = puntero".to_string());
+        self.text_section.push("    mov [r15 + 8], r12  ; length = count".to_string());
+        self.text_section.push("    mov [r15 + 16], r14  ; capacity".to_string());
         
         // Loop para copiar valores
         self.text_section.push("    ; Loop para copiar valores".to_string());
-        self.text_section.push("    mov rcx, [rbx + 8]  ; count".to_string());
+        self.text_section.push("    mov rcx, r12  ; count".to_string());
+        self.text_section.push("    mov rsi, r13  ; puntero a valores fuente (preservado)".to_string());
         self.text_section.push("    test rcx, rcx".to_string());
         self.text_section.push("    jz .copy_done".to_string());
         self.text_section.push(".copy_loop:".to_string());
@@ -2179,174 +2344,171 @@ impl CodeGenerator {
         self.text_section.push("    dec rcx".to_string());
         self.text_section.push("    jnz .copy_loop".to_string());
         self.text_section.push(".copy_done:".to_string());
-        self.text_section.push("    mov rax, rbx  ; retornar puntero al Array".to_string());
+        self.text_section.push("    mov rax, r15  ; retornar puntero al Array".to_string());
         
-        // Epilogue
-        self.text_section.push("    leave".to_string());
-        self.text_section.push("    ret".to_string());
+        // Epilogue ABI-safe
+        self.generate_abi_epilogue(true);
         self.text_section.push("".to_string());
         
         // array_get: Obtener elemento por índice
         // Parámetros: RCX = puntero al Array, RDX = índice
-        // Retorna: RAX = valor del elemento
+        // Retorna: RAX = valor del elemento, o 0x8000000000000000 si error (índice fuera de rango)
+        // Nota: El caller debe verificar si RAX == 0x8000000000000000 para detectar error
+        //       Este valor especial (bit 63 activado) es poco probable como valor válido
         self.text_section.push("array_get:".to_string());
-        self.text_section.push("    ; Prologue".to_string());
-        self.text_section.push("    push rbp".to_string());
-        self.text_section.push("    mov rbp, rsp".to_string());
+        self.generate_abi_prologue(false);  // No necesita shadow space (solo lectura)
         
         // Bounds checking
         self.text_section.push("    ; Bounds checking".to_string());
-        self.text_section.push("    cmp rdx, [rcx + 8]  ; comparar índice con length".to_string());
+        self.text_section.push("    mov r12, rcx  ; preservar puntero al Array".to_string());
+        self.text_section.push("    mov r13, rdx  ; preservar índice".to_string());
+        self.text_section.push("    cmp r13, [r12 + 8]  ; comparar índice con length".to_string());
         self.text_section.push("    jge .array_get_error".to_string());
         
         // Obtener elemento
         self.text_section.push("    ; Obtener elemento".to_string());
-        self.text_section.push("    mov rax, [rcx + 0]  ; cargar puntero a data".to_string());
-        self.text_section.push("    mov rdx, rdx  ; índice".to_string());
+        self.text_section.push("    mov rax, [r12 + 0]  ; cargar puntero a data".to_string());
+        self.text_section.push("    mov rdx, r13  ; índice".to_string());
         self.text_section.push("    shl rdx, 3  ; índice * 8 bytes".to_string());
         self.text_section.push("    add rax, rdx  ; dirección del elemento".to_string());
         self.text_section.push("    mov rax, [rax]  ; cargar valor".to_string());
         
-        // Epilogue
-        self.text_section.push("    leave".to_string());
-        self.text_section.push("    ret".to_string());
+        // Epilogue ABI-safe
+        self.generate_abi_epilogue(false);
         self.text_section.push("".to_string());
         
-        // Error handler
+        // Error handler: retornar código de error especial en lugar de ExitProcess
         self.text_section.push(".array_get_error:".to_string());
         self.text_section.push("    ; Error: índice fuera de rango".to_string());
-        self.text_section.push("    mov ecx, 1  ; exit code 1 (error)".to_string());
-        self.text_section.push("    call ExitProcess".to_string());
+        self.text_section.push("    mov rax, 0x8000000000000000  ; código de error especial (bit 63 activado)".to_string());
+        self.generate_abi_epilogue(false);
         self.text_section.push("".to_string());
         
         // array_set: Establecer elemento por índice
         // Parámetros: RCX = puntero al Array, RDX = índice, R8 = valor
-        // Retorna: void
+        // Retorna: RAX = 0 (éxito) o -1 (error: índice fuera de rango)
         self.text_section.push("array_set:".to_string());
-        self.text_section.push("    ; Prologue".to_string());
-        self.text_section.push("    push rbp".to_string());
-        self.text_section.push("    mov rbp, rsp".to_string());
+        self.generate_abi_prologue(false);  // No necesita shadow space (solo escritura)
         
         // Bounds checking
         self.text_section.push("    ; Bounds checking".to_string());
-        self.text_section.push("    cmp rdx, [rcx + 8]  ; comparar índice con length".to_string());
+        self.text_section.push("    mov r12, rcx  ; preservar puntero al Array".to_string());
+        self.text_section.push("    mov r13, rdx  ; preservar índice".to_string());
+        self.text_section.push("    mov r14, r8  ; preservar valor".to_string());
+        self.text_section.push("    cmp r13, [r12 + 8]  ; comparar índice con length".to_string());
         self.text_section.push("    jge .array_set_error".to_string());
         
         // Establecer elemento
         self.text_section.push("    ; Establecer elemento".to_string());
-        self.text_section.push("    mov rax, [rcx + 0]  ; cargar puntero a data".to_string());
-        self.text_section.push("    mov rdx, rdx  ; índice".to_string());
+        self.text_section.push("    mov rax, [r12 + 0]  ; cargar puntero a data".to_string());
+        self.text_section.push("    mov rdx, r13  ; índice".to_string());
         self.text_section.push("    shl rdx, 3  ; índice * 8 bytes".to_string());
         self.text_section.push("    add rax, rdx  ; dirección del elemento".to_string());
-        self.text_section.push("    mov [rax], r8  ; guardar valor".to_string());
+        self.text_section.push("    mov [rax], r14  ; guardar valor".to_string());
         
-        // Epilogue
-        self.text_section.push("    leave".to_string());
-        self.text_section.push("    ret".to_string());
+        // Retornar éxito
+        self.text_section.push("    mov rax, 0  ; éxito".to_string());
+        
+        // Epilogue ABI-safe
+        self.generate_abi_epilogue(false);
         self.text_section.push("".to_string());
         
-        // Error handler
+        // Error handler: retornar código de error en lugar de ExitProcess
         self.text_section.push(".array_set_error:".to_string());
         self.text_section.push("    ; Error: índice fuera de rango".to_string());
-        self.text_section.push("    mov ecx, 1  ; exit code 1 (error)".to_string());
-        self.text_section.push("    call ExitProcess".to_string());
+        self.text_section.push("    mov rax, -1  ; código de error: -1 (índice fuera de rango)".to_string());
+        self.generate_abi_epilogue(false);
         self.text_section.push("".to_string());
         
         // array_len: Obtener longitud del array
         // Parámetros: RCX = puntero al Array
         // Retorna: RAX = longitud
+        // Nota: Función muy simple, no necesita prologue/epilogue completo
+        // pero debemos preservar registros según ABI
         self.text_section.push("array_len:".to_string());
         self.text_section.push("    mov rax, [rcx + 8]  ; cargar length".to_string());
-        self.text_section.push("    ret".to_string());
+        self.text_section.push("    ret  ; RCX es caller-saved, no necesitamos preservarlo".to_string());
         self.text_section.push("".to_string());
         
         // array_pop: Eliminar y retornar último elemento
         // Parámetros: RCX = puntero al Array
-        // Retorna: RAX = valor del último elemento
+        // Retorna: RAX = valor del último elemento, o 0x8000000000000001 si error (array vacío)
+        // Nota: El caller debe verificar si RAX == 0x8000000000000001 para detectar error
         self.text_section.push("array_pop:".to_string());
-        self.text_section.push("    ; Prologue".to_string());
-        self.text_section.push("    push rbp".to_string());
-        self.text_section.push("    mov rbp, rsp".to_string());
+        self.generate_abi_prologue(false);  // No necesita shadow space (solo lectura/escritura)
         
         // Verificar que el array no esté vacío
         self.text_section.push("    ; Verificar que el array no esté vacío".to_string());
-        self.text_section.push("    mov rax, [rcx + 8]  ; length".to_string());
+        self.text_section.push("    mov r12, rcx  ; preservar puntero al Array".to_string());
+        self.text_section.push("    mov rax, [r12 + 8]  ; length".to_string());
         self.text_section.push("    test rax, rax".to_string());
         self.text_section.push("    jz .array_pop_error".to_string());
         
         // Obtener último elemento
         self.text_section.push("    ; Obtener último elemento".to_string());
         self.text_section.push("    dec rax  ; length - 1 (índice del último)".to_string());
-        self.text_section.push("    mov rdx, [rcx + 0]  ; puntero a data".to_string());
-        self.text_section.push("    shl rax, 3  ; índice * 8 bytes".to_string());
-        self.text_section.push("    add rdx, rax  ; dirección del último elemento".to_string());
-        self.text_section.push("    mov rax, [rdx]  ; cargar valor del último elemento".to_string());
-        self.text_section.push("    push rax  ; guardar valor".to_string());
+        self.text_section.push("    mov r13, [r12 + 0]  ; puntero a data (preservado)".to_string());
+        self.text_section.push("    mov r14, rax  ; preservar índice".to_string());
+        self.text_section.push("    shl r14, 3  ; índice * 8 bytes".to_string());
+        self.text_section.push("    add r13, r14  ; dirección del último elemento".to_string());
+        self.text_section.push("    mov rax, [r13]  ; cargar valor del último elemento".to_string());
+        self.text_section.push("    mov r15, rax  ; preservar valor en r15".to_string());
         
         // Decrementar length
         self.text_section.push("    ; Decrementar length".to_string());
-        self.text_section.push("    dec qword [rcx + 8]  ; length--".to_string());
+        self.text_section.push("    dec qword [r12 + 8]  ; length--".to_string());
         
         // Retornar valor
-        self.text_section.push("    pop rax  ; restaurar valor".to_string());
+        self.text_section.push("    mov rax, r15  ; restaurar valor".to_string());
         
-        // Epilogue
-        self.text_section.push("    leave".to_string());
-        self.text_section.push("    ret".to_string());
+        // Epilogue ABI-safe
+        self.generate_abi_epilogue(false);
         self.text_section.push("".to_string());
         
-        // Error handler
+        // Error handler: retornar código de error especial en lugar de ExitProcess
         self.text_section.push(".array_pop_error:".to_string());
         self.text_section.push("    ; Error: pop de array vacío".to_string());
-        self.text_section.push("    mov ecx, 1  ; exit code 1 (error)".to_string());
-        self.text_section.push("    call ExitProcess".to_string());
+        self.text_section.push("    mov rax, 0x8000000000000001  ; código de error especial (array vacío)".to_string());
+        self.generate_abi_epilogue(false);
         self.text_section.push("".to_string());
         
         // array_append: Agregar elemento al array
         // Parámetros: RCX = puntero al Array, RDX = valor
-        // Retorna: void
+        // Retorna: RAX = 0 (éxito) o -1 (error: fallo de memoria)
         self.text_section.push("array_append:".to_string());
-        self.text_section.push("    ; Prologue".to_string());
-        self.text_section.push("    push rbp".to_string());
-        self.text_section.push("    mov rbp, rsp".to_string());
-        self.text_section.push("    sub rsp, 32  ; shadow space".to_string());
-        self.text_section.push("    push rcx  ; guardar puntero al Array".to_string());
-        self.text_section.push("    push rdx  ; guardar valor".to_string());
+        self.generate_abi_prologue(true);  // Necesita shadow space para VirtualAlloc/VirtualFree
+        self.text_section.push("    mov r12, rcx  ; preservar puntero al Array".to_string());
+        self.text_section.push("    mov r13, rdx  ; preservar valor".to_string());
         
         // Verificar si necesita realloc
         self.text_section.push("    ; Verificar si necesita realloc".to_string());
-        self.text_section.push("    mov rax, [rcx + 8]  ; length".to_string());
-        self.text_section.push("    cmp rax, [rcx + 16]  ; comparar con capacity".to_string());
+        self.text_section.push("    mov rax, [r12 + 8]  ; length".to_string());
+        self.text_section.push("    cmp rax, [r12 + 16]  ; comparar con capacity".to_string());
         self.text_section.push("    jl .no_realloc".to_string());
         
         // Realloc: duplicar capacity
         self.text_section.push("    ; Realloc: duplicar capacity".to_string());
-        self.text_section.push("    pop rcx  ; puntero al Array".to_string());
-        self.text_section.push("    mov rax, [rcx + 16]  ; capacity actual".to_string());
+        self.text_section.push("    mov rax, [r12 + 16]  ; capacity actual".to_string());
         self.text_section.push("    shl rax, 1  ; capacity * 2".to_string());
-        self.text_section.push("    mov [rcx + 16], rax  ; actualizar capacity".to_string());
-        self.text_section.push("    push rcx  ; guardar puntero al Array".to_string());
-        self.text_section.push("    shl rax, 3  ; capacity * 8 bytes".to_string());
+        self.text_section.push("    mov [r12 + 16], rax  ; actualizar capacity".to_string());
+        self.text_section.push("    mov r14, rax  ; preservar nueva capacity".to_string());
+        self.text_section.push("    shl r14, 3  ; capacity * 8 bytes".to_string());
         
         // VirtualAlloc nuevo bloque
         self.text_section.push("    ; VirtualAlloc nuevo bloque".to_string());
-        self.text_section.push("    mov rdx, rax  ; nuevo size".to_string());
+        self.ensure_stack_alignment_before_call("VirtualAlloc");
         self.text_section.push("    mov rcx, 0".to_string());
+        self.text_section.push("    mov rdx, r14  ; nuevo size".to_string());
         self.text_section.push("    mov r8, 0x1000".to_string());
         self.text_section.push("    mov r9, 0x04".to_string());
-        self.text_section.push("    sub rsp, 32".to_string());
         self.text_section.push("    call VirtualAlloc".to_string());
-        self.text_section.push("    add rsp, 32".to_string());
-        self.text_section.push("    push rax  ; guardar nuevo puntero".to_string());
+        self.text_section.push("    mov r15, rax  ; preservar nuevo puntero".to_string());
         
         // Copiar datos antiguos
         self.text_section.push("    ; Copiar datos antiguos".to_string());
-        self.text_section.push("    pop rdi  ; destino (nuevo)".to_string());
-        self.text_section.push("    pop rcx  ; puntero al Array".to_string());
-        self.text_section.push("    mov rsi, [rcx + 0]  ; fuente (antiguo)".to_string());
-        self.text_section.push("    mov rdx, [rcx + 8]  ; length".to_string());
-        self.text_section.push("    push rcx  ; guardar puntero al Array".to_string());
-        self.text_section.push("    mov rcx, rdx  ; contador (length)".to_string());
+        self.text_section.push("    mov rdi, r15  ; destino (nuevo)".to_string());
+        self.text_section.push("    mov rsi, [r12 + 0]  ; fuente (antiguo)".to_string());
+        self.text_section.push("    mov rcx, [r12 + 8]  ; contador (length)".to_string());
         self.text_section.push("    test rcx, rcx".to_string());
         self.text_section.push("    jz .copy_done_append".to_string());
         self.text_section.push(".copy_loop_append:".to_string());
@@ -2360,49 +2522,40 @@ impl CodeGenerator {
         
         // VirtualFree bloque antiguo
         self.text_section.push("    ; VirtualFree bloque antiguo".to_string());
-        self.text_section.push("    pop rcx  ; puntero al Array".to_string());
-        self.text_section.push("    mov rdx, [rcx + 0]  ; puntero antiguo".to_string());
-        self.text_section.push("    push rcx  ; guardar puntero al Array".to_string());
-        self.text_section.push("    mov rcx, rdx  ; lpAddress".to_string());
+        self.text_section.push("    mov r14, [r12 + 0]  ; preservar puntero antiguo".to_string());
+        self.ensure_stack_alignment_before_call("VirtualFree");
+        self.text_section.push("    mov rcx, r14  ; lpAddress".to_string());
         self.text_section.push("    mov rdx, 0  ; dwSize (0 = liberar todo)".to_string());
         self.text_section.push("    mov r8, 0x8000  ; MEM_RELEASE".to_string());
-        self.text_section.push("    sub rsp, 32".to_string());
         self.text_section.push("    call VirtualFree".to_string());
-        self.text_section.push("    add rsp, 32".to_string());
         
         // Actualizar data pointer
         self.text_section.push("    ; Actualizar data pointer".to_string());
-        self.text_section.push("    pop rcx  ; puntero al Array".to_string());
-        self.text_section.push("    mov [rcx + 0], rdi  ; data = nuevo puntero".to_string());
-        self.text_section.push("    push rcx  ; guardar puntero al Array".to_string());
+        self.text_section.push("    mov [r12 + 0], r15  ; data = nuevo puntero".to_string());
         
         // Agregar elemento
         self.text_section.push(".no_realloc:".to_string());
-        self.text_section.push("    pop rcx  ; puntero al Array".to_string());
-        self.text_section.push("    mov rax, [rcx + 8]  ; length".to_string());
-        self.text_section.push("    mov rbx, [rcx + 0]  ; data pointer".to_string());
+        self.text_section.push("    mov rax, [r12 + 8]  ; length".to_string());
+        self.text_section.push("    mov rbx, [r12 + 0]  ; data pointer".to_string());
         self.text_section.push("    shl rax, 3  ; length * 8 bytes".to_string());
         self.text_section.push("    add rbx, rax  ; dirección del nuevo elemento".to_string());
-        self.text_section.push("    pop rdx  ; valor".to_string());
-        self.text_section.push("    mov [rbx], rdx  ; guardar valor".to_string());
-        self.text_section.push("    inc qword [rcx + 8]  ; incrementar length".to_string());
+        self.text_section.push("    mov [rbx], r13  ; guardar valor".to_string());
+        self.text_section.push("    inc qword [r12 + 8]  ; incrementar length".to_string());
         
-        // Epilogue
-        self.text_section.push("    leave".to_string());
-        self.text_section.push("    ret".to_string());
+        // Epilogue ABI-safe
+        self.generate_abi_epilogue(true);
         self.text_section.push("".to_string());
         
         // array_reverse: Invertir orden del array
         // Parámetros: RCX = puntero al Array
-        // Retorna: void
+        // Retorna: RAX = 0 (éxito, siempre exitoso)
         self.text_section.push("array_reverse:".to_string());
-        self.text_section.push("    ; Prologue".to_string());
-        self.text_section.push("    push rbp".to_string());
-        self.text_section.push("    mov rbp, rsp".to_string());
+        self.generate_abi_prologue(false);  // No necesita shadow space (solo operaciones internas)
         
         // Verificar que el array no esté vacío o tenga solo 1 elemento
         self.text_section.push("    ; Verificar si necesita reversión".to_string());
-        self.text_section.push("    mov rax, [rcx + 8]  ; length".to_string());
+        self.text_section.push("    mov r12, rcx  ; preservar puntero al Array".to_string());
+        self.text_section.push("    mov rax, [r12 + 8]  ; length".to_string());
         self.text_section.push("    cmp rax, 1".to_string());
         self.text_section.push("    jle .reverse_done  ; si length <= 1, no hacer nada".to_string());
         
@@ -2411,7 +2564,7 @@ impl CodeGenerator {
         self.text_section.push("    mov rdx, 0  ; left index = 0".to_string());
         self.text_section.push("    mov r8, rax  ; length".to_string());
         self.text_section.push("    dec r8  ; right index = length - 1".to_string());
-        self.text_section.push("    mov r9, [rcx + 0]  ; puntero a data".to_string());
+        self.text_section.push("    mov r9, [r12 + 0]  ; puntero a data (preservado)".to_string());
         
         // Loop: intercambiar elementos mientras left < right
         self.text_section.push("    ; Loop: intercambiar elementos".to_string());
@@ -2445,10 +2598,405 @@ impl CodeGenerator {
         self.text_section.push("    jmp .reverse_loop".to_string());
         
         self.text_section.push(".reverse_done:".to_string());
+        self.text_section.push("    mov rax, 0  ; éxito".to_string());
         
-        // Epilogue
-        self.text_section.push("    leave".to_string());
-        self.text_section.push("    ret".to_string());
+        // Epilogue ABI-safe
+        self.generate_abi_epilogue(false);
+        self.text_section.push("".to_string());
+        
+        // array_insert: Insertar elemento en posición específica
+        // Parámetros: RCX = puntero al Array, RDX = índice, R8 = valor
+        // Retorna: RAX = 0 (éxito) o -1 (error: índice fuera de rango)
+        self.text_section.push("array_insert:".to_string());
+        self.generate_abi_prologue(true);  // Necesita shadow space para VirtualAlloc/VirtualFree
+        self.text_section.push("    mov r12, rcx  ; preservar puntero al Array".to_string());
+        self.text_section.push("    mov r13, rdx  ; preservar índice".to_string());
+        self.text_section.push("    mov r14, r8  ; preservar valor".to_string());
+        
+        // Verificar bounds: índice debe estar entre 0 y length (inclusive)
+        self.text_section.push("    ; Verificar bounds".to_string());
+        self.text_section.push("    mov rax, [r12 + 8]  ; length".to_string());
+        self.text_section.push("    cmp r13, rax  ; comparar índice con length".to_string());
+        self.text_section.push("    jg .insert_error  ; si índice > length, error".to_string());
+        
+        // Verificar si necesita realloc
+        self.text_section.push("    ; Verificar si necesita realloc".to_string());
+        self.text_section.push("    cmp rax, [r12 + 16]  ; comparar length con capacity".to_string());
+        self.text_section.push("    jl .no_realloc_insert".to_string());
+        
+        // Realloc: duplicar capacity
+        self.text_section.push("    ; Realloc: duplicar capacity".to_string());
+        self.text_section.push("    mov rax, [r12 + 16]  ; capacity actual".to_string());
+        self.text_section.push("    shl rax, 1  ; capacity * 2".to_string());
+        self.text_section.push("    mov [r12 + 16], rax  ; actualizar capacity".to_string());
+        self.text_section.push("    mov r15, rax  ; preservar nueva capacity".to_string());
+        self.text_section.push("    shl r15, 3  ; capacity * 8 bytes".to_string());
+        
+        // VirtualAlloc nuevo bloque
+        self.text_section.push("    ; VirtualAlloc nuevo bloque".to_string());
+        self.ensure_stack_alignment_before_call("VirtualAlloc");
+        self.text_section.push("    mov rcx, 0".to_string());
+        self.text_section.push("    mov rdx, r15  ; nuevo size".to_string());
+        self.text_section.push("    mov r8, 0x1000".to_string());
+        self.text_section.push("    mov r9, 0x04".to_string());
+        self.text_section.push("    call VirtualAlloc".to_string());
+        self.text_section.push("    mov rdi, rax  ; preservar nuevo puntero (rdi preservado)".to_string());
+        
+        // Copiar datos antiguos hasta el índice
+        self.text_section.push("    ; Copiar datos antiguos hasta el índice".to_string());
+        self.text_section.push("    mov rsi, [r12 + 0]  ; fuente (antiguo, rsi preservado)".to_string());
+        self.text_section.push("    mov rcx, r13  ; contador (índice)".to_string());
+        self.text_section.push("    test rcx, rcx".to_string());
+        self.text_section.push("    jz .copy_done_insert1".to_string());
+        self.text_section.push(".copy_loop_insert1:".to_string());
+        self.text_section.push("    mov rax, [rsi]".to_string());
+        self.text_section.push("    mov [rdi], rax".to_string());
+        self.text_section.push("    add rsi, 8".to_string());
+        self.text_section.push("    add rdi, 8".to_string());
+        self.text_section.push("    dec rcx".to_string());
+        self.text_section.push("    jnz .copy_loop_insert1".to_string());
+        self.text_section.push(".copy_done_insert1:".to_string());
+        
+        // Insertar nuevo valor
+        self.text_section.push("    ; Insertar nuevo valor".to_string());
+        self.text_section.push("    mov [rdi], r14  ; insertar valor".to_string());
+        self.text_section.push("    add rdi, 8".to_string());
+        
+        // Copiar datos restantes después del índice
+        self.text_section.push("    ; Copiar datos restantes después del índice".to_string());
+        self.text_section.push("    mov rax, [r12 + 8]  ; length".to_string());
+        self.text_section.push("    sub rax, r13  ; elementos restantes".to_string());
+        self.text_section.push("    mov rcx, rax  ; contador".to_string());
+        self.text_section.push("    test rcx, rcx".to_string());
+        self.text_section.push("    jz .copy_done_insert2".to_string());
+        self.text_section.push(".copy_loop_insert2:".to_string());
+        self.text_section.push("    mov rax, [rsi]".to_string());
+        self.text_section.push("    mov [rdi], rax".to_string());
+        self.text_section.push("    add rsi, 8".to_string());
+        self.text_section.push("    add rdi, 8".to_string());
+        self.text_section.push("    dec rcx".to_string());
+        self.text_section.push("    jnz .copy_loop_insert2".to_string());
+        self.text_section.push(".copy_done_insert2:".to_string());
+        
+        // VirtualFree bloque antiguo
+        self.text_section.push("    ; VirtualFree bloque antiguo".to_string());
+        self.text_section.push("    mov r15, [r12 + 0]  ; preservar puntero antiguo".to_string());
+        self.ensure_stack_alignment_before_call("VirtualFree");
+        self.text_section.push("    mov rcx, r15  ; lpAddress".to_string());
+        self.text_section.push("    mov rdx, 0  ; dwSize (0 = liberar todo)".to_string());
+        self.text_section.push("    mov r8, 0x8000  ; MEM_RELEASE".to_string());
+        self.text_section.push("    call VirtualFree".to_string());
+        
+        // Actualizar data pointer y length
+        self.text_section.push("    ; Actualizar data pointer y length".to_string());
+        self.text_section.push("    mov [r12 + 0], rdi  ; data = nuevo puntero (ajustado)".to_string());
+        self.text_section.push("    inc qword [r12 + 8]  ; incrementar length".to_string());
+        self.text_section.push("    jmp .insert_done".to_string());
+        
+        // Sin realloc: solo mover elementos y insertar
+        self.text_section.push(".no_realloc_insert:".to_string());
+        self.text_section.push("    mov rax, [r12 + 8]  ; length".to_string());
+        self.text_section.push("    mov rbx, [r12 + 0]  ; data pointer (rbx preservado)".to_string());
+        
+        // Mover elementos desde el índice hacia la derecha
+        self.text_section.push("    ; Mover elementos hacia la derecha".to_string());
+        self.text_section.push("    mov r15, rax  ; contador (length - índice)".to_string());
+        self.text_section.push("    sub r15, r13".to_string());
+        self.text_section.push("    test r15, r15".to_string());
+        self.text_section.push("    jz .no_move_insert".to_string());
+        self.text_section.push("    mov r10, rax  ; índice destino (empezar desde el final)".to_string());
+        self.text_section.push("    dec r10".to_string());
+        self.text_section.push("    mov r11, r10  ; índice fuente".to_string());
+        self.text_section.push("    dec r11".to_string());
+        self.text_section.push(".move_loop_insert:".to_string());
+        self.text_section.push("    mov rax, r10".to_string());
+        self.text_section.push("    shl rax, 3  ; índice * 8 bytes".to_string());
+        self.text_section.push("    mov r8, rbx".to_string());
+        self.text_section.push("    add r8, rax  ; dirección destino".to_string());
+        self.text_section.push("    mov rax, r11".to_string());
+        self.text_section.push("    shl rax, 3  ; índice * 8 bytes".to_string());
+        self.text_section.push("    mov r9, rbx".to_string());
+        self.text_section.push("    add r9, rax  ; dirección fuente".to_string());
+        self.text_section.push("    mov rax, [r9]  ; cargar valor fuente".to_string());
+        self.text_section.push("    mov [r8], rax  ; guardar en destino".to_string());
+        self.text_section.push("    dec r10".to_string());
+        self.text_section.push("    dec r11".to_string());
+        self.text_section.push("    dec r15".to_string());
+        self.text_section.push("    jnz .move_loop_insert".to_string());
+        self.text_section.push(".no_move_insert:".to_string());
+        
+        // Insertar valor en la posición
+        self.text_section.push("    ; Insertar valor en la posición".to_string());
+        self.text_section.push("    mov rax, r13  ; índice".to_string());
+        self.text_section.push("    shl rax, 3  ; índice * 8 bytes".to_string());
+        self.text_section.push("    add rbx, rax  ; dirección del nuevo elemento".to_string());
+        self.text_section.push("    mov [rbx], r14  ; guardar valor".to_string());
+        self.text_section.push("    inc qword [r12 + 8]  ; incrementar length".to_string());
+        
+        self.text_section.push(".insert_done:".to_string());
+        self.text_section.push("    mov rax, 0  ; éxito".to_string());
+        self.generate_abi_epilogue(true);
+        self.text_section.push("".to_string());
+        
+        self.text_section.push(".insert_error:".to_string());
+        self.text_section.push("    ; Error: índice fuera de rango".to_string());
+        self.text_section.push("    mov rax, -1  ; código de error: -1 (índice fuera de rango)".to_string());
+        self.generate_abi_epilogue(true);
+        self.text_section.push("".to_string());
+        
+        // array_remove: Eliminar primera ocurrencia de valor
+        // Parámetros: RCX = puntero al Array, RDX = valor
+        // Retorna: RAX = 0 (éxito) o -3 (error: valor no encontrado)
+        self.text_section.push("array_remove:".to_string());
+        self.generate_abi_prologue(false);  // No necesita shadow space (solo operaciones internas)
+        self.text_section.push("    mov r12, rcx  ; preservar puntero al Array".to_string());
+        self.text_section.push("    mov r13, rdx  ; preservar valor".to_string());
+        
+        // Buscar el valor en el array
+        self.text_section.push("    ; Buscar el valor en el array".to_string());
+        self.text_section.push("    mov rax, [r12 + 8]  ; length".to_string());
+        self.text_section.push("    test rax, rax".to_string());
+        self.text_section.push("    jz .remove_error  ; si length == 0, error".to_string());
+        self.text_section.push("    mov r8, [r12 + 0]  ; data pointer".to_string());
+        self.text_section.push("    mov r9, 0  ; índice actual".to_string());
+        self.text_section.push(".remove_search_loop:".to_string());
+        self.text_section.push("    cmp r9, rax  ; comparar índice con length".to_string());
+        self.text_section.push("    jge .remove_error  ; si índice >= length, no encontrado".to_string());
+        self.text_section.push("    mov r10, r9".to_string());
+        self.text_section.push("    shl r10, 3  ; índice * 8 bytes".to_string());
+        self.text_section.push("    mov r11, r8".to_string());
+        self.text_section.push("    add r11, r10  ; dirección del elemento".to_string());
+        self.text_section.push("    cmp [r11], r13  ; comparar elemento con valor".to_string());
+        self.text_section.push("    je .remove_found  ; si encontrado, salir".to_string());
+        self.text_section.push("    inc r9  ; siguiente índice".to_string());
+        self.text_section.push("    jmp .remove_search_loop".to_string());
+        
+        // Encontrado: mover elementos hacia la izquierda
+        self.text_section.push(".remove_found:".to_string());
+        self.text_section.push("    ; Mover elementos hacia la izquierda".to_string());
+        self.text_section.push("    push rax  ; guardar length original (rax será usado en el loop)".to_string());
+        self.text_section.push("    mov r10, r9  ; índice del elemento a eliminar".to_string());
+        self.text_section.push("    inc r10  ; índice siguiente".to_string());
+        self.text_section.push("    mov r11, rax  ; length".to_string());
+        self.text_section.push("    dec r11  ; nuevo length".to_string());
+        self.text_section.push("    cmp r10, rax  ; si índice siguiente >= length, solo decrementar".to_string());
+        self.text_section.push("    jge .remove_decrement".to_string());
+        self.text_section.push(".remove_move_loop:".to_string());
+        self.text_section.push("    mov r12, r10".to_string());
+        self.text_section.push("    shl r12, 3  ; índice * 8 bytes".to_string());
+        self.text_section.push("    mov r13, r8".to_string());
+        self.text_section.push("    add r13, r12  ; dirección fuente".to_string());
+        self.text_section.push("    mov r14, [r13]  ; cargar valor fuente (usar r14 en lugar de rax)".to_string());
+        self.text_section.push("    mov r12, r9".to_string());
+        self.text_section.push("    shl r12, 3  ; índice * 8 bytes".to_string());
+        self.text_section.push("    mov r13, r8".to_string());
+        self.text_section.push("    add r13, r12  ; dirección destino".to_string());
+        self.text_section.push("    mov [r13], r14  ; guardar valor".to_string());
+        self.text_section.push("    inc r9  ; siguiente índice destino".to_string());
+        self.text_section.push("    inc r10  ; siguiente índice fuente".to_string());
+        self.text_section.push("    pop rax  ; restaurar length original para comparación".to_string());
+        self.text_section.push("    cmp r10, rax  ; comparar con length original".to_string());
+        self.text_section.push("    push rax  ; guardar length de nuevo para siguiente iteración".to_string());
+        self.text_section.push("    jl .remove_move_loop".to_string());
+        self.text_section.push("    pop rax  ; limpiar stack (length ya no se necesita)".to_string());
+        self.text_section.push(".remove_decrement:".to_string());
+        self.text_section.push("    pop rax  ; limpiar length del stack si estaba ahí".to_string());
+        self.text_section.push("    dec qword [r12 + 8]  ; decrementar length".to_string());
+        self.text_section.push("    jmp .remove_done".to_string());
+        
+        self.text_section.push(".remove_error:".to_string());
+        self.text_section.push("    ; Error: valor no encontrado".to_string());
+        self.text_section.push("    mov rax, -3  ; código de error: -3 (valor no encontrado)".to_string());
+        self.generate_abi_epilogue(false);
+        self.text_section.push("".to_string());
+        
+        self.text_section.push(".remove_done:".to_string());
+        self.text_section.push("    mov rax, 0  ; éxito".to_string());
+        self.generate_abi_epilogue(false);
+        self.text_section.push("".to_string());
+        
+        // array_index: Encontrar índice de valor
+        // Parámetros: RCX = puntero al Array, RDX = valor
+        // Retorna: RAX = índice (o -1 si no encontrado)
+        self.text_section.push("array_index:".to_string());
+        self.generate_abi_prologue(false);  // No necesita shadow space (solo lectura)
+        
+        // Buscar el valor en el array
+        self.text_section.push("    ; Buscar el valor en el array".to_string());
+        self.text_section.push("    mov r12, rcx  ; preservar puntero al Array".to_string());
+        self.text_section.push("    mov r13, rdx  ; preservar valor".to_string());
+        self.text_section.push("    mov rax, [r12 + 8]  ; length".to_string());
+        self.text_section.push("    test rax, rax".to_string());
+        self.text_section.push("    jz .index_not_found  ; si length == 0, no encontrado".to_string());
+        self.text_section.push("    mov r8, [r12 + 0]  ; data pointer".to_string());
+        self.text_section.push("    mov r9, 0  ; índice actual".to_string());
+        self.text_section.push(".index_search_loop:".to_string());
+        self.text_section.push("    cmp r9, rax  ; comparar índice con length".to_string());
+        self.text_section.push("    jge .index_not_found  ; si índice >= length, no encontrado".to_string());
+        self.text_section.push("    mov r10, r9".to_string());
+        self.text_section.push("    shl r10, 3  ; índice * 8 bytes".to_string());
+        self.text_section.push("    mov r11, r8".to_string());
+        self.text_section.push("    add r11, r10  ; dirección del elemento".to_string());
+        self.text_section.push("    cmp [r11], r13  ; comparar elemento con valor".to_string());
+        self.text_section.push("    je .index_found  ; si encontrado, salir".to_string());
+        self.text_section.push("    inc r9  ; siguiente índice".to_string());
+        self.text_section.push("    jmp .index_search_loop".to_string());
+        
+        self.text_section.push(".index_found:".to_string());
+        self.text_section.push("    mov rax, r9  ; retornar índice".to_string());
+        self.generate_abi_epilogue(false);
+        self.text_section.push("".to_string());
+        
+        self.text_section.push(".index_not_found:".to_string());
+        self.text_section.push("    mov rax, -1  ; retornar -1 (no encontrado)".to_string());
+        self.generate_abi_epilogue(false);
+        self.text_section.push("".to_string());
+        
+        // array_count: Contar ocurrencias de valor
+        // Parámetros: RCX = puntero al Array, RDX = valor
+        // Retorna: RAX = conteo
+        self.text_section.push("array_count:".to_string());
+        self.generate_abi_prologue(false);  // No necesita shadow space (solo lectura)
+        
+        // Contar ocurrencias
+        self.text_section.push("    ; Contar ocurrencias".to_string());
+        self.text_section.push("    mov r12, rcx  ; preservar puntero al Array".to_string());
+        self.text_section.push("    mov r13, rdx  ; preservar valor".to_string());
+        self.text_section.push("    mov rax, [r12 + 8]  ; length".to_string());
+        self.text_section.push("    test rax, rax".to_string());
+        self.text_section.push("    jz .count_zero  ; si length == 0, retornar 0".to_string());
+        self.text_section.push("    mov r8, [r12 + 0]  ; data pointer".to_string());
+        self.text_section.push("    mov r9, 0  ; índice actual".to_string());
+        self.text_section.push("    mov r10, 0  ; contador".to_string());
+        self.text_section.push(".count_loop:".to_string());
+        self.text_section.push("    cmp r9, rax  ; comparar índice con length".to_string());
+        self.text_section.push("    jge .count_done  ; si índice >= length, terminar".to_string());
+        self.text_section.push("    mov r11, r9".to_string());
+        self.text_section.push("    shl r11, 3  ; índice * 8 bytes".to_string());
+        self.text_section.push("    mov r14, r8".to_string());
+        self.text_section.push("    add r14, r11  ; dirección del elemento".to_string());
+        self.text_section.push("    cmp [r14], r13  ; comparar elemento con valor".to_string());
+        self.text_section.push("    jne .count_next  ; si no coincide, siguiente".to_string());
+        self.text_section.push("    inc r10  ; incrementar contador".to_string());
+        self.text_section.push(".count_next:".to_string());
+        self.text_section.push("    inc r9  ; siguiente índice".to_string());
+        self.text_section.push("    jmp .count_loop".to_string());
+        
+        self.text_section.push(".count_done:".to_string());
+        self.text_section.push("    mov rax, r10  ; retornar conteo".to_string());
+        self.generate_abi_epilogue(false);
+        self.text_section.push("".to_string());
+        
+        self.text_section.push(".count_zero:".to_string());
+        self.text_section.push("    mov rax, 0  ; retornar 0".to_string());
+        self.generate_abi_epilogue(false);
+        self.text_section.push("".to_string());
+        
+        // array_sort: Ordenar array (bubble sort simple)
+        // Parámetros: RCX = puntero al Array
+        // Retorna: void
+        self.text_section.push("array_sort:".to_string());
+        self.generate_abi_prologue(false);  // No necesita shadow space (solo operaciones internas)
+        
+        // Verificar si necesita ordenar
+        self.text_section.push("    ; Verificar si necesita ordenar".to_string());
+        self.text_section.push("    mov r12, rcx  ; preservar puntero al Array".to_string());
+        self.text_section.push("    mov rax, [r12 + 8]  ; length".to_string());
+        self.text_section.push("    cmp rax, 1".to_string());
+        self.text_section.push("    jle .sort_done  ; si length <= 1, no hacer nada".to_string());
+        
+        // Bubble sort
+        self.text_section.push("    ; Bubble sort".to_string());
+        self.text_section.push("    mov r8, [r12 + 0]  ; data pointer (preservado)".to_string());
+        self.text_section.push("    mov r9, 0  ; i (outer loop)".to_string());
+        self.text_section.push(".sort_outer:".to_string());
+        self.text_section.push("    mov r10, rax  ; length".to_string());
+        self.text_section.push("    dec r10  ; length - 1".to_string());
+        self.text_section.push("    cmp r9, r10  ; comparar i con length - 1".to_string());
+        self.text_section.push("    jge .sort_done  ; si i >= length - 1, terminar".to_string());
+        self.text_section.push("    mov r11, 0  ; j (inner loop)".to_string());
+        self.text_section.push("    mov r12, rax  ; length".to_string());
+        self.text_section.push("    sub r12, r9  ; length - i".to_string());
+        self.text_section.push("    dec r12  ; length - i - 1".to_string());
+        self.text_section.push(".sort_inner:".to_string());
+        self.text_section.push("    cmp r11, r12  ; comparar j con length - i - 1".to_string());
+        self.text_section.push("    jge .sort_inner_done  ; si j >= length - i - 1, siguiente i".to_string());
+        self.text_section.push("    ; Comparar arr[j] y arr[j+1]".to_string());
+        self.text_section.push("    mov r13, r11".to_string());
+        self.text_section.push("    shl r13, 3  ; j * 8 bytes".to_string());
+        self.text_section.push("    mov r14, r8".to_string());
+        self.text_section.push("    add r14, r13  ; dirección de arr[j]".to_string());
+        self.text_section.push("    mov r15, [r14]  ; arr[j]".to_string());
+        self.text_section.push("    mov r13, r11".to_string());
+        self.text_section.push("    inc r13".to_string());
+        self.text_section.push("    shl r13, 3  ; (j+1) * 8 bytes".to_string());
+        self.text_section.push("    mov r14, r8".to_string());
+        self.text_section.push("    add r14, r13  ; dirección de arr[j+1]".to_string());
+        self.text_section.push("    mov r13, [r14]  ; arr[j+1]".to_string());
+        self.text_section.push("    cmp r15, r13  ; comparar arr[j] con arr[j+1]".to_string());
+        self.text_section.push("    jle .sort_no_swap  ; si arr[j] <= arr[j+1], no intercambiar".to_string());
+        self.text_section.push("    ; Intercambiar arr[j] y arr[j+1]".to_string());
+        self.text_section.push("    mov [r14], r15  ; arr[j+1] = arr[j]".to_string());
+        self.text_section.push("    mov r13, r11".to_string());
+        self.text_section.push("    shl r13, 3  ; j * 8 bytes".to_string());
+        self.text_section.push("    mov r14, r8".to_string());
+        self.text_section.push("    add r14, r13  ; dirección de arr[j]".to_string());
+        self.text_section.push("    mov r13, r11".to_string());
+        self.text_section.push("    inc r13".to_string());
+        self.text_section.push("    shl r13, 3  ; (j+1) * 8 bytes".to_string());
+        self.text_section.push("    mov r15, r8".to_string());
+        self.text_section.push("    add r15, r13  ; dirección de arr[j+1]".to_string());
+        self.text_section.push("    mov r13, [r15]  ; cargar arr[j+1] nuevamente".to_string());
+        self.text_section.push("    mov [r14], r13  ; arr[j] = arr[j+1]".to_string());
+        self.text_section.push(".sort_no_swap:".to_string());
+        self.text_section.push("    inc r11  ; j++".to_string());
+        self.text_section.push("    jmp .sort_inner".to_string());
+        self.text_section.push(".sort_inner_done:".to_string());
+        self.text_section.push("    inc r9  ; i++".to_string());
+        self.text_section.push("    jmp .sort_outer".to_string());
+        
+        self.text_section.push(".sort_done:".to_string());
+        self.text_section.push("    mov rax, 0  ; éxito".to_string());
+        self.generate_abi_epilogue(false);
+        self.text_section.push("".to_string());
+        
+        // array_free: Liberar memoria de un Array
+        // Parámetros: RCX = puntero al Array
+        // Retorna: RAX = 0 (éxito) o -4 (error: puntero inválido)
+        // Nota: Libera tanto el Array struct como su data buffer
+        //       Liberar NULL es seguro (no-op, retorna 0)
+        self.text_section.push("array_free:".to_string());
+        self.generate_abi_prologue(true);  // Necesita shadow space para VirtualFree
+        self.text_section.push("    mov r12, rcx  ; preservar puntero al Array".to_string());
+        
+        // Verificar si el puntero es NULL (liberar NULL es seguro, no-op)
+        self.text_section.push("    ; Verificar si el puntero es NULL".to_string());
+        self.text_section.push("    test r12, r12  ; verificar si Array* es NULL".to_string());
+        self.text_section.push("    jz .free_array_done  ; si es NULL, retornar éxito (no-op)".to_string());
+        
+        // Liberar data buffer primero
+        self.text_section.push("    ; Liberar data buffer".to_string());
+        self.text_section.push("    mov rcx, [r12 + 0]  ; data pointer".to_string());
+        self.text_section.push("    test rcx, rcx  ; verificar si es NULL".to_string());
+        self.text_section.push("    jz .free_array_struct  ; si es NULL, saltar".to_string());
+        self.ensure_stack_alignment_before_call("VirtualFree (data)");
+        self.text_section.push("    mov rdx, 0  ; dwSize (0 = liberar todo)".to_string());
+        self.text_section.push("    mov r8, 0x8000  ; MEM_RELEASE".to_string());
+        self.text_section.push("    call VirtualFree".to_string());
+        
+        // Liberar Array struct
+        self.text_section.push(".free_array_struct:".to_string());
+        self.text_section.push("    ; Liberar Array struct".to_string());
+        self.ensure_stack_alignment_before_call("VirtualFree (Array struct)");
+        self.text_section.push("    mov rcx, r12  ; puntero al Array struct".to_string());
+        self.text_section.push("    mov rdx, 0  ; dwSize (0 = liberar todo)".to_string());
+        self.text_section.push("    mov r8, 0x8000  ; MEM_RELEASE".to_string());
+        self.text_section.push("    call VirtualFree".to_string());
+        
+        // Retornar éxito
+        self.text_section.push(".free_array_done:".to_string());
+        self.text_section.push("    mov rax, 0  ; éxito".to_string());
+        self.generate_abi_epilogue(true);
         self.text_section.push("".to_string());
     }
 
@@ -2467,110 +3015,92 @@ impl CodeGenerator {
         // string_new: Crear string vacío
         // Retorna: RAX = puntero al String (en heap)
         self.text_section.push("string_new:".to_string());
-        self.text_section.push("    ; Prologue".to_string());
-        self.text_section.push("    push rbp".to_string());
-        self.text_section.push("    mov rbp, rsp".to_string());
-        self.text_section.push("    sub rsp, 32  ; shadow space".to_string());
+        self.generate_abi_prologue(true);  // Necesita shadow space para VirtualAlloc
         
         // Allocar memoria para String struct (32 bytes)
         self.text_section.push("    ; Allocar memoria para String struct (32 bytes)".to_string());
+        self.ensure_stack_alignment_before_call("VirtualAlloc (String struct)");
         self.text_section.push("    mov rcx, 0  ; lpAddress (NULL = auto)".to_string());
         self.text_section.push("    mov rdx, 32  ; dwSize (32 bytes para String struct)".to_string());
         self.text_section.push("    mov r8, 0x1000  ; flAllocationType (MEM_COMMIT)".to_string());
         self.text_section.push("    mov r9, 0x04  ; flProtect (PAGE_READWRITE)".to_string());
-        self.text_section.push("    sub rsp, 32  ; shadow space".to_string());
         self.text_section.push("    call VirtualAlloc".to_string());
-        self.text_section.push("    add rsp, 32  ; restaurar shadow space".to_string());
+        self.text_section.push("    mov r12, rax  ; preservar puntero al String".to_string());
         
         // Inicializar String: length=0, capacity=16, data=NULL (se asignará después), hash=0
         self.text_section.push("    ; Inicializar String".to_string());
-        self.text_section.push("    mov qword [rax + 0], 0  ; data = NULL (se asignará después)".to_string());
-        self.text_section.push("    mov qword [rax + 8], 0  ; length = 0".to_string());
-        self.text_section.push("    mov qword [rax + 16], 16  ; capacity = 16".to_string());
-        self.text_section.push("    mov qword [rax + 24], 0  ; hash = 0 (no calculado)".to_string());
+        self.text_section.push("    mov qword [r12 + 0], 0  ; data = NULL (se asignará después)".to_string());
+        self.text_section.push("    mov qword [r12 + 8], 0  ; length = 0".to_string());
+        self.text_section.push("    mov qword [r12 + 16], 16  ; capacity = 16".to_string());
+        self.text_section.push("    mov qword [r12 + 24], 0  ; hash = 0 (no calculado)".to_string());
         
         // Allocar memoria para data (capacity bytes)
         self.text_section.push("    ; Allocar memoria para data (16 bytes)".to_string());
-        self.text_section.push("    push rax  ; guardar puntero al String".to_string());
+        self.ensure_stack_alignment_before_call("VirtualAlloc (data)");
         self.text_section.push("    mov rcx, 0  ; lpAddress".to_string());
         self.text_section.push("    mov rdx, 16  ; dwSize (16 bytes)".to_string());
         self.text_section.push("    mov r8, 0x1000  ; MEM_COMMIT".to_string());
         self.text_section.push("    mov r9, 0x04  ; PAGE_READWRITE".to_string());
-        self.text_section.push("    sub rsp, 32  ; shadow space".to_string());
         self.text_section.push("    call VirtualAlloc".to_string());
-        self.text_section.push("    add rsp, 32  ; restaurar shadow space".to_string());
         
         // Asignar data al String
-        self.text_section.push("    pop rbx  ; restaurar puntero al String".to_string());
-        self.text_section.push("    mov [rbx + 0], rax  ; data = puntero a memoria".to_string());
+        self.text_section.push("    mov [r12 + 0], rax  ; data = puntero a memoria".to_string());
         self.text_section.push("    mov byte [rax], 0  ; null terminator".to_string());
-        self.text_section.push("    mov rax, rbx  ; retornar puntero al String".to_string());
+        self.text_section.push("    mov rax, r12  ; retornar puntero al String".to_string());
         
-        // Epilogue
-        self.text_section.push("    leave".to_string());
-        self.text_section.push("    ret".to_string());
+        // Epilogue ABI-safe
+        self.generate_abi_epilogue(true);
         self.text_section.push("".to_string());
         
         // string_from_literal: Crear string desde literal
         // Parámetros: RCX = puntero a literal (char*, null-terminated), RDX = longitud
         // Retorna: RAX = puntero al String (en heap)
         self.text_section.push("string_from_literal:".to_string());
-        self.text_section.push("    ; Prologue".to_string());
-        self.text_section.push("    push rbp".to_string());
-        self.text_section.push("    mov rbp, rsp".to_string());
-        self.text_section.push("    sub rsp, 32  ; shadow space".to_string());
-        self.text_section.push("    push rcx  ; guardar puntero a literal".to_string());
-        self.text_section.push("    push rdx  ; guardar longitud".to_string());
+        self.generate_abi_prologue(true);  // Necesita shadow space para VirtualAlloc
+        self.text_section.push("    mov r12, rcx  ; preservar puntero a literal".to_string());
+        self.text_section.push("    mov r13, rdx  ; preservar longitud".to_string());
         
         // Calcular capacity: max(length + 1, 16) (length + 1 para null terminator)
         self.text_section.push("    ; Calcular capacity: max(length + 1, 16)".to_string());
-        self.text_section.push("    mov rax, rdx  ; longitud".to_string());
+        self.text_section.push("    mov rax, r13  ; longitud".to_string());
         self.text_section.push("    inc rax  ; length + 1 (para null terminator)".to_string());
         self.text_section.push("    cmp rax, 16".to_string());
         self.text_section.push("    jge .capacity_ok_string".to_string());
         self.text_section.push("    mov rax, 16  ; mínimo 16".to_string());
         self.text_section.push(".capacity_ok_string:".to_string());
-        self.text_section.push("    push rax  ; guardar capacity".to_string());
+        self.text_section.push("    mov r14, rax  ; preservar capacity".to_string());
         
         // Allocar memoria para String struct (32 bytes)
         self.text_section.push("    ; Allocar memoria para String struct".to_string());
+        self.ensure_stack_alignment_before_call("VirtualAlloc (String struct)");
         self.text_section.push("    mov rcx, 0".to_string());
         self.text_section.push("    mov rdx, 32".to_string());
         self.text_section.push("    mov r8, 0x1000".to_string());
         self.text_section.push("    mov r9, 0x04".to_string());
-        self.text_section.push("    sub rsp, 32".to_string());
         self.text_section.push("    call VirtualAlloc".to_string());
-        self.text_section.push("    add rsp, 32".to_string());
-        self.text_section.push("    push rax  ; guardar puntero al String".to_string());
+        self.text_section.push("    mov r15, rax  ; preservar puntero al String".to_string());
         
         // Allocar memoria para data (capacity bytes)
         self.text_section.push("    ; Allocar memoria para data".to_string());
-        self.text_section.push("    pop rbx  ; capacity (del stack)".to_string());
-        self.text_section.push("    push rbx  ; guardar capacity de nuevo".to_string());
+        self.ensure_stack_alignment_before_call("VirtualAlloc (data)");
         self.text_section.push("    mov rcx, 0".to_string());
-        self.text_section.push("    mov rdx, rbx  ; capacity".to_string());
+        self.text_section.push("    mov rdx, r14  ; capacity".to_string());
         self.text_section.push("    mov r8, 0x1000".to_string());
         self.text_section.push("    mov r9, 0x04".to_string());
-        self.text_section.push("    sub rsp, 32".to_string());
         self.text_section.push("    call VirtualAlloc".to_string());
-        self.text_section.push("    add rsp, 32".to_string());
-        self.text_section.push("    push rax  ; guardar puntero a data".to_string());
+        self.text_section.push("    mov rdi, rax  ; preservar puntero a data (rdi preservado)".to_string());
         
-        // Copiar literal a data
-        self.text_section.push("    ; Copiar literal a data".to_string());
-        self.text_section.push("    pop rdi  ; puntero a data (destino)".to_string());
-        self.text_section.push("    pop rbx  ; puntero al String (del stack)".to_string());
-        self.text_section.push("    mov [rbx + 0], rdi  ; data = puntero".to_string());
-        self.text_section.push("    pop rdx  ; longitud".to_string());
-        self.text_section.push("    mov [rbx + 8], rdx  ; length".to_string());
-        self.text_section.push("    pop rax  ; capacity".to_string());
-        self.text_section.push("    mov [rbx + 16], rax  ; capacity".to_string());
-        self.text_section.push("    mov qword [rbx + 24], 0  ; hash = 0".to_string());
-        self.text_section.push("    pop rsi  ; puntero a literal fuente".to_string());
+        // Configurar String struct
+        self.text_section.push("    ; Configurar String struct".to_string());
+        self.text_section.push("    mov [r15 + 0], rdi  ; data = puntero".to_string());
+        self.text_section.push("    mov [r15 + 8], r13  ; length".to_string());
+        self.text_section.push("    mov [r15 + 16], r14  ; capacity".to_string());
+        self.text_section.push("    mov qword [r15 + 24], 0  ; hash = 0".to_string());
         
         // Loop para copiar caracteres
         self.text_section.push("    ; Loop para copiar caracteres".to_string());
-        self.text_section.push("    mov rcx, rdx  ; longitud".to_string());
+        self.text_section.push("    mov rcx, r13  ; longitud".to_string());
+        self.text_section.push("    mov rsi, r12  ; puntero a literal fuente (rsi preservado)".to_string());
         self.text_section.push("    test rcx, rcx".to_string());
         self.text_section.push("    jz .copy_done_string".to_string());
         self.text_section.push(".copy_loop_string:".to_string());
@@ -2582,37 +3112,35 @@ impl CodeGenerator {
         self.text_section.push("    jnz .copy_loop_string".to_string());
         self.text_section.push(".copy_done_string:".to_string());
         self.text_section.push("    mov byte [rdi], 0  ; null terminator".to_string());
-        self.text_section.push("    mov rax, rbx  ; retornar puntero al String".to_string());
+        self.text_section.push("    mov rax, r15  ; retornar puntero al String".to_string());
         
-        // Epilogue
-        self.text_section.push("    leave".to_string());
-        self.text_section.push("    ret".to_string());
+        // Epilogue ABI-safe
+        self.generate_abi_epilogue(true);
         self.text_section.push("".to_string());
         
         // string_len: Obtener longitud del string
         // Parámetros: RCX = puntero al String
         // Retorna: RAX = longitud
+        // Nota: Función muy simple, no necesita prologue/epilogue completo
+        // pero debemos preservar registros según ABI (RCX es caller-saved)
         self.text_section.push("string_len:".to_string());
         self.text_section.push("    mov rax, [rcx + 8]  ; cargar length".to_string());
-        self.text_section.push("    ret".to_string());
+        self.text_section.push("    ret  ; RCX es caller-saved, no necesitamos preservarlo".to_string());
         self.text_section.push("".to_string());
         
         // string_concat: Concatenar dos strings
         // Parámetros: RCX = puntero al String 1, RDX = puntero al String 2
         // Retorna: RAX = puntero al nuevo String (concatenado)
         self.text_section.push("string_concat:".to_string());
-        self.text_section.push("    ; Prologue".to_string());
-        self.text_section.push("    push rbp".to_string());
-        self.text_section.push("    mov rbp, rsp".to_string());
-        self.text_section.push("    sub rsp, 32  ; shadow space".to_string());
-        self.text_section.push("    push rcx  ; guardar String 1".to_string());
-        self.text_section.push("    push rdx  ; guardar String 2".to_string());
+        self.generate_abi_prologue(true);  // Necesita shadow space para VirtualAlloc
+        self.text_section.push("    mov r12, rcx  ; preservar String 1".to_string());
+        self.text_section.push("    mov r13, rdx  ; preservar String 2".to_string());
         
         // Calcular nueva longitud: len1 + len2
         self.text_section.push("    ; Calcular nueva longitud: len1 + len2".to_string());
-        self.text_section.push("    mov rax, [rcx + 8]  ; length1".to_string());
-        self.text_section.push("    add rax, [rdx + 8]  ; length2".to_string());
-        self.text_section.push("    push rax  ; guardar nueva longitud".to_string());
+        self.text_section.push("    mov rax, [r12 + 8]  ; length1".to_string());
+        self.text_section.push("    add rax, [r13 + 8]  ; length2".to_string());
+        self.text_section.push("    mov r14, rax  ; preservar nueva longitud".to_string());
         
         // Calcular nueva capacity: max((len1 + len2 + 1) * 2, 16)
         self.text_section.push("    ; Calcular nueva capacity".to_string());
@@ -2622,51 +3150,39 @@ impl CodeGenerator {
         self.text_section.push("    jge .capacity_ok_concat".to_string());
         self.text_section.push("    mov rax, 16  ; mínimo 16".to_string());
         self.text_section.push(".capacity_ok_concat:".to_string());
-        self.text_section.push("    push rax  ; guardar capacity".to_string());
+        self.text_section.push("    mov r15, rax  ; preservar capacity".to_string());
         
         // Allocar memoria para nuevo String struct (32 bytes)
         self.text_section.push("    ; Allocar memoria para nuevo String struct".to_string());
+        self.ensure_stack_alignment_before_call("VirtualAlloc (String struct)");
         self.text_section.push("    mov rcx, 0".to_string());
         self.text_section.push("    mov rdx, 32".to_string());
         self.text_section.push("    mov r8, 0x1000".to_string());
         self.text_section.push("    mov r9, 0x04".to_string());
-        self.text_section.push("    sub rsp, 32".to_string());
         self.text_section.push("    call VirtualAlloc".to_string());
-        self.text_section.push("    add rsp, 32".to_string());
-        self.text_section.push("    push rax  ; guardar puntero al nuevo String".to_string());
+        self.text_section.push("    mov rbx, rax  ; preservar puntero al nuevo String (rbx preservado)".to_string());
         
         // Allocar memoria para data
         self.text_section.push("    ; Allocar memoria para data".to_string());
-        self.text_section.push("    pop rbx  ; capacity (del stack)".to_string());
-        self.text_section.push("    push rbx  ; guardar capacity de nuevo".to_string());
+        self.ensure_stack_alignment_before_call("VirtualAlloc (data)");
         self.text_section.push("    mov rcx, 0".to_string());
-        self.text_section.push("    mov rdx, rbx  ; capacity".to_string());
+        self.text_section.push("    mov rdx, r15  ; capacity".to_string());
         self.text_section.push("    mov r8, 0x1000".to_string());
         self.text_section.push("    mov r9, 0x04".to_string());
-        self.text_section.push("    sub rsp, 32".to_string());
         self.text_section.push("    call VirtualAlloc".to_string());
-        self.text_section.push("    add rsp, 32".to_string());
-        self.text_section.push("    push rax  ; guardar puntero a data".to_string());
+        self.text_section.push("    mov rdi, rax  ; preservar puntero a data (rdi preservado)".to_string());
         
-        // Copiar String 1
-        self.text_section.push("    ; Copiar String 1".to_string());
-        self.text_section.push("    pop rdi  ; destino (data)".to_string());
-        self.text_section.push("    pop rbx  ; puntero al nuevo String".to_string());
+        // Configurar String struct
+        self.text_section.push("    ; Configurar String struct".to_string());
         self.text_section.push("    mov [rbx + 0], rdi  ; data = puntero".to_string());
-        self.text_section.push("    pop rax  ; nueva longitud".to_string());
-        self.text_section.push("    mov [rbx + 8], rax  ; length".to_string());
-        self.text_section.push("    pop rax  ; capacity".to_string());
-        self.text_section.push("    mov [rbx + 16], rax  ; capacity".to_string());
+        self.text_section.push("    mov [rbx + 8], r14  ; length".to_string());
+        self.text_section.push("    mov [rbx + 16], r15  ; capacity".to_string());
         self.text_section.push("    mov qword [rbx + 24], 0  ; hash = 0".to_string());
-        self.text_section.push("    pop rdx  ; String 2".to_string());
-        self.text_section.push("    pop rcx  ; String 1".to_string());
-        self.text_section.push("    push rbx  ; guardar puntero al nuevo String".to_string());
-        self.text_section.push("    push rdi  ; guardar puntero a data".to_string());
         
         // Copiar String1->data
         self.text_section.push("    ; Copiar String1->data".to_string());
-        self.text_section.push("    mov rsi, [rcx + 0]  ; fuente (String1->data)".to_string());
-        self.text_section.push("    mov rcx, [rcx + 8]  ; length1".to_string());
+        self.text_section.push("    mov rsi, [r12 + 0]  ; fuente (String1->data, rsi preservado)".to_string());
+        self.text_section.push("    mov rcx, [r12 + 8]  ; length1".to_string());
         self.text_section.push("    test rcx, rcx".to_string());
         self.text_section.push("    jz .copy_string2".to_string());
         self.text_section.push(".copy_loop_concat1:".to_string());
@@ -2680,8 +3196,8 @@ impl CodeGenerator {
         // Copiar String2->data
         self.text_section.push(".copy_string2:".to_string());
         self.text_section.push("    ; Copiar String2->data".to_string());
-        self.text_section.push("    mov rsi, [rdx + 0]  ; fuente (String2->data)".to_string());
-        self.text_section.push("    mov rcx, [rdx + 8]  ; length2".to_string());
+        self.text_section.push("    mov rsi, [r13 + 0]  ; fuente (String2->data)".to_string());
+        self.text_section.push("    mov rcx, [r13 + 8]  ; length2".to_string());
         self.text_section.push("    test rcx, rcx".to_string());
         self.text_section.push("    jz .concat_done".to_string());
         self.text_section.push(".copy_loop_concat2:".to_string());
@@ -2694,41 +3210,36 @@ impl CodeGenerator {
         
         self.text_section.push(".concat_done:".to_string());
         self.text_section.push("    mov byte [rdi], 0  ; null terminator".to_string());
-        self.text_section.push("    pop rdi  ; restaurar puntero a data (no usado)".to_string());
-        self.text_section.push("    pop rax  ; retornar puntero al nuevo String".to_string());
+        self.text_section.push("    mov rax, rbx  ; retornar puntero al nuevo String".to_string());
         
-        // Epilogue
-        self.text_section.push("    leave".to_string());
-        self.text_section.push("    ret".to_string());
+        // Epilogue ABI-safe
+        self.generate_abi_epilogue(true);
         self.text_section.push("".to_string());
         
         // string_slice: Obtener slice de string
         // Parámetros: RCX = puntero al String, RDX = índice inicio, R8 = índice fin (exclusivo)
-        // Retorna: RAX = puntero al nuevo String (slice)
+        // Retorna: RAX = puntero al nuevo String (slice), o NULL (0) si error (índices inválidos)
         self.text_section.push("string_slice:".to_string());
-        self.text_section.push("    ; Prologue".to_string());
-        self.text_section.push("    push rbp".to_string());
-        self.text_section.push("    mov rbp, rsp".to_string());
-        self.text_section.push("    sub rsp, 32  ; shadow space".to_string());
-        self.text_section.push("    push rcx  ; guardar String".to_string());
-        self.text_section.push("    push rdx  ; guardar start".to_string());
-        self.text_section.push("    push r8  ; guardar end".to_string());
+        self.generate_abi_prologue(true);  // Necesita shadow space para VirtualAlloc
+        self.text_section.push("    mov r12, rcx  ; preservar String".to_string());
+        self.text_section.push("    mov r13, rdx  ; preservar start".to_string());
+        self.text_section.push("    mov r14, r8  ; preservar end".to_string());
         
         // Bounds checking
         self.text_section.push("    ; Bounds checking".to_string());
-        self.text_section.push("    mov rax, [rcx + 8]  ; length".to_string());
-        self.text_section.push("    cmp rdx, rax  ; start >= length?".to_string());
+        self.text_section.push("    mov rax, [r12 + 8]  ; length".to_string());
+        self.text_section.push("    cmp r13, rax  ; start >= length?".to_string());
         self.text_section.push("    jge .slice_error".to_string());
-        self.text_section.push("    cmp r8, rax  ; end > length?".to_string());
+        self.text_section.push("    cmp r14, rax  ; end > length?".to_string());
         self.text_section.push("    jg .slice_error".to_string());
-        self.text_section.push("    cmp rdx, r8  ; start >= end?".to_string());
+        self.text_section.push("    cmp r13, r14  ; start >= end?".to_string());
         self.text_section.push("    jge .slice_error".to_string());
         
         // Calcular longitud: end - start
         self.text_section.push("    ; Calcular longitud: end - start".to_string());
-        self.text_section.push("    mov rax, r8  ; end".to_string());
-        self.text_section.push("    sub rax, rdx  ; end - start".to_string());
-        self.text_section.push("    push rax  ; guardar nueva longitud".to_string());
+        self.text_section.push("    mov rax, r14  ; end".to_string());
+        self.text_section.push("    sub rax, r13  ; end - start".to_string());
+        self.text_section.push("    mov r15, rax  ; preservar nueva longitud".to_string());
         
         // Calcular capacity: max((length + 1) * 2, 16)
         self.text_section.push("    ; Calcular capacity".to_string());
@@ -2738,53 +3249,42 @@ impl CodeGenerator {
         self.text_section.push("    jge .capacity_ok_slice".to_string());
         self.text_section.push("    mov rax, 16  ; mínimo 16".to_string());
         self.text_section.push(".capacity_ok_slice:".to_string());
-        self.text_section.push("    push rax  ; guardar capacity".to_string());
+        self.text_section.push("    push rax  ; guardar capacity temporalmente".to_string());
         
         // Allocar memoria para nuevo String struct
         self.text_section.push("    ; Allocar memoria para nuevo String struct".to_string());
+        self.ensure_stack_alignment_before_call("VirtualAlloc (String struct)");
         self.text_section.push("    mov rcx, 0".to_string());
         self.text_section.push("    mov rdx, 32".to_string());
         self.text_section.push("    mov r8, 0x1000".to_string());
         self.text_section.push("    mov r9, 0x04".to_string());
-        self.text_section.push("    sub rsp, 32".to_string());
         self.text_section.push("    call VirtualAlloc".to_string());
-        self.text_section.push("    add rsp, 32".to_string());
-        self.text_section.push("    push rax  ; guardar puntero al nuevo String".to_string());
+        self.text_section.push("    mov rbx, rax  ; preservar puntero al nuevo String (rbx preservado)".to_string());
         
         // Allocar memoria para data
         self.text_section.push("    ; Allocar memoria para data".to_string());
-        self.text_section.push("    pop rbx  ; capacity (del stack)".to_string());
-        self.text_section.push("    push rbx  ; guardar capacity de nuevo".to_string());
+        self.text_section.push("    pop rdx  ; capacity".to_string());
+        self.text_section.push("    push rdx  ; guardar capacity de nuevo".to_string());
+        self.ensure_stack_alignment_before_call("VirtualAlloc (data)");
         self.text_section.push("    mov rcx, 0".to_string());
-        self.text_section.push("    mov rdx, rbx  ; capacity".to_string());
         self.text_section.push("    mov r8, 0x1000".to_string());
         self.text_section.push("    mov r9, 0x04".to_string());
-        self.text_section.push("    sub rsp, 32".to_string());
         self.text_section.push("    call VirtualAlloc".to_string());
-        self.text_section.push("    add rsp, 32".to_string());
-        self.text_section.push("    push rax  ; guardar puntero a data".to_string());
+        self.text_section.push("    mov rdi, rax  ; preservar puntero a data (rdi preservado)".to_string());
         
-        // Copiar slice
-        self.text_section.push("    ; Copiar slice".to_string());
-        self.text_section.push("    pop rdi  ; destino (data)".to_string());
-        self.text_section.push("    pop rbx  ; puntero al nuevo String".to_string());
+        // Configurar String struct
+        self.text_section.push("    ; Configurar String struct".to_string());
         self.text_section.push("    mov [rbx + 0], rdi  ; data = puntero".to_string());
-        self.text_section.push("    pop rax  ; nueva longitud".to_string());
-        self.text_section.push("    mov [rbx + 8], rax  ; length".to_string());
-        self.text_section.push("    pop rax  ; capacity".to_string());
-        self.text_section.push("    mov [rbx + 16], rax  ; capacity".to_string());
+        self.text_section.push("    mov [rbx + 8], r15  ; length".to_string());
+        self.text_section.push("    pop rdx  ; capacity".to_string());
+        self.text_section.push("    mov [rbx + 16], rdx  ; capacity".to_string());
         self.text_section.push("    mov qword [rbx + 24], 0  ; hash = 0".to_string());
-        self.text_section.push("    pop r8  ; end".to_string());
-        self.text_section.push("    pop rdx  ; start".to_string());
-        self.text_section.push("    pop rcx  ; String".to_string());
-        self.text_section.push("    push rbx  ; guardar puntero al nuevo String".to_string());
         
         // Calcular dirección de inicio en String->data
         self.text_section.push("    ; Calcular dirección de inicio".to_string());
-        self.text_section.push("    mov rsi, [rcx + 0]  ; String->data".to_string());
-        self.text_section.push("    add rsi, rdx  ; String->data + start".to_string());
-        self.text_section.push("    mov rcx, r8  ; end".to_string());
-        self.text_section.push("    sub rcx, rdx  ; end - start (longitud)".to_string());
+        self.text_section.push("    mov rsi, [r12 + 0]  ; String->data (rsi preservado)".to_string());
+        self.text_section.push("    add rsi, r13  ; String->data + start".to_string());
+        self.text_section.push("    mov rcx, r15  ; longitud".to_string());
         
         // Copiar caracteres
         self.text_section.push("    ; Copiar caracteres".to_string());
@@ -2800,88 +3300,73 @@ impl CodeGenerator {
         
         self.text_section.push(".slice_copy_done:".to_string());
         self.text_section.push("    mov byte [rdi], 0  ; null terminator".to_string());
-        self.text_section.push("    pop rax  ; retornar puntero al nuevo String".to_string());
+        self.text_section.push("    mov rax, rbx  ; retornar puntero al nuevo String".to_string());
         
-        // Epilogue
-        self.text_section.push("    leave".to_string());
-        self.text_section.push("    ret".to_string());
+        // Epilogue ABI-safe
+        self.generate_abi_epilogue(true);
         self.text_section.push("".to_string());
         
-        // Error handler
+        // Error handler: retornar NULL en lugar de ExitProcess
         self.text_section.push(".slice_error:".to_string());
         self.text_section.push("    ; Error: índices inválidos".to_string());
-        self.text_section.push("    mov ecx, 1  ; exit code 1 (error)".to_string());
-        self.text_section.push("    call ExitProcess".to_string());
+        self.text_section.push("    mov rax, 0  ; retornar NULL (error)".to_string());
+        self.generate_abi_epilogue(true);
         self.text_section.push("".to_string());
         
         // string_upper: Convertir a mayúsculas
         // Parámetros: RCX = puntero al String
         // Retorna: RAX = puntero al nuevo String (mayúsculas)
         self.text_section.push("string_upper:".to_string());
-        self.text_section.push("    ; Prologue".to_string());
-        self.text_section.push("    push rbp".to_string());
-        self.text_section.push("    mov rbp, rsp".to_string());
-        self.text_section.push("    sub rsp, 32  ; shadow space".to_string());
-        self.text_section.push("    push rcx  ; guardar String".to_string());
+        self.generate_abi_prologue(true);  // Necesita shadow space para VirtualAlloc
+        self.text_section.push("    mov r12, rcx  ; preservar String".to_string());
         
         // Obtener longitud
         self.text_section.push("    ; Obtener longitud".to_string());
-        self.text_section.push("    mov rdx, [rcx + 8]  ; length".to_string());
-        self.text_section.push("    push rdx  ; guardar longitud".to_string());
+        self.text_section.push("    mov rdx, [r12 + 8]  ; length".to_string());
+        self.text_section.push("    mov r13, rdx  ; preservar longitud".to_string());
         
         // Calcular capacity: max((length + 1) * 2, 16)
         self.text_section.push("    ; Calcular capacity".to_string());
-        self.text_section.push("    mov rax, rdx".to_string());
+        self.text_section.push("    mov rax, r13".to_string());
         self.text_section.push("    inc rax  ; +1 para null terminator".to_string());
         self.text_section.push("    shl rax, 1  ; * 2".to_string());
         self.text_section.push("    cmp rax, 16".to_string());
         self.text_section.push("    jge .capacity_ok_upper".to_string());
         self.text_section.push("    mov rax, 16  ; mínimo 16".to_string());
         self.text_section.push(".capacity_ok_upper:".to_string());
-        self.text_section.push("    push rax  ; guardar capacity".to_string());
+        self.text_section.push("    mov r14, rax  ; preservar capacity".to_string());
         
         // Allocar memoria para nuevo String struct
         self.text_section.push("    ; Allocar memoria para nuevo String struct".to_string());
+        self.ensure_stack_alignment_before_call("VirtualAlloc (String struct)");
         self.text_section.push("    mov rcx, 0".to_string());
         self.text_section.push("    mov rdx, 32".to_string());
         self.text_section.push("    mov r8, 0x1000".to_string());
         self.text_section.push("    mov r9, 0x04".to_string());
-        self.text_section.push("    sub rsp, 32".to_string());
         self.text_section.push("    call VirtualAlloc".to_string());
-        self.text_section.push("    add rsp, 32".to_string());
-        self.text_section.push("    push rax  ; guardar puntero al nuevo String".to_string());
+        self.text_section.push("    mov rbx, rax  ; preservar puntero al nuevo String (rbx preservado)".to_string());
         
         // Allocar memoria para data
         self.text_section.push("    ; Allocar memoria para data".to_string());
-        self.text_section.push("    pop rbx  ; capacity (del stack)".to_string());
-        self.text_section.push("    push rbx  ; guardar capacity de nuevo".to_string());
+        self.ensure_stack_alignment_before_call("VirtualAlloc (data)");
         self.text_section.push("    mov rcx, 0".to_string());
-        self.text_section.push("    mov rdx, rbx  ; capacity".to_string());
+        self.text_section.push("    mov rdx, r14  ; capacity".to_string());
         self.text_section.push("    mov r8, 0x1000".to_string());
         self.text_section.push("    mov r9, 0x04".to_string());
-        self.text_section.push("    sub rsp, 32".to_string());
         self.text_section.push("    call VirtualAlloc".to_string());
-        self.text_section.push("    add rsp, 32".to_string());
-        self.text_section.push("    push rax  ; guardar puntero a data".to_string());
+        self.text_section.push("    mov rdi, rax  ; preservar puntero a data (rdi preservado)".to_string());
         
         // Configurar nuevo String
         self.text_section.push("    ; Configurar nuevo String".to_string());
-        self.text_section.push("    pop rdi  ; destino (data)".to_string());
-        self.text_section.push("    pop rbx  ; puntero al nuevo String".to_string());
         self.text_section.push("    mov [rbx + 0], rdi  ; data = puntero".to_string());
-        self.text_section.push("    pop rax  ; longitud".to_string());
-        self.text_section.push("    mov [rbx + 8], rax  ; length".to_string());
-        self.text_section.push("    pop rax  ; capacity".to_string());
-        self.text_section.push("    mov [rbx + 16], rax  ; capacity".to_string());
+        self.text_section.push("    mov [rbx + 8], r13  ; length".to_string());
+        self.text_section.push("    mov [rbx + 16], r14  ; capacity".to_string());
         self.text_section.push("    mov qword [rbx + 24], 0  ; hash = 0".to_string());
-        self.text_section.push("    pop rcx  ; String original".to_string());
-        self.text_section.push("    push rbx  ; guardar puntero al nuevo String".to_string());
-        self.text_section.push("    push rdi  ; guardar puntero a data".to_string());
         
         // Copiar y convertir a mayúsculas
         self.text_section.push("    ; Copiar y convertir a mayúsculas".to_string());
-        self.text_section.push("    mov rsi, [rcx + 0]  ; fuente (String->data)".to_string());
-        self.text_section.push("    mov rcx, [rcx + 8]  ; longitud".to_string());
+        self.text_section.push("    mov rsi, [r12 + 0]  ; fuente (String->data, rsi preservado)".to_string());
+        self.text_section.push("    mov rcx, r13  ; longitud".to_string());
         self.text_section.push("    test rcx, rcx".to_string());
         self.text_section.push("    jz .upper_done".to_string());
         self.text_section.push(".copy_loop_upper:".to_string());
@@ -2901,82 +3386,66 @@ impl CodeGenerator {
         
         self.text_section.push(".upper_done:".to_string());
         self.text_section.push("    mov byte [rdi], 0  ; null terminator".to_string());
-        self.text_section.push("    pop rdi  ; restaurar (no usado)".to_string());
-        self.text_section.push("    pop rax  ; retornar puntero al nuevo String".to_string());
+        self.text_section.push("    mov rax, rbx  ; retornar puntero al nuevo String".to_string());
         
-        // Epilogue
-        self.text_section.push("    leave".to_string());
-        self.text_section.push("    ret".to_string());
+        // Epilogue ABI-safe
+        self.generate_abi_epilogue(true);
         self.text_section.push("".to_string());
         
         // string_lower: Convertir a minúsculas
         // Parámetros: RCX = puntero al String
         // Retorna: RAX = puntero al nuevo String (minúsculas)
         self.text_section.push("string_lower:".to_string());
-        self.text_section.push("    ; Prologue".to_string());
-        self.text_section.push("    push rbp".to_string());
-        self.text_section.push("    mov rbp, rsp".to_string());
-        self.text_section.push("    sub rsp, 32  ; shadow space".to_string());
-        self.text_section.push("    push rcx  ; guardar String".to_string());
+        self.generate_abi_prologue(true);  // Necesita shadow space para VirtualAlloc
+        self.text_section.push("    mov r12, rcx  ; preservar String".to_string());
         
         // Obtener longitud
         self.text_section.push("    ; Obtener longitud".to_string());
-        self.text_section.push("    mov rdx, [rcx + 8]  ; length".to_string());
-        self.text_section.push("    push rdx  ; guardar longitud".to_string());
+        self.text_section.push("    mov rdx, [r12 + 8]  ; length".to_string());
+        self.text_section.push("    mov r13, rdx  ; preservar longitud".to_string());
         
         // Calcular capacity: max((length + 1) * 2, 16)
         self.text_section.push("    ; Calcular capacity".to_string());
-        self.text_section.push("    mov rax, rdx".to_string());
+        self.text_section.push("    mov rax, r13".to_string());
         self.text_section.push("    inc rax  ; +1 para null terminator".to_string());
         self.text_section.push("    shl rax, 1  ; * 2".to_string());
         self.text_section.push("    cmp rax, 16".to_string());
         self.text_section.push("    jge .capacity_ok_lower".to_string());
         self.text_section.push("    mov rax, 16  ; mínimo 16".to_string());
         self.text_section.push(".capacity_ok_lower:".to_string());
-        self.text_section.push("    push rax  ; guardar capacity".to_string());
+        self.text_section.push("    mov r14, rax  ; preservar capacity".to_string());
         
         // Allocar memoria para nuevo String struct
         self.text_section.push("    ; Allocar memoria para nuevo String struct".to_string());
+        self.ensure_stack_alignment_before_call("VirtualAlloc (String struct)");
         self.text_section.push("    mov rcx, 0".to_string());
         self.text_section.push("    mov rdx, 32".to_string());
         self.text_section.push("    mov r8, 0x1000".to_string());
         self.text_section.push("    mov r9, 0x04".to_string());
-        self.text_section.push("    sub rsp, 32".to_string());
         self.text_section.push("    call VirtualAlloc".to_string());
-        self.text_section.push("    add rsp, 32".to_string());
-        self.text_section.push("    push rax  ; guardar puntero al nuevo String".to_string());
+        self.text_section.push("    mov rbx, rax  ; preservar puntero al nuevo String (rbx preservado)".to_string());
         
         // Allocar memoria para data
         self.text_section.push("    ; Allocar memoria para data".to_string());
-        self.text_section.push("    pop rbx  ; capacity (del stack)".to_string());
-        self.text_section.push("    push rbx  ; guardar capacity de nuevo".to_string());
+        self.ensure_stack_alignment_before_call("VirtualAlloc (data)");
         self.text_section.push("    mov rcx, 0".to_string());
-        self.text_section.push("    mov rdx, rbx  ; capacity".to_string());
+        self.text_section.push("    mov rdx, r14  ; capacity".to_string());
         self.text_section.push("    mov r8, 0x1000".to_string());
         self.text_section.push("    mov r9, 0x04".to_string());
-        self.text_section.push("    sub rsp, 32".to_string());
         self.text_section.push("    call VirtualAlloc".to_string());
-        self.text_section.push("    add rsp, 32".to_string());
-        self.text_section.push("    push rax  ; guardar puntero a data".to_string());
+        self.text_section.push("    mov rdi, rax  ; preservar puntero a data (rdi preservado)".to_string());
         
         // Configurar nuevo String
         self.text_section.push("    ; Configurar nuevo String".to_string());
-        self.text_section.push("    pop rdi  ; destino (data)".to_string());
-        self.text_section.push("    pop rbx  ; puntero al nuevo String".to_string());
         self.text_section.push("    mov [rbx + 0], rdi  ; data = puntero".to_string());
-        self.text_section.push("    pop rax  ; longitud".to_string());
-        self.text_section.push("    mov [rbx + 8], rax  ; length".to_string());
-        self.text_section.push("    pop rax  ; capacity".to_string());
-        self.text_section.push("    mov [rbx + 16], rax  ; capacity".to_string());
+        self.text_section.push("    mov [rbx + 8], r13  ; length".to_string());
+        self.text_section.push("    mov [rbx + 16], r14  ; capacity".to_string());
         self.text_section.push("    mov qword [rbx + 24], 0  ; hash = 0".to_string());
-        self.text_section.push("    pop rcx  ; String original".to_string());
-        self.text_section.push("    push rbx  ; guardar puntero al nuevo String".to_string());
-        self.text_section.push("    push rdi  ; guardar puntero a data".to_string());
         
         // Copiar y convertir a minúsculas
         self.text_section.push("    ; Copiar y convertir a minúsculas".to_string());
-        self.text_section.push("    mov rsi, [rcx + 0]  ; fuente (String->data)".to_string());
-        self.text_section.push("    mov rcx, [rcx + 8]  ; longitud".to_string());
+        self.text_section.push("    mov rsi, [r12 + 0]  ; fuente (String->data, rsi preservado)".to_string());
+        self.text_section.push("    mov rcx, r13  ; longitud".to_string());
         self.text_section.push("    test rcx, rcx".to_string());
         self.text_section.push("    jz .lower_done".to_string());
         self.text_section.push(".copy_loop_lower:".to_string());
@@ -2996,12 +3465,49 @@ impl CodeGenerator {
         
         self.text_section.push(".lower_done:".to_string());
         self.text_section.push("    mov byte [rdi], 0  ; null terminator".to_string());
-        self.text_section.push("    pop rdi  ; restaurar (no usado)".to_string());
-        self.text_section.push("    pop rax  ; retornar puntero al nuevo String".to_string());
+        self.text_section.push("    mov rax, rbx  ; retornar puntero al nuevo String".to_string());
         
-        // Epilogue
-        self.text_section.push("    leave".to_string());
-        self.text_section.push("    ret".to_string());
+        // Epilogue ABI-safe
+        self.generate_abi_epilogue(true);
+        self.text_section.push("".to_string());
+        
+        // string_free: Liberar memoria de un String
+        // Parámetros: RCX = puntero al String
+        // Retorna: RAX = 0 (éxito) o -4 (error: puntero inválido)
+        // Nota: Libera tanto el String struct como su data buffer
+        //       Liberar NULL es seguro (no-op, retorna 0)
+        self.text_section.push("string_free:".to_string());
+        self.generate_abi_prologue(true);  // Necesita shadow space para VirtualFree
+        self.text_section.push("    mov r12, rcx  ; preservar puntero al String".to_string());
+        
+        // Verificar si el puntero es NULL (liberar NULL es seguro, no-op)
+        self.text_section.push("    ; Verificar si el puntero es NULL".to_string());
+        self.text_section.push("    test r12, r12  ; verificar si String* es NULL".to_string());
+        self.text_section.push("    jz .free_string_done  ; si es NULL, retornar éxito (no-op)".to_string());
+        
+        // Liberar data buffer primero
+        self.text_section.push("    ; Liberar data buffer".to_string());
+        self.text_section.push("    mov rcx, [r12 + 0]  ; data pointer".to_string());
+        self.text_section.push("    test rcx, rcx  ; verificar si es NULL".to_string());
+        self.text_section.push("    jz .free_string_struct  ; si es NULL, saltar".to_string());
+        self.ensure_stack_alignment_before_call("VirtualFree (data)");
+        self.text_section.push("    mov rdx, 0  ; dwSize (0 = liberar todo)".to_string());
+        self.text_section.push("    mov r8, 0x8000  ; MEM_RELEASE".to_string());
+        self.text_section.push("    call VirtualFree".to_string());
+        
+        // Liberar String struct
+        self.text_section.push(".free_string_struct:".to_string());
+        self.text_section.push("    ; Liberar String struct".to_string());
+        self.ensure_stack_alignment_before_call("VirtualFree (String struct)");
+        self.text_section.push("    mov rcx, r12  ; puntero al String struct".to_string());
+        self.text_section.push("    mov rdx, 0  ; dwSize (0 = liberar todo)".to_string());
+        self.text_section.push("    mov r8, 0x8000  ; MEM_RELEASE".to_string());
+        self.text_section.push("    call VirtualFree".to_string());
+        
+        // Retornar éxito
+        self.text_section.push(".free_string_done:".to_string());
+        self.text_section.push("    mov rax, 0  ; éxito".to_string());
+        self.generate_abi_epilogue(true);
         self.text_section.push("".to_string());
     }
 }

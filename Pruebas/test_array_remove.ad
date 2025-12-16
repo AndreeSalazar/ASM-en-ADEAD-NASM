@@ -1,0 +1,9 @@
+; Test: arr.remove(x)
+let arr = [1, 2, 3, 2, 4]
+arr.remove(2)       ; Eliminar primera ocurrencia de 2
+print arr[0]        ; Debe imprimir 1
+print arr[1]        ; Debe imprimir 3
+print arr[2]        ; Debe imprimir 2
+print arr[3]        ; Debe imprimir 4
+print len(arr)      ; Debe imprimir 4
+
