@@ -1,0 +1,23 @@
+; Test casos límite: strings vacíos, slices al límite, etc.
+let s1 = ""
+let s2 = "a"
+let s3 = "ab"
+let s4 = "abc"
+
+; Longitudes
+print len(s1)
+print len(s2)
+print len(s3)
+print len(s4)
+
+; Slices
+let slice1 = s3[0:1]
+let slice2 = s3[1:2]
+let slice3 = s4[0:2]
+let slice4 = s4[2:3]
+
+print slice1
+print slice2
+print slice3
+print slice4
+

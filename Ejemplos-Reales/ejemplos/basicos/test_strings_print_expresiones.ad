@@ -1,0 +1,8 @@
+; Test print con expresiones de strings directamente
+print "hola"
+print "mundo"
+print "hola" + "mundo"
+print ("hola" + "mundo").upper()
+print ("HOLA" + "MUNDO").lower()
+print ("holamundo")[0:4]
+

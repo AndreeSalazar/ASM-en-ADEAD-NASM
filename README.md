@@ -13,7 +13,7 @@ Simple sintaxis estilo Python • Rendimiento nativo
 
 </div>
 
-## 🔄 Arquitectura Completa: Parser Manual + C++20 + Rust + Rust Cleaner
+## 🔄 Arquitectura Completa: Stack Completo con Zig Linker Opcional
 
 **ADead utiliza un stack completo y optimizado que genera código ASM virgen y puro:**
 
@@ -21,16 +21,17 @@ Simple sintaxis estilo Python • Rendimiento nativo
 ╔═══════════════════════════════════════════════════════════════════════╗
 ║              ARQUITECTURA COMPLETA                                     ║
 ║     Parser Manual (Rust) + C++20 Generator (Rust) + GCC++/Clang++ +    ║
-║     Rust Cleaner → ASM Virgen/Puro                                     ║
+║     Rust Cleaner → ASM → NASM/GAS → .obj → Zig/GCC/Clang (linker) → .exe ║
 ║                                                                         ║
 ║     C++20 Features: ranges, concepts, format, consteval               ║
 ║     Fallback: C++17 si C++20 no está disponible                        ║
+║     Linker: GCC/Clang (requerido) o Zig (opcional)                     ║
 ╚═══════════════════════════════════════════════════════════════════════╝
 ```
 
 ### 🎯 Flujo Principal Completo (100% Funcional)
 
-**ADead → Parser Manual (Rust) → C++20 Generator (Rust) → GCC++/Clang++ (C++20) → Rust Cleaner → ASM Virgen/Puro**
+**ADead → Parser Manual (Rust) → C++ Generator (Rust) → GCC++/Clang++ (C++20/C++17) → Rust Cleaner → ASM → NASM/GAS → .obj → Zig/GCC/Clang (linker) → .exe**
 
 ```
 ┌─────────────────────────────────────────┐
@@ -50,24 +51,26 @@ Simple sintaxis estilo Python • Rendimiento nativo
                │
                ▼
 ┌─────────────────────────────────────────┐
-│  🚀 C++20 GENERATOR (Rust)              │
-│  • AST → Código C++20 válido          │
+│  🚀 C++ GENERATOR (Rust)               │
+│  • AST → Código C++20/C++17 válido    │
 │  • std::vector para arrays             │
 │  • RAII para memoria automática        │
 │  • constexpr/consteval para optimizaciones │
-│  • std::ranges para operaciones expresivas │
-│  • std::format para mejor formateo     │
+│  • std::ranges para operaciones expresivas (C++20) │
+│  • std::format para mejor formateo (C++20) │
 │  • Código limpio y expresivo           │
+│  • Detección automática C++20/C++17    │
 └──────────────┬──────────────────────────┘
                │
                ▼
 ┌─────────────────────────────────────────┐
-│  ⚙️ GCC++/CLANG++ (Compilador C++20)  │
-│  • C++20 → ASM optimizado              │
+│  ⚙️ GCC++/CLANG++ (Compilador C++)    │
+│  • C++20/C++17 → ASM optimizado        │
 │  • Optimización -O2, -O3               │
 │  • constexpr/consteval evaluado en compile-time │
 │  • Templates optimizados                │
 │  • Detección automática C++20/C++17    │
+│  • ⚠️ REQUERIDO para compilar C++ → ASM │
 └──────────────┬──────────────────────────┘
                │
                ▼
@@ -89,10 +92,36 @@ Simple sintaxis estilo Python • Rendimiento nativo
 └──────────────┬──────────────────────────┘
                │
                ▼
+┌─────────────────────────────────────────┐
+│  🔧 NASM/GAS (Ensamblador)             │
+│  • Ensamblar ASM → .obj                │
+│  • NASM: sintaxis Intel                 │
+│  • GAS: sintaxis AT&T                   │
+│  • Genera archivos objeto (.obj/.o)     │
+└──────────────┬──────────────────────────┘
+               │
+               ▼
+┌─────────────────────────────────────────┐
+│  🔗 LINKER (GCC/Clang o Zig)           │
+│  • Linkear .obj → .exe                 │
+│  • ✅ GCC/Clang: Linker tradicional     │
+│  • ✅ Zig: Linker alternativo (opcional)│
+│  • Ambos funcionan igual de bien       │
+│  • ⚠️ GCC/Clang sigue siendo necesario  │
+│    para compilar C++ → ASM             │
+└──────────────┬──────────────────────────┘
+               │
+               ▼
          ⚡ CPU Directo ⚡
 ```
 
 **Estado:** ✅ **COMPLETO Y FUNCIONAL** - Verificado con ejemplos reales
+
+**Resumen del Stack:**
+- ✅ **GCC/Clang para compilación** - Requerido para C++ → ASM
+- ✅ **Zig opcional para linking** - Alternativa ligera y fácil de instalar
+- ✅ **NASM/GAS para ensamblar** - Convierte ASM → .obj
+- ✅ **Pipeline completo funcional** - De ADead a ejecutable nativo
 
 ---
 
@@ -122,13 +151,16 @@ Simple sintaxis estilo Python • Rendimiento nativo
 - ✅ Detección automática C++20/C++17 con fallback transparente
 - **Ubicación:** `CORE/rust/crates/adead-parser/src/cpp_generator.rs`
 
-### 3. ⚙️ GCC/Clang++ (Compilador C++)
+### 3. ⚙️ GCC/Clang++ (Compilador C++) - **REQUERIDO**
 **Rol:** Compilación de C++ a ASM optimizado
 - ✅ C++ → ASM (GAS, sintaxis Intel)
 - ✅ Optimización `-O2`, `-O3`
 - ✅ `constexpr` evaluado en compile-time
 - ✅ Templates optimizados
 - ✅ Aprovecha optimizaciones avanzadas de C++
+- ✅ Detección automática C++20/C++17
+- **⚠️ CRÍTICO:** Este paso es **obligatorio** - GCC/Clang++ es necesario para compilar C++ → ASM
+- **⚠️ NO puede ser reemplazado por Zig** - Zig solo puede linkear, no compilar C++
 
 ### 4. 🔒 Rust Cleaner (clean_asm.rs)
 **Rol:** Limpieza final de ASM para producir código virgen/puro
@@ -140,6 +172,28 @@ Simple sintaxis estilo Python • Rendimiento nativo
 - ✅ Elimina NOPs innecesarios
 - ✅ Normaliza formato
 - **Ubicación:** `CORE/rust/crates/adead-parser/src/clean_asm.rs`
+
+### 5. 🔧 NASM/GAS (Ensamblador)
+**Rol:** Convertir código ASM a archivos objeto (.obj/.o)
+- ✅ **NASM:** Ensamblador con sintaxis Intel (recomendado para Windows)
+- ✅ **GAS:** GNU Assembler con sintaxis AT&T (incluido con GCC)
+- ✅ Convierte ASM → .obj (Windows) o .o (Linux)
+- ✅ Formato de salida compatible con linkers estándar
+- **Ubicación:** Herramientas externas (NASM o GAS del sistema)
+
+### 6. 🔗 Linker (GCC/Clang o Zig)
+**Rol:** Enlazar código objeto (.obj/.o) en ejecutable (.exe)
+- ✅ **GCC/Clang:** Linker tradicional, incluido con el compilador
+  - Funciona automáticamente con GCC/Clang instalado
+  - Comando: `g++ archivo.obj -o archivo.exe` o `clang++ archivo.obj -o archivo.exe`
+- ✅ **Zig:** Linker alternativo (opcional pero recomendado)
+  - Más fácil de instalar (solo un binario)
+  - Comando: `zig build-exe archivo.obj -target x86_64-windows -lc -o archivo.exe`
+  - Funciona igual de bien que GCC/Clang para linking
+- ✅ Ambos funcionan igual de bien para linking
+- **⚠️ Importante:** Zig **NO reemplaza** a GCC/Clang en la etapa de compilación (paso 3)
+- **⚠️ GCC/Clang sigue siendo necesario** para compilar C++ → ASM
+- **✅ Zig es opcional** - Solo reemplaza el linker, no el compilador
 
 ---
 
@@ -254,6 +308,24 @@ main:
     ...
 ```
 
+**5. NASM/GAS → .obj (ensamblar):**
+```bash
+# Con NASM (Windows)
+nasm -f win64 archivo.asm -o archivo.obj
+
+# Con GAS (Linux/Windows)
+as --64 -o archivo.obj archivo.asm
+```
+
+**6. Linker (GCC/Clang o Zig) → .exe:**
+```bash
+# Opción 1: Con GCC/Clang
+g++ archivo.obj -o archivo.exe
+
+# Opción 2: Con Zig (recomendado si no tienes GCC/Clang completo)
+zig build-exe archivo.obj -target x86_64-windows -lc -o archivo.exe
+```
+
 ---
 
 ## ✨ ¿Por qué ADead?
@@ -325,6 +397,8 @@ ADead es un lenguaje de programación que combina la simplicidad de Python con e
 │  • C++ Generator (Rust) → Código C++                   │
 │  • GCC/Clang++ → ASM optimizado                       │
 │  • Rust Cleaner → ASM virgen/puro                      │
+│  • NASM/GAS → .obj (ensamblar)                         │
+│  • Zig/GCC/Clang → .exe (linkear)                      │
 │  • Todo en compile-time                                │
 │  • Sin runtime necesario                               │
 └────────────────┬────────────────────────────────────────┘
@@ -550,9 +624,11 @@ ADead:    1000 operaciones → ~1,000 instrucciones CPU (ASM directo, optimizado
 
 **ADead actualmente es un compilador funcional que:**
 - ✅ Parsea código ADead con sintaxis simple
-- ✅ Genera código C++ válido usando Parser Manual + C++ Generator
-- ✅ Compila a ASM optimizado usando GCC/Clang++
+- ✅ Genera código C++ válido usando Parser Manual + C++ Generator (C++20/C++17)
+- ✅ Compila a ASM optimizado usando GCC/Clang++ (REQUERIDO)
 - ✅ Limpia ASM con Rust Cleaner para producir código virgen/puro
+- ✅ Ensambla ASM → .obj usando NASM o GAS
+- ✅ Linkea .obj → .exe usando Zig (opcional) o GCC/Clang
 - ✅ Produce ejecutables nativos sin dependencias
 - ✅ Funciona con while loops, if statements, variables, arrays y aritmética
 
@@ -597,9 +673,11 @@ Ver [docs/ESTADO-ACTUAL.md](docs/ESTADO-ACTUAL.md) para detalles completos.
 
 #### ✅ Arquitectura Técnica Actual
 - ✅ **Parser Manual (Rust)** - Regex + Recursión para while/if
-- ✅ **C++ Generator (Rust)** - Convierte AST a código C++ válido con `std::vector`
-- ✅ **GCC/Clang++** - Compila C++ → ASM optimizado
+- ✅ **C++ Generator (Rust)** - Convierte AST a código C++ válido con `std::vector` (C++20/C++17)
+- ✅ **GCC/Clang++** - Compila C++ → ASM optimizado (REQUERIDO)
 - ✅ **Rust Cleaner** - Limpia ASM para producir código virgen/puro
+- ✅ **NASM/GAS** - Ensambla ASM → .obj (herramientas externas)
+- ✅ **Zig/GCC/Clang Linker** - Linkea .obj → .exe (Zig opcional pero recomendado)
 - ✅ **CLI funcional** - `compile` con pipeline completo
 
 #### ✅ Experiencia de Usuario
@@ -649,12 +727,17 @@ arr.reverse()       // Invierte array
 ### Requisitos
 
 **Windows (Verificado y Funcional):**
-- Rust (última versión estable) - Para compilar el compilador
-- GCC++ o Clang++ (MSYS2/MinGW) - Para compilar código C++ generado
+- **Rust** (última versión estable) - Para compilar el compilador ADead
+- **GCC++ o Clang++** (MSYS2/MinGW) - **REQUERIDO** para compilar código C++ → ASM
+- **NASM o GAS** (as) - Para ensamblar código ASM → .obj
+- **Zig** (opcional pero recomendado) - Linker alternativo más fácil de instalar
+- **O alternativamente:** GCC/Clang completo - Incluye linker, puede reemplazar a Zig
 
 **Linux:**
-- Rust (última versión estable)
-- GCC++ o Clang++ (`g++` o `clang++` en PATH)
+- **Rust** (última versión estable) - Para compilar el compilador ADead
+- **GCC++ o Clang++** (`g++` o `clang++` en PATH) - **REQUERIDO** para compilar C++ → ASM
+- **NASM o GAS** (as) - Para ensamblar código ASM → .o
+- **Zig** (opcional pero recomendado) - Linker alternativo más fácil de instalar
 
 ### Instalación
 
@@ -670,20 +753,80 @@ cargo build --release
 
 ### Uso Básico
 
+**Pipeline completo paso a paso:**
+
 ```powershell
-# Compilar con pipeline completo (Parser Manual → C++ → GCC++ → Rust Cleaner)
+# Paso 1: Compilar ADead → ASM (Parser Manual → C++ Generator → GCC++ → Rust Cleaner)
 .\CORE\rust\target\release\adeadc.exe compile Ejemplos-Reales\compilados\test_10.ad --backend cpp -o test_10.asm
 
 # El pipeline automáticamente:
 # 1. Parsea con Parser Manual (Rust)
-# 2. Genera C++ con C++ Generator (Rust)
-# 3. Compila con GCC++/Clang++
+# 2. Genera C++ con C++ Generator (Rust) - C++20 si está disponible, sino C++17
+# 3. Compila con GCC++/Clang++ → ASM (formato GAS o NASM según compilador)
 # 4. Limpia ASM con Rust Cleaner
 # 5. Produce ASM virgen/puro
 
-# Ejecutar el programa
-.\Ejemplos-Reales\compilados\test_10_cpp.exe
+# Paso 2: Ensamblar ASM → .obj (NASM o GAS)
+nasm -f win64 test_10.asm -o test_10.obj
+# O con GAS:
+# as --64 -o test_10.obj test_10.asm
+
+# Paso 3: Linkear .obj → .exe (Zig o GCC/Clang)
+# Opción A: Con Zig (recomendado - más fácil de instalar)
+zig build-exe test_10.obj -target x86_64-windows -lc -o test_10.exe
+
+# Opción B: Con GCC/Clang (si tienes el linker completo)
+g++ test_10.obj -o test_10.exe
+# O con Clang:
+# clang++ test_10.obj -o test_10.exe
+
+# Paso 4: Ejecutar el programa
+.\test_10.exe
 ```
+
+**Flujo completo resumido:**
+```
+ADead (.ad) → Parser Manual → C++ Generator → GCC++/Clang++ → Rust Cleaner → ASM → NASM/GAS → .obj → Zig/GCC/Clang (linker) → .exe
+```
+
+### 🔗 Stack Completo: GCC/Clang para Compilación, Zig Opcional para Linking
+
+**Resumen del Stack:**
+- ✅ **GCC/Clang para compilación** - Requerido para C++ → ASM (no puede ser reemplazado)
+- ✅ **Zig opcional para linking** - Alternativa ligera y fácil de instalar
+- ✅ **NASM/GAS para ensamblar** - Convierte ASM → .obj
+
+**¿Por qué Zig como linker opcional?**
+- ✅ **Más fácil de instalar** - Solo un binario, no requiere MSYS2/MinGW completo
+- ✅ **Funciona igual de bien** - Zig linkea tan bien como GCC/Clang
+- ✅ **Alternativa cuando falta GCC/Clang** - Si solo tienes el compilador pero no el linker
+- ⚠️ **NO reemplaza al compilador** - GCC/Clang sigue siendo necesario para C++ → ASM
+
+**Flujo completo con Zig como linker:**
+```
+ADead → Parser Manual → C++ Generator → GCC++/Clang++ → Rust Cleaner → ASM → NASM/GAS → .obj → Zig (linker) → .exe
+```
+
+**Flujo completo con GCC/Clang como linker:**
+```
+ADead → Parser Manual → C++ Generator → GCC++/Clang++ → Rust Cleaner → ASM → NASM/GAS → .obj → GCC/Clang (linker) → .exe
+```
+
+**Scripts disponibles:**
+- `Ejemplos-Reales\ejemplos\basicos\ejecutar_con_zig.bat` - Compila, ensambla y linkea usando Zig
+- `Ejemplos-Reales\ejemplos\basicos\linkear_con_zig.bat` - Solo linkea objetos .obj con Zig
+
+**Ejemplo de uso con Zig:**
+```cmd
+cd Ejemplos-Reales\ejemplos\basicos
+ejecutar_con_zig.bat test_strings_basico.ad
+```
+
+**Ventajas de usar Zig como linker:**
+- ✅ Instalación más simple (solo un binario)
+- ✅ No requiere MSYS2/MinGW completo para linking
+- ✅ Funciona igual de bien que GCC/Clang para linking
+- ✅ Alternativa cuando GCC/Clang no está disponible para linking
 
 ---
 
@@ -694,6 +837,7 @@ cargo build --release
 - [Flujo Actual](docs/FLUJO-ACTUAL.md) ⭐ - Flujo de compilación funcional
 - [Características Funcionales](docs/CARACTERISTICAS-FUNCIONALES.md) ⭐ - Qué funciona y qué falta
 - [Análisis Potencial C++ Completo](ANALISIS-POTENCIAL-CPP-COMPLETO.md) ⭐ - Stack completo C++ explicado
+- [Historial Zig Linker y C++17/C++20](HISTORIAL-ZIG-CPP.md) ⭐ - Historial completo de decisiones arquitectónicas
 - [Índice de Documentación](docs/README.md) - Guía de toda la documentación
 
 ---
@@ -734,7 +878,7 @@ Copyright (c) 2025 Eddi Andreé Salazar Matos
 
 ⚡ *ADead - Simple syntax, powerful performance* ⚡
 
-**Stack Completo:** Parser Manual (Rust) + C++ Generator (Rust) + GCC/Clang++ + Rust Cleaner → ASM Virgen/Puro
+**Stack Completo:** Parser Manual (Rust) + C++ Generator (Rust) + GCC/Clang++ (compilación) + Rust Cleaner → ASM → NASM/GAS → Zig/GCC/Clang (linker) → Ejecutable
 
 *11 de Diciembre de 2025*
 

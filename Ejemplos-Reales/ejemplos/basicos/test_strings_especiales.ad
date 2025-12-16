@@ -1,0 +1,20 @@
+; Test strings con caracteres especiales y espacios
+let s1 = "hola mundo"
+let s2 = "uno-dos-tres"
+let s3 = "a b c d e"
+let s4 = "  espacios  "
+
+let upper1 = s1.upper()
+let lower2 = s2.lower()
+let slice3 = s3[0:3]
+let slice4 = s4[2:10]
+
+print s1
+print upper1
+print s2
+print lower2
+print s3
+print slice3
+print s4
+print slice4
+

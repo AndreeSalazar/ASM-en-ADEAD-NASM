@@ -1,0 +1,18 @@
+; Test ASCII: verificar conversión correcta de mayúsculas/minúsculas
+let s1 = "abcdefghijklmnopqrstuvwxyz"
+let s2 = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+let s3 = "aBcDeFgHiJkLmNoPqRsTuVwXyZ"
+
+let upper1 = s1.upper()
+let lower2 = s2.lower()
+let upper3 = s3.upper()
+let lower3 = s3.lower()
+
+print s1
+print upper1
+print s2
+print lower2
+print s3
+print upper3
+print lower3
+

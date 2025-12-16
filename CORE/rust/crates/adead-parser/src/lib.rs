@@ -89,6 +89,12 @@ pub enum Expr {
         array: Box<Expr>,
         index: Box<Expr>,
     },
+    // Strings (Sprint 2)
+    Slice {                     // s[0:4]
+        object: Box<Expr>,
+        start: Box<Expr>,
+        end: Box<Expr>,
+    },
 }
 
 /// Par├ímetro de funci├│n con informaci├│n de borrowing
@@ -1195,19 +1201,40 @@ fn expr_parser() -> impl Parser<char, Expr, Error = Simple<char>> + Clone {
                 }
             });
 
-        // Indexación: arr[0] (Sprint 1.2)
-        let with_index = with_access
+        // Indexación: arr[0] o Slicing: s[0:4] (Sprint 1.2, Sprint 2)
+        let index_or_slice = with_access
             .then(
                 just('[')
                     .padded()
                     .ignore_then(expr.clone())
+                    .then(
+                        // Detectar si viene ':' para slicing
+                        just(':')
+                            .padded()
+                            .ignore_then(expr.clone())
+                            .or_not()
+                    )
                     .then_ignore(just(']').padded())
                     .repeated(),
             )
-            .foldl(|arr, idx| Expr::Index {
-                array: Box::new(arr),
-                index: Box::new(idx),
+            .foldl(|arr, (idx, end_opt)| {
+                if let Some(end) = end_opt {
+                    // Slicing: s[0:4]
+                    Expr::Slice {
+                        object: Box::new(arr),
+                        start: Box::new(idx),
+                        end: Box::new(end),
+                    }
+                } else {
+                    // Indexación: arr[0]
+                    Expr::Index {
+                        array: Box::new(arr),
+                        index: Box::new(idx),
+                    }
+                }
             });
+        
+        let with_index = index_or_slice;
 
         // Operador ? para propagación de errores (expr?)
         let with_propagate = with_index

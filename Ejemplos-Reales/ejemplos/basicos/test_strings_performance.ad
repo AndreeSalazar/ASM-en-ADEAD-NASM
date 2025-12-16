@@ -1,0 +1,23 @@
+; Test de performance: operaciones múltiples para verificar eficiencia
+let s = "test"
+let i = 0
+let limite = 10
+
+while i < limite {
+    let s2 = s + "x"
+    let upper = s2.upper()
+    let slice = upper[0:4]
+    let len_slice = len(slice)
+    
+    if i == 0 {
+        print s2
+        print upper
+        print slice
+        print len_slice
+    }
+    
+    i = i + 1
+}
+
+print "Completado"
+

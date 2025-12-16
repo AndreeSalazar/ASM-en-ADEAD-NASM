@@ -1,0 +1,6 @@
+; Test longitud: len(s)
+let s = "hola"
+let len_s = len(s)
+print s
+print len_s
+

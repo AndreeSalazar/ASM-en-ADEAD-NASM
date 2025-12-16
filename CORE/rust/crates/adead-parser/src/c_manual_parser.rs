@@ -480,6 +480,12 @@ impl CManualParser {
             }
         }
         
+        // String literal (debe ir antes de números e identificadores)
+        if text.starts_with('"') && text.ends_with('"') && text.len() > 1 {
+            let string_val = text[1..text.len()-1].to_string();
+            return Ok(Expr::String(string_val));
+        }
+        
         // Número
         if let Ok(n) = text.parse::<i64>() {
             return Ok(Expr::Number(n));

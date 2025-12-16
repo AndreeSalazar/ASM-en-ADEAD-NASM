@@ -1,4 +1,0 @@
-EXPORTS
-    generate_nasm_ffi
-    parse_expr_ffi
-

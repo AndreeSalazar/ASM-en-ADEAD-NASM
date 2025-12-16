@@ -1,0 +1,11 @@
+; Test concatenación con literales directamente
+let s1 = "hola" + "mundo"
+let s2 = "uno" + "dos" + "tres"
+let s3 = ("a" + "b").upper()
+let s4 = ("A" + "B").lower()
+
+print s1
+print s2
+print s3
+print s4
+

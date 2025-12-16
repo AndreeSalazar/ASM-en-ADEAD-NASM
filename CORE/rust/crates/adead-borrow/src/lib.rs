@@ -366,6 +366,13 @@ impl BorrowChecker {
                 self.check_expr(index)?;
                 Ok(())
             }
+            Expr::Slice { object, start, end } => {
+                // Verificar objeto, inicio y fin del slice
+                self.check_expr(object)?;
+                self.check_expr(start)?;
+                self.check_expr(end)?;
+                Ok(())
+            }
         }
     }
 

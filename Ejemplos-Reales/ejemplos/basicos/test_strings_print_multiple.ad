@@ -1,0 +1,10 @@
+; Test print múltiple: imprimir varios strings
+let s1 = "uno"
+let s2 = "dos"
+let s3 = "tres"
+
+print s1
+print s2
+print s3
+print s1 + s2 + s3
+

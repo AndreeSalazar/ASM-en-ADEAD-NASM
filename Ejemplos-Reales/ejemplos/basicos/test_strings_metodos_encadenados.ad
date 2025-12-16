@@ -1,0 +1,17 @@
+; Test métodos encadenados: upper() y lower() en secuencia
+let s = "Hola Mundo"
+
+; Aplicar upper() y luego lower()
+let upper = s.upper()
+let lower = upper.lower()
+
+; Aplicar lower() y luego upper()
+let lower2 = s.lower()
+let upper2 = lower2.upper()
+
+print s
+print upper
+print lower
+print lower2
+print upper2
+

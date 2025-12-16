@@ -1,0 +1,6 @@
+; Test concatenación: s1 + s2
+let s1 = "hola"
+let s2 = "mundo"
+let s3 = s1 + s2
+print s3
+

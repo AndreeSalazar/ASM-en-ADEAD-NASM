@@ -1,0 +1,6 @@
+; Test método lower(): s.lower()
+let s = "HOLA MUNDO"
+let lower = s.lower()
+print s
+print lower
+
