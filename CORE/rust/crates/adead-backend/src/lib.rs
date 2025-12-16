@@ -2,6 +2,15 @@ use adead_common::Result;
 use adead_parser::{BinOp, Expr, Pattern, Program, Stmt};
 use std::collections::HashMap;
 
+mod memory_pool;
+mod optimizer;
+mod stdlib;
+mod register_optimizer;
+use memory_pool::MemoryPool;
+use optimizer::CodeOptimizer;
+use stdlib::StdLib;
+use register_optimizer::RegisterOptimizer;
+
 pub struct CodeGenerator {
     data_section: Vec<String>,
     text_section: Vec<String>,
@@ -11,6 +20,8 @@ pub struct CodeGenerator {
     stack_offset: i64,
     structs_with_destroy: HashMap<String, bool>, // Track structs that have destroy methods (O2.1)
     variables_to_destroy: Vec<(String, String)>, // (variable_name, struct_name) - RAII tracking
+    source_lines: Vec<(usize, String)>, // (line_number, source_line) para debug symbols
+    current_line: usize, // Línea actual del código fuente
 }
 
 impl CodeGenerator {
@@ -24,6 +35,17 @@ impl CodeGenerator {
             stack_offset: 0,
             structs_with_destroy: HashMap::new(),
             variables_to_destroy: Vec::new(),
+            source_lines: Vec::new(),
+            current_line: 0,
+        }
+    }
+    
+    /// Agregar comentario de debug con origen ADead
+    fn add_debug_comment(&mut self, comment: &str) {
+        if self.current_line > 0 {
+            self.text_section.push(format!("    ; ADead: line {} - {}", self.current_line, comment));
+        } else {
+            self.text_section.push(format!("    ; ADead: {}", comment));
         }
     }
 
@@ -75,11 +97,60 @@ impl CodeGenerator {
         self.text_section.push("extern VirtualFree".to_string());
         self.text_section.push("global main".to_string());
         
+        // ============================================
+        // RUNTIME BOUNDARY: Funciones Helper del Runtime
+        // ============================================
+        // Estas funciones son parte del runtime de ADead
+        // NO son código generado del usuario, son helpers del sistema
+        
         // Generar funciones helper de Array en NASM (antes de main)
         self.generate_array_helpers_nasm();
         
         // Generar funciones helper de String en NASM (antes de main)
         self.generate_string_helpers_nasm();
+        
+        // ============================================
+        // RUNTIME BOUNDARY: Librería Estándar (Stdlib)
+        // ============================================
+        // Funciones predefinidas disponibles en todos los programas
+        // Parte del runtime, no código generado del usuario
+        
+        // Generar librería estándar (funciones predefinidas)
+        let stdlib_code = StdLib::generate_stdlib_nasm();
+        for line in stdlib_code {
+            self.text_section.push(line);
+        }
+        
+        // ============================================
+        // RUNTIME BOUNDARY END: Código Generado del Usuario
+        // ============================================
+        
+        // Generar librería estándar (funciones predefinidas)
+        let stdlib_code = StdLib::generate_stdlib_nasm();
+        for line in stdlib_code {
+            self.text_section.push(line);
+        }
+        
+        // Generar funciones de usuario ANTES del main
+        // Separar funciones de otros statements
+        let mut user_functions = Vec::new();
+        let mut other_statements = Vec::new();
+        
+        for stmt in &program.statements {
+            match stmt {
+                Stmt::Fn { .. } => {
+                    user_functions.push(stmt);
+                }
+                _ => {
+                    other_statements.push(stmt);
+                }
+            }
+        }
+        
+        // Generar funciones de usuario primero
+        for stmt in &user_functions {
+            self.generate_stmt_windows(stmt)?;
+        }
         
         self.text_section.push("main:".to_string());
         
@@ -100,7 +171,8 @@ impl CodeGenerator {
         self.text_section.push("    call GetStdHandle".to_string());
         self.text_section.push("    mov [rbp+16], rax  ; save stdout handle at [rbp+16]".to_string());
 
-        for stmt in &program.statements {
+        // Generar otros statements (no funciones) dentro del main
+        for stmt in &other_statements {
             self.generate_stmt_windows(stmt)?;
         }
 
@@ -134,6 +206,15 @@ impl CodeGenerator {
     }
 
     fn finish_generation(&mut self) -> Result<String> {
+        // OPTIMIZACIÓN: Aplicar optimizaciones al código generado
+        let mut optimizer = CodeOptimizer::new();
+        let text_code = self.text_section.join("\n");
+        optimizer.analyze_usage(&text_code);
+        
+        // Eliminar código muerto (funciones no usadas)
+        let optimized_text = optimizer.remove_dead_code(&text_code);
+        let optimized_lines: Vec<String> = optimized_text.lines().map(|s| s.to_string()).collect();
+        
         let mut output = String::new();
         
         // En Windows, poner default rel al principio
@@ -152,8 +233,8 @@ impl CodeGenerator {
             output.push('\n');
         }
         
-        // Text section
-        for line in &self.text_section {
+        // Text section (optimizado - dead code eliminado)
+        for line in &optimized_lines {
             output.push_str(line);
             output.push('\n');
         }
@@ -523,56 +604,123 @@ impl CodeGenerator {
                 self.text_section.push(format!("{}:", loop_end));
             }
             Stmt::Fn { visibility: _, name, params, body } => {
-                // Generate function with Windows x64 calling convention
+                // Generate function with Windows x64 calling convention (ABI-safe)
                 // Visibility no afecta la generación de código (Sprint 1.3)
                 let func_label = format!("fn_{}", name);
-                self.text_section.push(format!("    jmp {}_end", func_label));
+                // No necesitamos jmp si la función se genera antes del main
+                // (las funciones de usuario se generan antes del main)
                 self.text_section.push(format!("{}:", func_label));
-                self.text_section.push("    push rbp".to_string());
-                self.text_section.push("    mov rbp, rsp".to_string());
                 
-                // Allocate space for locals (we'll track this with stack_offset)
-                // Parameters are in RCX, RDX, R8, R9 (Windows x64 calling convention)
-                // Save them to local stack variables
+                // Guardar stack_offset inicial para restaurar después
+                let saved_stack_offset = self.stack_offset;
+                
+                // Prologue ABI-safe: preservar registros no volátiles y alinear stack
+                // Necesitamos shadow space si la función llama a otras funciones
+                // Por ahora, siempre reservamos shadow space para seguridad
+                self.generate_abi_prologue(true);
+                
+                // Calcular espacio necesario para variables locales
+                // Parámetros adicionales (> 4) ya están en stack del caller
+                // Necesitamos espacio para:
+                // - Parámetros locales (primeros 4 se guardan en stack local)
+                // - Variables locales de la función
+                let mut local_vars_size = 0;
+                
+                // Guardar parámetros en variables locales
+                // Parámetros en registros: RCX, RDX, R8, R9 (primeros 4)
+                // Parámetros adicionales: en stack del caller [rbp + 16 + (i-4)*8]
+                // Nota: Después del prologue ABI-safe, rbp apunta al frame del caller
+                // Los parámetros adicionales están en [rbp + 16 + shadow_space + (i-4)*8]
+                // Pero como ya hicimos push de registros, necesitamos ajustar
+                // Después de prologue: rbp original está en [rbp + 0], return address en [rbp + 8]
+                // Parámetros adicionales están en [rbp + 16 + (i-4)*8] (sin contar los push del prologue)
                 for (i, param) in params.iter().enumerate() {
                     let offset = self.stack_offset;
                     self.stack_offset += 8;
+                    local_vars_size += 8;
                     self.variables.insert(param.name.clone(), offset);
                     
-                    let reg = match i {
-                        0 => "rcx",
-                        1 => "rdx",
-                        2 => "r8",
-                        3 => "r9",
-                        _ => {
-                            // Additional params are on stack at [rbp + 16 + (i-4)*8]
-                            // (16 = return address + saved rbp)
-                            let stack_offset = 16 + (i - 4) * 8;
-                                self.text_section.push(format!("    mov rax, [rbp + {}]", stack_offset));
-                                self.text_section.push(format!("    mov [rbp - {}], rax", offset + 8));
-                            continue;
+                    match i {
+                        0 => {
+                            // RCX -> guardar en stack local
+                            self.text_section.push(format!("    mov [rbp - {}], rcx  ; guardar param0: {}", offset + 8, param.name));
                         }
-                    };
-                    self.text_section.push(format!("    mov [rbp - {}], {}", offset + 8, reg));
+                        1 => {
+                            // RDX -> guardar en stack local
+                            self.text_section.push(format!("    mov [rbp - {}], rdx  ; guardar param1: {}", offset + 8, param.name));
+                        }
+                        2 => {
+                            // R8 -> guardar en stack local
+                            self.text_section.push(format!("    mov [rbp - {}], r8  ; guardar param2: {}", offset + 8, param.name));
+                        }
+                        3 => {
+                            // R9 -> guardar en stack local
+                            self.text_section.push(format!("    mov [rbp - {}], r9  ; guardar param3: {}", offset + 8, param.name));
+                        }
+                        _ => {
+                            // Parámetros adicionales (> 4) están en stack del caller
+                            // Después del prologue ABI-safe:
+                            // - rbp apunta al frame del caller
+                            // - Los push del prologue están antes de rbp
+                            // - Parámetros adicionales están en [rbp + 16 + (i-4)*8]
+                            //   16 = return address (8) + saved rbp (8)
+                            let stack_offset = 16 + (i - 4) * 8;
+                            self.text_section.push(format!("    mov rax, [rbp + {}]  ; cargar param{} desde stack del caller", stack_offset, i));
+                            self.text_section.push(format!("    mov [rbp - {}], rax  ; guardar param{}: {}", offset + 8, i, param.name));
+                        }
+                    }
                 }
                 
-                // Generate function body
+                // Reservar espacio adicional para variables locales si es necesario
+                // (ya reservamos espacio para parámetros arriba)
+                // El prologue ya reservó shadow space (32 bytes) y alineación (8 bytes)
+                
+                // Generar cuerpo de la función
+                // Nota: Si hay return statements, saltarán al epilogue
+                let return_label = format!("{}_return", func_label);
+                let mut has_explicit_return = false;
+                
                 for s in body {
-                    self.generate_stmt_windows(s)?;
+                    match s {
+                        Stmt::Return(_) => {
+                            // Return statement: evaluar expresión y saltar al epilogue
+                            has_explicit_return = true;
+                            self.generate_stmt_windows(s)?;
+                            // Después de return, saltar al epilogue
+                            self.text_section.push(format!("    jmp {}", return_label));
+                        }
+                        _ => {
+                            self.generate_stmt_windows(s)?;
+                        }
+                    }
                 }
                 
-                self.text_section.push("    leave".to_string());
-                self.text_section.push("    ret".to_string());
+                // Si no hay return explícito, retornar 0 por defecto
+                self.text_section.push(format!("{}:", return_label));
+                if !has_explicit_return {
+                    self.text_section.push("    mov rax, 0  ; return value por defecto".to_string());
+                }
+                // Si hay return explícito, el valor ya está en RAX
+                
+                // Epilogue ABI-safe: restaurar registros y limpiar stack
+                self.generate_abi_epilogue(true);
+                
+                // Restaurar stack_offset
+                self.stack_offset = saved_stack_offset;
+                
                 self.text_section.push(format!("{}_end:", func_label));
             }
             Stmt::Return(expr) => {
+                // Return statement: evaluar expresión y poner resultado en RAX
+                // El epilogue se manejará en la función (no aquí)
                 if let Some(expr) = expr {
                     self.generate_expr_windows(expr)?;
+                    // El resultado ya está en RAX
                 } else {
-                    self.text_section.push("    mov rax, 0".to_string());
+                    self.text_section.push("    mov rax, 0  ; return sin valor (default 0)".to_string());
                 }
-                self.text_section.push("    leave".to_string());
-                self.text_section.push("    ret".to_string());
+                // Nota: NO llamamos leave/ret aquí porque el epilogue de la función lo hará
+                // El código de la función saltará al epilogue después de return
             }
             Stmt::Struct { name, fields: _, init, destroy: _ } => {
                 // Registrar struct y generar código para constructor si existe
@@ -898,18 +1046,29 @@ impl CodeGenerator {
                     
                     // Retorna la longitud en RAX (ya está ahí)
                 } else {
-                    // Llamada a función normal
-                    // Windows x64 calling convention
-                    let mut stack_args = Vec::new();
-                    for (i, arg) in args.iter().enumerate() {
-                        if i >= 4 {
-                            self.generate_expr_windows(arg)?;
-                            self.text_section.push("    push rax".to_string());
-                            stack_args.push(i);
-                        }
+                    // Llamada a función normal (ABI-safe)
+                    // Windows x64 calling convention:
+                    // - First 4 params: RCX, RDX, R8, R9
+                    // - Additional params: on stack (right-to-left)
+                    // - Shadow space: 32 bytes must be reserved
+                    // - Stack must be aligned to 16 bytes before call
+                    
+                    let num_args = args.len();
+                    let stack_args_count = if num_args > 4 { num_args - 4 } else { 0 };
+                    let total_stack_space = 32 + (stack_args_count * 8); // shadow space (32) + stack args (8 cada uno)
+                    
+                    // Reservar shadow space y espacio para parámetros adicionales
+                    self.text_section.push(format!("    sub rsp, {}  ; shadow space (32) + stack args ({})", 32, stack_args_count * 8));
+                    
+                    // Push parámetros adicionales en stack (right-to-left)
+                    // Windows x64: parámetros adicionales se pasan right-to-left
+                    for arg in args.iter().skip(4).rev() {
+                        self.generate_expr_windows(arg)?;
+                        self.text_section.push("    push rax  ; parámetro adicional en stack".to_string());
                     }
                     
-                    for (i, arg) in args.iter().enumerate().take(4) {
+                    // Cargar primeros 4 parámetros en registros (left-to-right)
+                    for (i, arg) in args.iter().take(4).enumerate() {
                         self.generate_expr_windows(arg)?;
                         let reg = match i {
                             0 => "rcx",
@@ -918,12 +1077,7 @@ impl CodeGenerator {
                             3 => "r9",
                             _ => unreachable!(),
                         };
-                        if i == 0 && args.len() > 1 {
-                            self.text_section.push("    mov r10, rax".to_string());
-                                self.text_section.push(format!("    mov {}, r10", reg));
-                        } else {
-                                self.text_section.push(format!("    mov {}, rax", reg));
-                        }
+                        self.text_section.push(format!("    mov {}, rax  ; param{}", reg, i));
                     }
                     
                     // Llamar función (con namespace si existe) (Sprint 1.3)
@@ -933,13 +1087,12 @@ impl CodeGenerator {
                         format!("fn_{}", name)
                     };
                     
-                    self.text_section.push("    sub rsp, 32  ; shadow space".to_string());
                     self.text_section.push(format!("    call {}", function_name));
-                    if !stack_args.is_empty() {
-                        self.text_section.push(format!("    add rsp, {}", (stack_args.len() * 8) + 32));
-                    } else {
-                        self.text_section.push("    add rsp, 32".to_string());
-                    }
+                    
+                    // Restaurar stack (shadow space + parámetros adicionales)
+                    self.text_section.push(format!("    add rsp, {}  ; restaurar shadow space + stack args", total_stack_space));
+                    
+                    // Valor de retorno está en RAX
                 }
             }
             Expr::Assign { name, value } => {
@@ -2747,6 +2900,7 @@ impl CodeGenerator {
         // array_remove: Eliminar primera ocurrencia de valor
         // Parámetros: RCX = puntero al Array, RDX = valor
         // Retorna: RAX = 0 (éxito) o -3 (error: valor no encontrado)
+        // ERROR CONVENTION: Void functions usan códigos negativos (-3 = valor no encontrado)
         self.text_section.push("array_remove:".to_string());
         self.generate_abi_prologue(false);  // No necesita shadow space (solo operaciones internas)
         self.text_section.push("    mov r12, rcx  ; preservar puntero al Array".to_string());
@@ -2892,9 +3046,11 @@ impl CodeGenerator {
         self.generate_abi_epilogue(false);
         self.text_section.push("".to_string());
         
-        // array_sort: Ordenar array (bubble sort simple)
+        // array_sort: Ordenar array
         // Parámetros: RCX = puntero al Array
-        // Retorna: void
+        // Retorna: RAX = 0 (éxito, siempre exitoso)
+        // OPTIMIZATION: Usa bubble sort (placeholder, no optimizado)
+        // TODO: Implementar quicksort o mergesort para mejor rendimiento
         self.text_section.push("array_sort:".to_string());
         self.generate_abi_prologue(false);  // No necesita shadow space (solo operaciones internas)
         

@@ -1,0 +1,9 @@
+// Test 4: Función con múltiples puntos de retorno
+fn maximo(a, b):
+    if a > b:
+        return a
+    return b
+
+let resultado = maximo(10, 5)
+print resultado
+
