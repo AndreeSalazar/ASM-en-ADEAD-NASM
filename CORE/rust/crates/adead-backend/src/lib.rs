@@ -6,10 +6,14 @@ mod memory_pool;
 mod optimizer;
 mod stdlib;
 mod register_optimizer;
+mod dependency_graph;
+mod usage_analyzer;
 use memory_pool::MemoryPool;
 use optimizer::CodeOptimizer;
 use stdlib::StdLib;
 use register_optimizer::RegisterOptimizer;
+use dependency_graph::DependencyGraph;
+use usage_analyzer::UsageAnalyzer;
 
 pub struct CodeGenerator {
     data_section: Vec<String>,
@@ -98,16 +102,37 @@ impl CodeGenerator {
         self.text_section.push("global main".to_string());
         
         // ============================================
+        // DEAD CODE ELIMINATION: Análisis Estático
+        // ============================================
+        // Analizar el programa para detectar qué funciones del runtime se usan
+        let mut deps = DependencyGraph::new();
+        UsageAnalyzer::analyze_program(program, &mut deps);
+        
+        // ============================================
         // RUNTIME BOUNDARY: Funciones Helper del Runtime
         // ============================================
         // Estas funciones son parte del runtime de ADead
         // NO son código generado del usuario, son helpers del sistema
+        // SOLO se generan si se usan (dead code elimination)
         
-        // Generar funciones helper de Array en NASM (antes de main)
-        self.generate_array_helpers_nasm();
+        // Generar sistema de panic solo si se usa
+        let uses_panic = deps.uses_panic();
+        let uses_arrays = deps.uses_arrays();
+        let uses_strings = deps.uses_strings();
         
-        // Generar funciones helper de String en NASM (antes de main)
-        self.generate_string_helpers_nasm();
+        if uses_panic {
+            self.generate_panic_system();
+        }
+        
+        // Generar funciones helper de Array solo si se usan
+        if uses_arrays {
+            self.generate_array_helpers_nasm_selective(&deps);
+        }
+        
+        // Generar funciones helper de String solo si se usan
+        if uses_strings {
+            self.generate_string_helpers_nasm_selective(&deps);
+        }
         
         // ============================================
         // RUNTIME BOUNDARY: Librería Estándar (Stdlib)
@@ -124,12 +149,6 @@ impl CodeGenerator {
         // ============================================
         // RUNTIME BOUNDARY END: Código Generado del Usuario
         // ============================================
-        
-        // Generar librería estándar (funciones predefinidas)
-        let stdlib_code = StdLib::generate_stdlib_nasm();
-        for line in stdlib_code {
-            self.text_section.push(line);
-        }
         
         // Generar funciones de usuario ANTES del main
         // Separar funciones de otros statements
@@ -310,28 +329,176 @@ impl CodeGenerator {
                         self.text_section.push("    call WriteFile".to_string());
                     }
                     Expr::Ident(name) => {
-                        // Variable que contiene String struct: cargar puntero al String desde la variable
-                        if let Some(&offset) = self.variables.get(name) {
-                            // La variable contiene el puntero al String struct
-                            self.text_section.push(format!("    mov rax, [rbp - {}]  ; cargar puntero al String struct desde variable {}", offset + 8, name));
-                            
-                            // Cargar String->data y String->length
-                            self.text_section.push("    mov rdx, [rax + 0]  ; String->data".to_string());
-                            self.text_section.push("    mov r8, [rax + 8]  ; String->length".to_string());
+                        // Verificar si la variable es string o numérica
+                        if self.is_string_expr(expr) {
+                            // Variable que contiene String struct: cargar puntero al String desde la variable
+                            if let Some(&offset) = self.variables.get(name) {
+                                // La variable contiene el puntero al String struct
+                                self.text_section.push(format!("    mov rax, [rbp - {}]  ; cargar puntero al String struct desde variable {}", offset + 8, name));
+                                
+                                // Cargar String->data y String->length
+                                self.text_section.push("    mov rdx, [rax + 0]  ; String->data".to_string());
+                                self.text_section.push("    mov r8, [rax + 8]  ; String->length".to_string());
+                            } else {
+                                return Err(adead_common::ADeadError::RuntimeError {
+                                    message: format!("undefined variable: {} in print statement", name),
+                                });
+                            }
+                            // Preparar WriteFile call
+                            self.text_section.push("    ; Prepare WriteFile call for String variable".to_string());
+                            self.text_section.push("    mov rcx, [rbp+16]  ; stdout handle".to_string());
+                            // RDX ya está listo (String->data)
+                            // R8 ya está listo (String->length)
+                            self.text_section.push("    lea r9, [rbp+24]  ; lpNumberOfBytesWritten".to_string());
+                            self.text_section.push("    mov qword [r9], 0  ; inicializar".to_string());
+                            self.text_section.push("    mov qword [rsp+32], 0  ; lpOverlapped = NULL".to_string());
+                            self.text_section.push("    call WriteFile".to_string());
                         } else {
-                            return Err(adead_common::ADeadError::RuntimeError {
-                                message: format!("undefined variable: {} in print statement", name),
-                            });
+                            // Variable numérica: evaluar expresión y convertir a string
+                            // Usar la misma lógica que para expresiones numéricas complejas
+                            self.generate_expr_windows(expr)?;
+                            // RAX ahora contiene el resultado numérico
+                            
+                            // Reservar espacio para buffer en stack (20 bytes es suficiente para int64)
+                            let buffer_offset = self.stack_offset;
+                            self.stack_offset += 24; // Buffer + align
+                            
+                            // Guardar resultado en rbx temporalmente
+                            self.text_section.push("    mov rbx, rax  ; guardar resultado".to_string());
+                            
+                            // Convertir número en RBX a string en buffer [rbp - buffer_offset]
+                            // Función helper inline para convertir int64 a string
+                            let conv_label = self.new_label("int_to_str_runtime");
+                            self.text_section.push(format!("    lea rdx, [rbp - {}]  ; dirección del buffer", buffer_offset + 8));
+                            self.text_section.push("    mov rax, rbx  ; número a convertir".to_string());
+                            self.text_section.push("    push rbx  ; guardar resultado".to_string());
+                            self.text_section.push("    push rdx  ; guardar dirección buffer".to_string());
+                            self.text_section.push(format!("    call {}", conv_label));
+                            
+                            // RAX ahora contiene la longitud del string
+                            // RDX tiene la dirección del buffer (preservada por la función helper)
+                            self.text_section.push("    mov r8, rax  ; guardar longitud en r8 (tercer parámetro de WriteFile)".to_string());
+                            
+                            // Preparar WriteFile call
+                            self.text_section.push("    ; Prepare WriteFile call for numeric variable".to_string());
+                            self.text_section.push("    mov rcx, [rbp+16]  ; stdout handle (primer parámetro)".to_string());
+                            // RDX ya tiene la dirección del buffer (segundo parámetro)
+                            // R8 ya tiene la longitud (tercer parámetro)
+                            self.text_section.push("    lea r9, [rbp+24]  ; lpNumberOfBytesWritten (cuarto parámetro)".to_string());
+                            self.text_section.push("    mov qword [r9], 0  ; inicializar lpNumberOfBytesWritten".to_string());
+                            self.text_section.push("    mov qword [rsp+32], 0  ; lpOverlapped = NULL (quinto parámetro en shadow space)".to_string());
+                            self.text_section.push("    call WriteFile".to_string());
+                            
+                            // Restaurar stack
+                            self.text_section.push("    pop rdx  ; restaurar dirección buffer".to_string());
+                            self.text_section.push("    pop rbx  ; restaurar resultado".to_string());
+                            self.stack_offset -= 24; // Liberar buffer
+                            
+                            // Generar función helper para convertir int64 a string (runtime)
+                            self.text_section.push(format!("    jmp {}_end", conv_label));
+                            self.text_section.push(format!("{}:", conv_label));
+                            self.text_section.push("    ; Función helper: convertir int64 a string decimal (runtime)".to_string());
+                            self.text_section.push("    ; Entrada: RAX = número, RDX = dirección del buffer".to_string());
+                            self.text_section.push("    ; Salida: RAX = longitud del string".to_string());
+                            self.text_section.push("    push rbp".to_string());
+                            self.text_section.push("    mov rbp, rsp".to_string());
+                            self.text_section.push("    push rbx".to_string());
+                            self.text_section.push("    push rcx".to_string());
+                            // CRÍTICO: Guardar dirección buffer original en r8 (registro no volátil) ANTES de cualquier modificación
+                            self.text_section.push("    mov r8, rdx  ; guardar dirección buffer en r8 (preservar para retorno)".to_string());
+                            // Guardar también en stack para restaurar después
+                            self.text_section.push("    push rdx  ; guardar dirección buffer original en stack también".to_string());
+                            // Usar rsi como registro de trabajo durante procesamiento
+                            self.text_section.push("    mov rsi, rdx  ; copiar a rsi para usar durante procesamiento".to_string());
+                            
+                            // Manejar negativo
+                            let pos_label = self.new_label("num_pos_rt");
+                            let end_label = self.new_label("num_end_rt");
+                            self.text_section.push("    cmp rax, 0".to_string());
+                            self.text_section.push(format!("    jge {}", pos_label));
+                            self.text_section.push("    mov byte [rdx], '-'".to_string());
+                            self.text_section.push("    inc rdx".to_string());
+                            self.text_section.push("    neg rax".to_string());
+                            self.text_section.push(format!("{}:", pos_label));
+                            
+                            // CRÍTICO: Usar rsi (que tiene la dirección original del buffer) en lugar de rdx
+                            // porque rdx puede haber sido modificado si el número era negativo
+                            self.text_section.push("    mov rbx, rsi  ; inicio buffer (usar rsi que tiene dirección original)".to_string());
+                            self.text_section.push("    mov rcx, 10  ; divisor".to_string());
+                            
+                            // Caso especial: 0
+                            let not_zero_label = self.new_label("not_zero_rt");
+                            self.text_section.push("    cmp rax, 0".to_string());
+                            self.text_section.push(format!("    jne {}", not_zero_label));
+                            self.text_section.push("    mov byte [rsi], '0'".to_string());
+                            self.text_section.push("    inc rsi".to_string());
+                            self.text_section.push(format!("    jmp {}", end_label));
+                            self.text_section.push(format!("{}:", not_zero_label));
+                            
+                            // Loop: dividir y obtener dígitos
+                            let loop_label = self.new_label("digit_loop_rt");
+                            self.text_section.push(format!("{}:", loop_label));
+                            self.text_section.push("    xor rdx, rdx  ; limpiar para división".to_string());
+                            self.text_section.push("    div rcx  ; rax = rax/10, rdx = rax%10".to_string());
+                            self.text_section.push("    add dl, '0'  ; convertir a ASCII".to_string());
+                            self.text_section.push("    mov [rbx], dl  ; guardar dígito".to_string());
+                            self.text_section.push("    inc rbx".to_string());
+                            self.text_section.push("    cmp rax, 0".to_string());
+                            self.text_section.push(format!("    jne {}", loop_label));
+                            
+                            self.text_section.push(format!("{}:", end_label));
+                            self.text_section.push("    mov byte [rbx], 0xA  ; newline".to_string());
+                            self.text_section.push("    inc rbx".to_string());
+                            
+                            // Revertir string (dígitos están al revés)
+                            let rev_start = self.new_label("rev_start_rt");
+                            let rev_loop = self.new_label("rev_loop_rt");
+                            let rev_done = self.new_label("rev_done_rt");
+                            self.text_section.push(format!("{}:", rev_start));
+                            // Usar r8 que tiene la dirección original del buffer (guardada al inicio, nunca modificado)
+                            self.text_section.push("    mov rcx, r8  ; inicio para el loop de reverso (r8 tiene dirección original)".to_string());
+                            self.text_section.push("    mov rdx, rbx  ; fin para el loop de reverso".to_string());
+                            self.text_section.push("    dec rdx  ; excluir newline del reverso".to_string());
+                            self.text_section.push("    cmp rcx, rdx".to_string());
+                            self.text_section.push(format!("    jge {}", rev_done));
+                            // CRÍTICO: Guardar rbx (fin del string) antes del loop de reversión
+                            // porque el loop modificará rbx
+                            self.text_section.push("    push rbx  ; guardar fin del string antes de reversión".to_string());
+                            
+                            self.text_section.push(format!("{}:", rev_loop));
+                            self.text_section.push("    mov al, [rcx]  ; byte desde inicio".to_string());
+                            self.text_section.push("    mov bl, [rdx]  ; byte desde fin (rbx temporal, se restaurará después)".to_string());
+                            self.text_section.push("    mov [rcx], bl".to_string());
+                            self.text_section.push("    mov [rdx], al".to_string());
+                            self.text_section.push("    inc rcx".to_string());
+                            self.text_section.push("    dec rdx".to_string());
+                            self.text_section.push("    cmp rcx, rdx".to_string());
+                            self.text_section.push(format!("    jl {}", rev_loop));
+                            self.text_section.push(format!("{}:", rev_done));
+                            
+                            // Restaurar rbx (fin del string) después del loop
+                            self.text_section.push("    pop rbx  ; restaurar fin del string después de reversión".to_string());
+                            
+                            // Calcular longitud: rbx (fin) - dirección inicial del buffer
+                            self.text_section.push("    mov rax, rbx  ; fin del string (incluye newline)".to_string());
+                            self.text_section.push("    sub rax, r8  ; longitud = fin - inicio (r8 tiene la dirección original)".to_string());
+                            
+                            // Restaurar registros (en orden inverso del push)
+                            // Stack tiene: [rbp] [rbx] [rcx] [rdx_buffer] <- top
+                            // Hacer pop rdx para balancear el stack primero
+                            self.text_section.push("    pop rdx  ; balancear stack (descartar valor del stack)".to_string());
+                            self.text_section.push("    pop rcx  ; restaurar rcx original".to_string());
+                            self.text_section.push("    pop rbx".to_string());
+                            self.text_section.push("    pop rbp".to_string());
+                            
+                            // CRÍTICO: Restaurar la dirección del buffer en RDX DESPUÉS de todos los pop
+                            // El caller necesita RDX con la dirección del buffer para WriteFile
+                            self.text_section.push("    mov rdx, r8  ; restaurar dirección buffer en rdx para el caller (r8 nunca se modificó)".to_string());
+                            
+                            // RAX tiene la longitud, RDX tiene la dirección del buffer - ambos para el caller
+                            self.text_section.push("    ret".to_string());
+                            self.text_section.push(format!("{}_end:", conv_label));
                         }
-                        // Preparar WriteFile call
-                        self.text_section.push("    ; Prepare WriteFile call for String variable".to_string());
-                        self.text_section.push("    mov rcx, [rbp+16]  ; stdout handle".to_string());
-                        // RDX ya está listo (String->data)
-                        // R8 ya está listo (String->length)
-                        self.text_section.push("    lea r9, [rbp+24]  ; lpNumberOfBytesWritten".to_string());
-                        self.text_section.push("    mov qword [r9], 0  ; inicializar".to_string());
-                        self.text_section.push("    mov qword [rsp+32], 0  ; lpOverlapped = NULL".to_string());
-                        self.text_section.push("    call WriteFile".to_string());
                     }
                     _ => {
                         // Evaluar expresión numérica (ej: 2 + 5, 3.14 + 2.5) y convertir a string
@@ -2388,10 +2555,100 @@ impl CodeGenerator {
         // Por ahora, asumimos que el prologue mantiene la alineación correcta
     }
 
-    /// Generar funciones helper de Array en NASM
+    /// Generar sistema de panic para manejo de errores profesional
+    fn generate_panic_system(&mut self) {
+        self.text_section.push("".to_string());
+        self.text_section.push("; ============================================".to_string());
+        self.text_section.push("; RUNTIME: Sistema de Panic".to_string());
+        self.text_section.push("; ============================================".to_string());
+        self.text_section.push("".to_string());
+        
+        // panic_out_of_bounds: Error cuando se accede fuera de rango
+        self.text_section.push("panic_out_of_bounds:".to_string());
+        self.text_section.push("    push rbp".to_string());
+        self.text_section.push("    mov rbp, rsp".to_string());
+        self.text_section.push("    sub rsp, 64  ; shadow space + local vars".to_string());
+        
+        // Obtener stdout
+        self.text_section.push("    mov ecx, -11  ; STD_OUTPUT_HANDLE".to_string());
+        self.text_section.push("    call GetStdHandle".to_string());
+        self.text_section.push("    mov r12, rax  ; guardar handle en r12 (preservado)".to_string());
+        
+        // Preparar WriteFile
+        self.text_section.push("    mov rcx, r12  ; hFile (stdout)".to_string());
+        self.text_section.push("    lea rdx, [rel panic_msg_out_of_bounds]  ; lpBuffer".to_string());
+        self.text_section.push("    mov r8, panic_msg_out_of_bounds_len  ; nNumberOfBytesToWrite".to_string());
+        self.text_section.push("    lea r9, [rbp - 8]  ; lpNumberOfBytesWritten".to_string());
+        self.text_section.push("    mov qword [r9], 0  ; inicializar".to_string());
+        self.text_section.push("    mov qword [rsp + 32], 0  ; lpOverlapped = NULL".to_string());
+        self.text_section.push("    call WriteFile".to_string());
+        
+        // Exit con código de error
+        self.text_section.push("    mov ecx, 1  ; exit code 1 (error)".to_string());
+        self.text_section.push("    call ExitProcess".to_string());
+        self.text_section.push("".to_string());
+        
+        // panic_null_pointer: Error cuando se desreferencia null
+        self.text_section.push("panic_null_pointer:".to_string());
+        self.text_section.push("    push rbp".to_string());
+        self.text_section.push("    mov rbp, rsp".to_string());
+        self.text_section.push("    sub rsp, 64".to_string());
+        
+        self.text_section.push("    mov ecx, -11".to_string());
+        self.text_section.push("    call GetStdHandle".to_string());
+        self.text_section.push("    mov r12, rax".to_string());
+        
+        self.text_section.push("    mov rcx, r12".to_string());
+        self.text_section.push("    lea rdx, [rel panic_msg_null_pointer]".to_string());
+        self.text_section.push("    mov r8, panic_msg_null_pointer_len".to_string());
+        self.text_section.push("    lea r9, [rbp - 8]".to_string());
+        self.text_section.push("    mov qword [r9], 0".to_string());
+        self.text_section.push("    mov qword [rsp + 32], 0".to_string());
+        self.text_section.push("    call WriteFile".to_string());
+        
+        self.text_section.push("    mov ecx, 1".to_string());
+        self.text_section.push("    call ExitProcess".to_string());
+        self.text_section.push("".to_string());
+        
+        // Agregar mensajes de error en data section
+        self.data_section.push("".to_string());
+        self.data_section.push("; Mensajes de error para panic system".to_string());
+        self.data_section.push("panic_msg_out_of_bounds: db \"Error: Array index out of bounds\", 0xA, 0".to_string());
+        self.data_section.push("panic_msg_out_of_bounds_len equ $ - panic_msg_out_of_bounds".to_string());
+        self.data_section.push("".to_string());
+        self.data_section.push("panic_msg_null_pointer: db \"Error: Null pointer dereference\", 0xA, 0".to_string());
+        self.data_section.push("panic_msg_null_pointer_len equ $ - panic_msg_null_pointer".to_string());
+        self.data_section.push("".to_string());
+    }
+    
+    /// Generar funciones helper de Array en NASM (versión completa - todas las funciones)
     /// Estructura Array: [data: qword, length: qword, capacity: qword]
     /// Total: 24 bytes (3 qwords)
     fn generate_array_helpers_nasm(&mut self) {
+        // Llamar a la versión selectiva con un dependency graph que incluye todo
+        let mut deps = DependencyGraph::new();
+        // Marcar todas las funciones de arrays como usadas
+        deps.mark_used("array_new");
+        deps.mark_used("array_from_values");
+        deps.mark_used("array_get");
+        deps.mark_used("array_set");
+        deps.mark_used("array_len");
+        deps.mark_used("array_append");
+        deps.mark_used("array_pop");
+        deps.mark_used("array_insert");
+        deps.mark_used("array_remove");
+        deps.mark_used("array_index");
+        deps.mark_used("array_count");
+        deps.mark_used("array_sort");
+        deps.mark_used("array_reverse");
+        deps.mark_used("array_free");
+        self.generate_array_helpers_nasm_selective(&deps);
+    }
+    
+    /// Generar funciones helper de Array en NASM (versión selectiva - solo funciones usadas)
+    /// Estructura Array: [data: qword, length: qword, capacity: qword]
+    /// Total: 24 bytes (3 qwords)
+    fn generate_array_helpers_nasm_selective(&mut self, deps: &DependencyGraph) {
         // ============================================
         // Estructura Array en NASM (24 bytes):
         // - data: qword (puntero a memoria dinámica)
@@ -2401,6 +2658,7 @@ impl CodeGenerator {
         
         // array_new: Crear array vacío
         // Retorna: RAX = puntero al Array (en heap)
+        if deps.should_generate("array_new") {
         self.text_section.push("array_new:".to_string());
         self.generate_abi_prologue(true);  // Necesita shadow space para VirtualAlloc
         
@@ -2436,8 +2694,10 @@ impl CodeGenerator {
         // Epilogue ABI-safe
         self.generate_abi_epilogue(true);
         self.text_section.push("".to_string());
+        }
         
         // array_from_values: Crear array desde valores iniciales
+        if deps.should_generate("array_from_values") {
         // Parámetros: RCX = count, RDX = puntero a valores (int64_t*)
         // Retorna: RAX = puntero al Array
         self.text_section.push("array_from_values:".to_string());
@@ -2502,21 +2762,29 @@ impl CodeGenerator {
         // Epilogue ABI-safe
         self.generate_abi_epilogue(true);
         self.text_section.push("".to_string());
+        }
         
         // array_get: Obtener elemento por índice
+        if deps.should_generate("array_get") {
         // Parámetros: RCX = puntero al Array, RDX = índice
-        // Retorna: RAX = valor del elemento, o 0x8000000000000000 si error (índice fuera de rango)
-        // Nota: El caller debe verificar si RAX == 0x8000000000000000 para detectar error
-        //       Este valor especial (bit 63 activado) es poco probable como valor válido
+        // Retorna: RAX = valor del elemento
+        // Si hay error (null pointer o out of bounds), llama a panic y termina el programa
         self.text_section.push("array_get:".to_string());
         self.generate_abi_prologue(false);  // No necesita shadow space (solo lectura)
         
-        // Bounds checking
+        // Verificar null pointer
+        self.text_section.push("    ; Verificar null pointer".to_string());
+        self.text_section.push("    test rcx, rcx".to_string());
+        self.text_section.push("    jz panic_null_pointer".to_string());
+        
+        // Bounds checking (usa panic en lugar de código mágico)
         self.text_section.push("    ; Bounds checking".to_string());
         self.text_section.push("    mov r12, rcx  ; preservar puntero al Array".to_string());
         self.text_section.push("    mov r13, rdx  ; preservar índice".to_string());
         self.text_section.push("    cmp r13, [r12 + 8]  ; comparar índice con length".to_string());
-        self.text_section.push("    jge .array_get_error".to_string());
+        self.text_section.push("    jge panic_out_of_bounds".to_string());
+        self.text_section.push("    cmp r13, 0".to_string());
+        self.text_section.push("    jl panic_out_of_bounds".to_string());
         
         // Obtener elemento
         self.text_section.push("    ; Obtener elemento".to_string());
@@ -2529,27 +2797,30 @@ impl CodeGenerator {
         // Epilogue ABI-safe
         self.generate_abi_epilogue(false);
         self.text_section.push("".to_string());
-        
-        // Error handler: retornar código de error especial en lugar de ExitProcess
-        self.text_section.push(".array_get_error:".to_string());
-        self.text_section.push("    ; Error: índice fuera de rango".to_string());
-        self.text_section.push("    mov rax, 0x8000000000000000  ; código de error especial (bit 63 activado)".to_string());
-        self.generate_abi_epilogue(false);
-        self.text_section.push("".to_string());
+        }
         
         // array_set: Establecer elemento por índice
+        if deps.should_generate("array_set") {
         // Parámetros: RCX = puntero al Array, RDX = índice, R8 = valor
-        // Retorna: RAX = 0 (éxito) o -1 (error: índice fuera de rango)
+        // Retorna: RAX = 0 (éxito)
+        // Si hay error (null pointer o out of bounds), llama a panic y termina el programa
         self.text_section.push("array_set:".to_string());
         self.generate_abi_prologue(false);  // No necesita shadow space (solo escritura)
         
-        // Bounds checking
+        // Verificar null pointer
+        self.text_section.push("    ; Verificar null pointer".to_string());
+        self.text_section.push("    test rcx, rcx".to_string());
+        self.text_section.push("    jz panic_null_pointer".to_string());
+        
+        // Bounds checking (usa panic en lugar de código mágico)
         self.text_section.push("    ; Bounds checking".to_string());
         self.text_section.push("    mov r12, rcx  ; preservar puntero al Array".to_string());
         self.text_section.push("    mov r13, rdx  ; preservar índice".to_string());
         self.text_section.push("    mov r14, r8  ; preservar valor".to_string());
         self.text_section.push("    cmp r13, [r12 + 8]  ; comparar índice con length".to_string());
-        self.text_section.push("    jge .array_set_error".to_string());
+        self.text_section.push("    jge panic_out_of_bounds".to_string());
+        self.text_section.push("    cmp r13, 0".to_string());
+        self.text_section.push("    jl panic_out_of_bounds".to_string());
         
         // Establecer elemento
         self.text_section.push("    ; Establecer elemento".to_string());
@@ -2565,15 +2836,10 @@ impl CodeGenerator {
         // Epilogue ABI-safe
         self.generate_abi_epilogue(false);
         self.text_section.push("".to_string());
-        
-        // Error handler: retornar código de error en lugar de ExitProcess
-        self.text_section.push(".array_set_error:".to_string());
-        self.text_section.push("    ; Error: índice fuera de rango".to_string());
-        self.text_section.push("    mov rax, -1  ; código de error: -1 (índice fuera de rango)".to_string());
-        self.generate_abi_epilogue(false);
-        self.text_section.push("".to_string());
+        }
         
         // array_len: Obtener longitud del array
+        if deps.should_generate("array_len") {
         // Parámetros: RCX = puntero al Array
         // Retorna: RAX = longitud
         // Nota: Función muy simple, no necesita prologue/epilogue completo
@@ -2582,8 +2848,10 @@ impl CodeGenerator {
         self.text_section.push("    mov rax, [rcx + 8]  ; cargar length".to_string());
         self.text_section.push("    ret  ; RCX es caller-saved, no necesitamos preservarlo".to_string());
         self.text_section.push("".to_string());
+        }
         
         // array_pop: Eliminar y retornar último elemento
+        if deps.should_generate("array_pop") {
         // Parámetros: RCX = puntero al Array
         // Retorna: RAX = valor del último elemento, o 0x8000000000000001 si error (array vacío)
         // Nota: El caller debe verificar si RAX == 0x8000000000000001 para detectar error
@@ -2624,8 +2892,10 @@ impl CodeGenerator {
         self.text_section.push("    mov rax, 0x8000000000000001  ; código de error especial (array vacío)".to_string());
         self.generate_abi_epilogue(false);
         self.text_section.push("".to_string());
+        }
         
         // array_append: Agregar elemento al array
+        if deps.should_generate("array_append") {
         // Parámetros: RCX = puntero al Array, RDX = valor
         // Retorna: RAX = 0 (éxito) o -1 (error: fallo de memoria)
         self.text_section.push("array_append:".to_string());
@@ -2657,20 +2927,15 @@ impl CodeGenerator {
         self.text_section.push("    call VirtualAlloc".to_string());
         self.text_section.push("    mov r15, rax  ; preservar nuevo puntero".to_string());
         
-        // Copiar datos antiguos
-        self.text_section.push("    ; Copiar datos antiguos".to_string());
+        // Copiar datos antiguos (OPTIMIZADO: usar rep movsq para copia rápida)
+        self.text_section.push("    ; Copiar datos antiguos (optimizado con rep movsq)".to_string());
         self.text_section.push("    mov rdi, r15  ; destino (nuevo)".to_string());
         self.text_section.push("    mov rsi, [r12 + 0]  ; fuente (antiguo)".to_string());
-        self.text_section.push("    mov rcx, [r12 + 8]  ; contador (length)".to_string());
+        self.text_section.push("    mov rcx, [r12 + 8]  ; contador (length en elementos)".to_string());
         self.text_section.push("    test rcx, rcx".to_string());
         self.text_section.push("    jz .copy_done_append".to_string());
-        self.text_section.push(".copy_loop_append:".to_string());
-        self.text_section.push("    mov rax, [rsi]".to_string());
-        self.text_section.push("    mov [rdi], rax".to_string());
-        self.text_section.push("    add rsi, 8".to_string());
-        self.text_section.push("    add rdi, 8".to_string());
-        self.text_section.push("    dec rcx".to_string());
-        self.text_section.push("    jnz .copy_loop_append".to_string());
+        self.text_section.push("    cld  ; clear direction flag (forward)".to_string());
+        self.text_section.push("    rep movsq  ; copiar 8 bytes a la vez (qword) - MUCHO MÁS RÁPIDO".to_string());
         self.text_section.push(".copy_done_append:".to_string());
         
         // VirtualFree bloque antiguo
@@ -2698,8 +2963,10 @@ impl CodeGenerator {
         // Epilogue ABI-safe
         self.generate_abi_epilogue(true);
         self.text_section.push("".to_string());
+        }
         
         // array_reverse: Invertir orden del array
+        if deps.should_generate("array_reverse") {
         // Parámetros: RCX = puntero al Array
         // Retorna: RAX = 0 (éxito, siempre exitoso)
         self.text_section.push("array_reverse:".to_string());
@@ -2756,8 +3023,10 @@ impl CodeGenerator {
         // Epilogue ABI-safe
         self.generate_abi_epilogue(false);
         self.text_section.push("".to_string());
+        }
         
         // array_insert: Insertar elemento en posición específica
+        if deps.should_generate("array_insert") {
         // Parámetros: RCX = puntero al Array, RDX = índice, R8 = valor
         // Retorna: RAX = 0 (éxito) o -1 (error: índice fuera de rango)
         self.text_section.push("array_insert:".to_string());
@@ -2896,8 +3165,10 @@ impl CodeGenerator {
         self.text_section.push("    mov rax, -1  ; código de error: -1 (índice fuera de rango)".to_string());
         self.generate_abi_epilogue(true);
         self.text_section.push("".to_string());
+        }
         
         // array_remove: Eliminar primera ocurrencia de valor
+        if deps.should_generate("array_remove") {
         // Parámetros: RCX = puntero al Array, RDX = valor
         // Retorna: RAX = 0 (éxito) o -3 (error: valor no encontrado)
         // ERROR CONVENTION: Void functions usan códigos negativos (-3 = valor no encontrado)
@@ -2968,8 +3239,10 @@ impl CodeGenerator {
         self.text_section.push("    mov rax, 0  ; éxito".to_string());
         self.generate_abi_epilogue(false);
         self.text_section.push("".to_string());
+        }
         
         // array_index: Encontrar índice de valor
+        if deps.should_generate("array_index") {
         // Parámetros: RCX = puntero al Array, RDX = valor
         // Retorna: RAX = índice (o -1 si no encontrado)
         self.text_section.push("array_index:".to_string());
@@ -3005,8 +3278,10 @@ impl CodeGenerator {
         self.text_section.push("    mov rax, -1  ; retornar -1 (no encontrado)".to_string());
         self.generate_abi_epilogue(false);
         self.text_section.push("".to_string());
+        }
         
         // array_count: Contar ocurrencias de valor
+        if deps.should_generate("array_count") {
         // Parámetros: RCX = puntero al Array, RDX = valor
         // Retorna: RAX = conteo
         self.text_section.push("array_count:".to_string());
@@ -3045,8 +3320,10 @@ impl CodeGenerator {
         self.text_section.push("    mov rax, 0  ; retornar 0".to_string());
         self.generate_abi_epilogue(false);
         self.text_section.push("".to_string());
+        }
         
         // array_sort: Ordenar array
+        if deps.should_generate("array_sort") {
         // Parámetros: RCX = puntero al Array
         // Retorna: RAX = 0 (éxito, siempre exitoso)
         // OPTIMIZATION: Usa bubble sort (placeholder, no optimizado)
@@ -3115,8 +3392,10 @@ impl CodeGenerator {
         self.text_section.push("    mov rax, 0  ; éxito".to_string());
         self.generate_abi_epilogue(false);
         self.text_section.push("".to_string());
+        }
         
         // array_free: Liberar memoria de un Array
+        if deps.should_generate("array_free") {
         // Parámetros: RCX = puntero al Array
         // Retorna: RAX = 0 (éxito) o -4 (error: puntero inválido)
         // Nota: Libera tanto el Array struct como su data buffer
@@ -3154,12 +3433,31 @@ impl CodeGenerator {
         self.text_section.push("    mov rax, 0  ; éxito".to_string());
         self.generate_abi_epilogue(true);
         self.text_section.push("".to_string());
+        }
     }
 
-    /// Generar funciones helper de String en NASM
+    /// Generar funciones helper de String en NASM (versión completa - todas las funciones)
     /// Estructura String: [data: qword, length: qword, capacity: qword, hash: qword]
     /// Total: 32 bytes (4 qwords)
     fn generate_string_helpers_nasm(&mut self) {
+        // Llamar a la versión selectiva con un dependency graph que incluye todo
+        let mut deps = DependencyGraph::new();
+        // Marcar todas las funciones de strings como usadas
+        deps.mark_used("string_new");
+        deps.mark_used("string_from_literal");
+        deps.mark_used("string_len");
+        deps.mark_used("string_concat");
+        deps.mark_used("string_slice");
+        deps.mark_used("string_upper");
+        deps.mark_used("string_lower");
+        deps.mark_used("string_free");
+        self.generate_string_helpers_nasm_selective(&deps);
+    }
+    
+    /// Generar funciones helper de String en NASM (versión selectiva - solo funciones usadas)
+    /// Estructura String: [data: qword, length: qword, capacity: qword, hash: qword]
+    /// Total: 32 bytes (4 qwords)
+    fn generate_string_helpers_nasm_selective(&mut self, deps: &DependencyGraph) {
         // ============================================
         // Estructura String en NASM (32 bytes):
         // - [rax + 0]  : data (qword) - puntero a memoria dinámica (char*)
@@ -3170,6 +3468,7 @@ impl CodeGenerator {
         
         // string_new: Crear string vacío
         // Retorna: RAX = puntero al String (en heap)
+        if deps.should_generate("string_new") {
         self.text_section.push("string_new:".to_string());
         self.generate_abi_prologue(true);  // Necesita shadow space para VirtualAlloc
         
@@ -3273,8 +3572,10 @@ impl CodeGenerator {
         // Epilogue ABI-safe
         self.generate_abi_epilogue(true);
         self.text_section.push("".to_string());
+        }
         
         // string_len: Obtener longitud del string
+        if deps.should_generate("string_len") {
         // Parámetros: RCX = puntero al String
         // Retorna: RAX = longitud
         // Nota: Función muy simple, no necesita prologue/epilogue completo
@@ -3283,8 +3584,10 @@ impl CodeGenerator {
         self.text_section.push("    mov rax, [rcx + 8]  ; cargar length".to_string());
         self.text_section.push("    ret  ; RCX es caller-saved, no necesitamos preservarlo".to_string());
         self.text_section.push("".to_string());
+        }
         
         // string_concat: Concatenar dos strings
+        if deps.should_generate("string_concat") {
         // Parámetros: RCX = puntero al String 1, RDX = puntero al String 2
         // Retorna: RAX = puntero al nuevo String (concatenado)
         self.text_section.push("string_concat:".to_string());
@@ -3371,8 +3674,10 @@ impl CodeGenerator {
         // Epilogue ABI-safe
         self.generate_abi_epilogue(true);
         self.text_section.push("".to_string());
+        }
         
         // string_slice: Obtener slice de string
+        if deps.should_generate("string_slice") {
         // Parámetros: RCX = puntero al String, RDX = índice inicio, R8 = índice fin (exclusivo)
         // Retorna: RAX = puntero al nuevo String (slice), o NULL (0) si error (índices inválidos)
         self.text_section.push("string_slice:".to_string());
@@ -3468,10 +3773,12 @@ impl CodeGenerator {
         self.text_section.push("    mov rax, 0  ; retornar NULL (error)".to_string());
         self.generate_abi_epilogue(true);
         self.text_section.push("".to_string());
+        }
         
         // string_upper: Convertir a mayúsculas
         // Parámetros: RCX = puntero al String
         // Retorna: RAX = puntero al nuevo String (mayúsculas)
+        if deps.should_generate("string_upper") {
         self.text_section.push("string_upper:".to_string());
         self.generate_abi_prologue(true);  // Necesita shadow space para VirtualAlloc
         self.text_section.push("    mov r12, rcx  ; preservar String".to_string());
@@ -3547,10 +3854,12 @@ impl CodeGenerator {
         // Epilogue ABI-safe
         self.generate_abi_epilogue(true);
         self.text_section.push("".to_string());
+        }
         
         // string_lower: Convertir a minúsculas
         // Parámetros: RCX = puntero al String
         // Retorna: RAX = puntero al nuevo String (minúsculas)
+        if deps.should_generate("string_lower") {
         self.text_section.push("string_lower:".to_string());
         self.generate_abi_prologue(true);  // Necesita shadow space para VirtualAlloc
         self.text_section.push("    mov r12, rcx  ; preservar String".to_string());
@@ -3626,12 +3935,14 @@ impl CodeGenerator {
         // Epilogue ABI-safe
         self.generate_abi_epilogue(true);
         self.text_section.push("".to_string());
+        }
         
         // string_free: Liberar memoria de un String
         // Parámetros: RCX = puntero al String
         // Retorna: RAX = 0 (éxito) o -4 (error: puntero inválido)
         // Nota: Libera tanto el String struct como su data buffer
         //       Liberar NULL es seguro (no-op, retorna 0)
+        if deps.should_generate("string_free") {
         self.text_section.push("string_free:".to_string());
         self.generate_abi_prologue(true);  // Necesita shadow space para VirtualFree
         self.text_section.push("    mov r12, rcx  ; preservar puntero al String".to_string());
@@ -3665,6 +3976,7 @@ impl CodeGenerator {
         self.text_section.push("    mov rax, 0  ; éxito".to_string());
         self.generate_abi_epilogue(true);
         self.text_section.push("".to_string());
+        }
     }
 }
 

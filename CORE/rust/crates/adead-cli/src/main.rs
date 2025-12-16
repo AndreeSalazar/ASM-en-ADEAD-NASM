@@ -3,8 +3,11 @@ use clap::{Parser, Subcommand};
 use std::fs;
 use std::path::PathBuf;
 
-// Helper function para detectar si el código tiene strings avanzados
-fn has_advanced_strings(source: &str) -> bool {
+mod linker;
+use linker::{LinkerType, compile_and_link, link_objs_to_exe, assemble_asm_to_obj, detect_linker};
+
+// Helper function para detectar si el código tiene strings avanzados (usado en linker.rs también)
+pub fn has_advanced_strings(source: &str) -> bool {
     // Detectar operaciones de strings avanzadas
     source.contains("\"") ||  // String literals
     source.contains("+") && (source.contains("let") || source.contains("s")) ||  // Concatenación
@@ -99,7 +102,7 @@ enum Commands {
         /// Archivo de entrada (.ad)
         input: PathBuf,
         
-        /// Backend a usar (cpp, c, auto)
+        /// Backend a usar (cpp, c, nasm, auto)
         #[arg(long, default_value = "auto")]
         backend: String,
         
@@ -110,6 +113,53 @@ enum Commands {
         /// Archivo de salida (alias de -o)
         #[arg(short = 'o')]
         out: Option<PathBuf>,
+    },
+    
+    /// Compila y linkea código ADead a ejecutable (.exe)
+    Build {
+        /// Archivo de entrada (.ad)
+        input: PathBuf,
+        
+        /// Backend a usar (cpp, c, nasm, auto)
+        #[arg(long, default_value = "auto")]
+        backend: String,
+        
+        /// Archivo ejecutable de salida
+        #[arg(short, long)]
+        output: Option<PathBuf>,
+        
+        /// Linker a usar (zig, gcc, clang, auto)
+        #[arg(long, default_value = "auto")]
+        linker: String,
+        
+        /// Solo ensamblar (.asm → .obj), no linkear
+        #[arg(long)]
+        assemble_only: bool,
+    },
+    
+    /// Linkea archivos .obj a ejecutable (.exe)
+    Link {
+        /// Archivos objeto (.obj) a linkear
+        #[arg(required = true)]
+        obj_files: Vec<PathBuf>,
+        
+        /// Archivo ejecutable de salida
+        #[arg(short, long, required = true)]
+        output: PathBuf,
+        
+        /// Linker a usar (zig, gcc, clang, auto)
+        #[arg(long, default_value = "auto")]
+        linker: String,
+    },
+    
+    /// Ensambla archivo .asm a .obj
+    Assemble {
+        /// Archivo de entrada (.asm)
+        input: PathBuf,
+        
+        /// Archivo objeto de salida (.obj)
+        #[arg(short, long)]
+        output: Option<PathBuf>,
     },
 }
 
@@ -158,6 +208,86 @@ fn main() -> Result<()> {
                     compile_with_intelligent_pipeline(&source, &input.display().to_string(), &output_path.display().to_string())?;
                 }
             }
+        }
+        
+        Commands::Build { input, backend, output, linker, assemble_only } => {
+            // Determinar linker preferido
+            let linker_type = match linker.as_str() {
+                "zig" => Some(LinkerType::Zig),
+                "gcc" => Some(LinkerType::Gcc),
+                "clang" => Some(LinkerType::Clang),
+                "auto" | _ => None,
+            };
+            
+            if *assemble_only {
+                // Solo ensamblar: .ad → .asm → .obj
+                let asm_file = input.with_extension("asm");
+                let source = fs::read_to_string(input)
+                    .with_context(|| format!("Error al leer archivo: {}", input.display()))?;
+                
+                println!("   📝 Compilando {} → {}", input.display(), asm_file.display());
+                
+                match backend.as_str() {
+                    "nasm" | "direct" => {
+                        let program = adead_parser::parse(&source)
+                            .map_err(|e| anyhow::anyhow!("Parser error: {:?}", e))?;
+                        
+                        let mut generator = adead_backend::CodeGenerator::new();
+                        let nasm_code = generator.generate(&program)
+                            .map_err(|e| anyhow::anyhow!("NASM generation error: {:?}", e))?;
+                        
+                        fs::write(&asm_file, nasm_code)
+                            .with_context(|| format!("Error al escribir {}", asm_file.display()))?;
+                    }
+                    _ => {
+                        // Usar pipeline inteligente que detecta automáticamente
+                        let pipeline = adead_parser::pipeline_selector::RecommendedPipeline::ParserManualCpp;
+                        
+                        let asm_code = adead_parser::pipeline_selector::generate_asm_with_pipeline(
+                            &source,
+                            &pipeline,
+                            Some(&asm_file),
+                        )
+                        .map_err(|e| anyhow::anyhow!("Pipeline error: {}", e))?;
+                        
+                        fs::write(&asm_file, asm_code)
+                            .with_context(|| format!("Error al escribir {}", asm_file.display()))?;
+                    }
+                }
+                
+                let obj_file = input.with_extension("obj");
+                println!("   🔧 Ensamblando {} → {}", asm_file.display(), obj_file.display());
+                assemble_asm_to_obj(&asm_file, &obj_file)?;
+                println!("   ✅ Objeto generado: {}", obj_file.display());
+            } else {
+                // Compilar y linkear completo: .ad → .asm → .obj → .exe
+                let exe_file = compile_and_link(input, output.clone(), backend, linker_type)?;
+                println!("   ✅ Build completo: {} → {}", input.display(), exe_file.display());
+            }
+        }
+        
+        Commands::Link { obj_files, output, linker } => {
+            // Determinar linker preferido
+            let linker_type = match linker.as_str() {
+                "zig" => Some(LinkerType::Zig),
+                "gcc" => Some(LinkerType::Gcc),
+                "clang" => Some(LinkerType::Clang),
+                "auto" | _ => None,
+            };
+            
+            println!("   🔗 Linkeando {} archivo(s) .obj → {}", obj_files.len(), output.display());
+            link_objs_to_exe(obj_files, output, linker_type)?;
+            println!("   ✅ Ejecutable generado: {}", output.display());
+        }
+        
+        Commands::Assemble { input, output } => {
+            let obj_file = output.as_ref()
+                .map(|p| p.clone())
+                .unwrap_or_else(|| input.with_extension("obj"));
+            
+            println!("   🔧 Ensamblando {} → {}", input.display(), obj_file.display());
+            assemble_asm_to_obj(input, &obj_file)?;
+            println!("   ✅ Objeto generado: {}", obj_file.display());
         }
     }
     
