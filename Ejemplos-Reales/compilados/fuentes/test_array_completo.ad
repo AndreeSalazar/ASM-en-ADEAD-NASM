@@ -1,0 +1,21 @@
+let arr = [3, 1, 4, 1, 5]
+print len(arr)
+arr.append(9)
+print len(arr)
+let last = arr.pop()
+print last
+print len(arr)
+arr.insert(2, 7)
+print arr[2]
+print len(arr)
+arr.remove(1)
+print len(arr)
+let idx = arr.index(4)
+print idx
+let cnt = arr.count(1)
+print cnt
+arr.sort()
+print arr[0]
+print arr[1]
+arr.reverse()
+print arr[0]

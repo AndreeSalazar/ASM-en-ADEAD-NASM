@@ -73,7 +73,28 @@ pub fn generate_nasm_direct(expr_str: &str) -> Option<String> {
 
         // Verificar resultado
         if result_len < 0 {
-            // Error en Zig generator
+            // Error en Zig generator - códigos de error específicos
+            let error_msg = match result_len {
+                -1 => "Error general en Zig",
+                -2 => "Error en parsing de statements",
+                -3 => "No se parseó ningún statement",
+                -4 => "Error en generación de código",
+                -5 => "Ningún statement parseado (parser falló)",
+                -6 => "Error al generar código completo",
+                -7 => "Solo headers generados (text_section vacío)",
+                -8 => "text_section vacío antes de generateCompleteCode",
+                -9 => "text_section tenía contenido pero buffer final es pequeño",
+                -10 => "generateStatement no agregó código a text_section",
+                -11 => "Statements parseados pero text_section vacío",
+                _ => "Error desconocido en Zig",
+            };
+            eprintln!("   ⚠️  Zig error ({}): {}", result_len, error_msg);
+            
+            // CRÍTICO: Si text_section está vacío, usar fallback a C
+            if result_len == -7 || result_len == -8 || result_len == -10 || result_len == -11 {
+                eprintln!("   🔧 Usando fallback a C debido a text_section vacío");
+            }
+            
             return None;
         }
 

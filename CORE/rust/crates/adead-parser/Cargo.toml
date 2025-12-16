@@ -9,6 +9,7 @@ chumsky = { workspace = true }
 adead-common = { path = "../adead-common" }
 anyhow = { workspace = true }
 regex = "1.10"
+sha2 = "0.10"
 
 [build-dependencies]
 cc = "1.0"

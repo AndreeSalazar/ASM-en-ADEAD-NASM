@@ -11,7 +11,9 @@ fn main() {
     // Nueva estructura: CORE/d/ en lugar de d/
     let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
     let workspace_root = manifest_dir.parent().unwrap().parent().unwrap().parent().unwrap().parent().unwrap();
-    let d_obj_path = workspace_root.join("CORE").join("d").join("build").join("adead_d.obj");
+    let d_build_dir = workspace_root.join("CORE").join("d").join("build");
+    let d_obj_path = d_build_dir.join("adead_d.obj");
+    let d_lib_path = d_build_dir.join("adead_d.lib");
     
     // IMPORTANTE: Aunque el objeto D existe, las funciones NO están completamente implementadas
     // Por lo tanto, NUNCA linkear el objeto D automáticamente, incluso con --features d-language
@@ -29,13 +31,25 @@ fn main() {
         println!("cargo:warning=Para habilitar, compila el módulo D primero: cd CORE/d && ./build.ps1");
     }
     
-    // NO linkear el objeto D por ahora - las funciones no están implementadas
-    // Cuando estén listas, descomentar estas líneas:
-    // let d_feature_enabled = env::var("CARGO_FEATURE_D_LANGUAGE").is_ok();
-    // if d_feature_enabled && d_obj_path.exists() {
-    //     println!("cargo:rustc-link-search=native={}", d_obj_path.parent().unwrap().display());
-    //     println!("cargo:rustc-link-arg={}", d_obj_path.display());
-    // }
+    // Linkear el objeto D si la feature está habilitada
+    let d_feature_enabled = env::var("CARGO_FEATURE_D_LANGUAGE").is_ok();
+    if d_feature_enabled {
+        // Preferir biblioteca estática si existe, sino usar objeto
+        if d_lib_path.exists() {
+            println!("cargo:rustc-link-search=native={}", d_build_dir.display());
+            println!("cargo:rustc-link-lib=static=adead_d");
+            println!("cargo:warning=ADead D library linkeada: {}", d_lib_path.display());
+        } else if d_obj_path.exists() {
+            println!("cargo:rustc-link-search=native={}", d_build_dir.display());
+            // Linkear objeto directamente
+            let d_obj_abs = std::fs::canonicalize(&d_obj_path).unwrap_or(d_obj_path.clone());
+            println!("cargo:rustc-link-arg={}", d_obj_abs.display());
+            println!("cargo:warning=ADead D object linkeado: {}", d_obj_abs.display());
+        } else {
+            println!("cargo:warning=Feature d-language activada pero objeto/biblioteca D no encontrado");
+            println!("cargo:warning=Compila el módulo D: cd CORE/d && ./build.ps1");
+        }
+    }
     
     // Recompilar si cambia el módulo D
     println!("cargo:rerun-if-changed={}", d_obj_path.display());

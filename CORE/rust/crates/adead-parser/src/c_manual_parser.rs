@@ -94,8 +94,71 @@ impl CManualParser {
                 if let Ok((condition, body)) = Self::parse_while_from_text(&while_text) {
                     statements.push(Stmt::While { condition, body });
                 }
+            } else if line.contains(".") && line.contains("(") && line.contains(")") && !line.starts_with("print ") {
+                // Método: arr.append(x) - parsear como statement
+                match Self::parse_expr_from_text(line) {
+                    Ok(expr) => {
+                        if matches!(expr, Expr::MethodCall { .. }) {
+                            statements.push(Stmt::Expr(expr));
+                            i += 1;
+                            continue;
+                        }
+                        // Si no es MethodCall, puede ser otra cosa, continuar
+                    }
+                    Err(_) => {
+                        // Si falla el parsing, continuar con otras condiciones
+                    }
+                }
+                i += 1;
+            } else if line.contains(" = ") && !line.starts_with("let ") {
+                // Asignación: variable = value o arr[0] = value
+                if let Some(eq_pos) = line.find(" = ") {
+                    let left_side = line[..eq_pos].trim();
+                    let right_side = line[eq_pos + 3..].trim();
+                    
+                    // Verificar si es asignación a índice de array: arr[0] = value
+                    if left_side.contains('[') && left_side.ends_with(']') {
+                        if let Ok(index_expr) = Self::parse_expr_from_text(left_side) {
+                            if let Expr::Index { array, index } = index_expr {
+                                if let Ok(value_expr) = Self::parse_expr_from_text(right_side) {
+                                    // Crear una asignación especial para array index
+                                    // Usamos nombre especial que el generador C detectará
+                                    statements.push(Stmt::Expr(Expr::Assign {
+                                        name: "_array_set".to_string(), // Marcador especial
+                                        value: Box::new(Expr::BinaryOp {
+                                            op: BinOp::Eq, // Reutilizamos Eq como marcador
+                                            left: Box::new(Expr::Index {
+                                                array: array.clone(),
+                                                index: index.clone(),
+                                            }),
+                                            right: Box::new(value_expr),
+                                        }),
+                                    }));
+                                }
+                            }
+                        }
+                    } else {
+                        // Asignación normal: variable = value
+                        let var_name = left_side.to_string();
+                        if let Ok(value_expr) = Self::parse_expr_from_text(right_side) {
+                            statements.push(Stmt::Expr(Expr::Assign {
+                                name: var_name,
+                                value: Box::new(value_expr),
+                            }));
+                        }
+                    }
+                }
+                i += 1;
             } else {
-                // Otros statements
+                // Cualquier otra línea: intentar parsear como expresión
+                // Puede ser un método call o cualquier expresión válida
+                if let Ok(expr) = Self::parse_expr_from_text(line) {
+                    if matches!(expr, Expr::MethodCall { .. }) {
+                        // Es un método call, agregar como statement
+                        statements.push(Stmt::Expr(expr));
+                    }
+                    // Si no es MethodCall, lo ignoramos (podría ser solo un identificador)
+                }
                 i += 1;
             }
         }

@@ -27,7 +27,7 @@ enum Commands {
         #[arg(short, long, value_name = "OUTPUT")]
         output: Option<String>,
 
-        /// Backend a usar: nasm (default), c (genera C y compila con GCC/Clang)
+        /// Backend a usar: nasm (default), c (genera C y compila con GCC/Clang), optimized/opt (D→Zig→Rust→ASM Virgen)
         #[arg(long, default_value = "nasm")]
         backend: String,
     },
@@ -60,6 +60,24 @@ enum Commands {
         /// Mantener archivos temporales (.asm, .obj)
         #[arg(long)]
         keep_temp: bool,
+    },
+    /// Compilar múltiples archivos en paralelo con caching
+    CompileParallel {
+        /// Archivos de entrada (.ad) - múltiples archivos
+        #[arg(value_name = "INPUTS", num_args = 1..)]
+        inputs: Vec<String>,
+
+        /// Directorio de salida [opcional: usa directorio actual]
+        #[arg(short, long, value_name = "OUTPUT_DIR")]
+        output_dir: Option<String>,
+
+        /// Directorio de cache [opcional: usa .adead_cache]
+        #[arg(long, value_name = "CACHE_DIR")]
+        cache_dir: Option<String>,
+
+        /// Limpiar cache antes de compilar
+        #[arg(long)]
+        clear_cache: bool,
     },
 }
 
@@ -279,6 +297,33 @@ fn compile_with_c_backend(source: &str, input_path: &str, output_path: &str) -> 
     Ok(())
 }
 
+/// Compilar usando pipeline optimizado: D → Zig → Rust → ASM Virgen
+fn compile_with_optimized_pipeline(source: &str, input_path: &str, output_path: &str) -> Result<()> {
+    use adead_parser::optimized_pipeline::OptimizedPipeline;
+    use std::fs;
+    
+    println!("   🔷 Paso 1: D Language - CTFE y optimización compile-time...");
+    println!("   ⚡ Paso 2: Zig - Generación ASM directo...");
+    println!("   🔒 Paso 3: Rust - Limpieza y optimización de ASM...");
+    
+    match OptimizedPipeline::process_complete(source, input_path) {
+        Ok(clean_asm) => {
+            // Guardar ASM limpio
+            fs::write(output_path, &clean_asm)
+                .with_context(|| format!("Failed to write ASM file: {}", output_path))?;
+            println!("   ✅ ASM virgen y limpio generado: {}", output_path);
+            println!("   🎉 Pipeline optimizado completado exitosamente");
+            Ok(())
+        }
+        Err(e) => {
+            eprintln!("   ⚠️  Pipeline optimizado falló: {}", e);
+            eprintln!("   🔄 Intentando fallback a backend C...");
+            // Fallback a backend C
+            compile_with_c_backend(source, input_path, output_path)
+        }
+    }
+}
+
 fn main() -> Result<()> {
     let cli = Cli::parse();
 
@@ -307,6 +352,12 @@ fn main() -> Result<()> {
             if backend == "c" {
                 println!("   🔧 Usando backend C: ADead → C → GCC/Clang → ASM");
                 return compile_with_c_backend(&source, &input, &output_path);
+            }
+            
+            // BACKEND OPTIMIZADO: D → Zig → Rust → ASM Virgen
+            if backend == "optimized" || backend == "opt" {
+                println!("   🚀 Usando pipeline optimizado: ADead → D (CTFE) → Zig (ASM Directo) → Rust (Limpieza) → ASM Virgen");
+                return compile_with_optimized_pipeline(&source, &input, &output_path);
             }
 
             // FLUJO DIRECTO: ADead → Zig → NASM (para floats simples)
@@ -487,6 +538,45 @@ fn main() -> Result<()> {
             println!("🚀 Ejecutando proceso completo:");
             println!("   .ad -> .asm -> .obj -> .exe\n");
             run_program(&input, keep_temp)?;
+        }
+        Commands::CompileParallel { inputs, output_dir, cache_dir, clear_cache } => {
+            use adead_parser::parallel_pipeline::ParallelPipeline;
+            use std::path::PathBuf;
+            
+            println!("🚀 Compilación paralela de {} archivo(s)", inputs.len());
+            
+            // Preparar directorios
+            let output_dir_path = output_dir.map(PathBuf::from);
+            let cache_dir_path = cache_dir.map(PathBuf::from);
+            
+            // Crear pipeline paralelo
+            let pipeline = ParallelPipeline::new(cache_dir_path);
+            
+            // Limpiar cache si se solicita
+            if clear_cache {
+                match pipeline.clear_cache() {
+                    Ok(count) => println!("🗑️  Cache limpiado: {} entradas eliminadas", count),
+                    Err(e) => eprintln!("⚠️  Error limpiando cache: {}", e),
+                }
+            }
+            
+            // Convertir strings a PathBuf
+            let input_paths: Vec<PathBuf> = inputs.into_iter().map(PathBuf::from).collect();
+            
+            // Compilar en paralelo
+            let results = pipeline.compile_parallel(input_paths, output_dir_path);
+            
+            // Mostrar estadísticas del cache
+            let (total, valid) = pipeline.cache_stats();
+            println!("\n📦 Estadísticas del cache:");
+            println!("   Total de entradas: {}", total);
+            println!("   Entradas válidas: {}", valid);
+            
+            // Retornar código de error si hubo fallos
+            let failed_count = results.iter().filter(|r| !r.success).count();
+            if failed_count > 0 {
+                std::process::exit(1);
+            }
         }
     }
 

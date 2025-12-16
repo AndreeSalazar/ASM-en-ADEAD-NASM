@@ -23,14 +23,17 @@ New-Item -ItemType Directory -Force -Path "build" | Out-Null
 
 # Compilar con DMD
 if ($compiler -eq "dmd") {
-    Write-Host "`nCompilando con DMD..." -ForegroundColor Yellow
+    Write-Host "`nCompilando módulos D con DMD..." -ForegroundColor Yellow
+    Write-Host "  - adead_metaprog.d" -ForegroundColor Gray
+    Write-Host "  - adead_ctfe.d" -ForegroundColor Gray
+    
     & dmd -c `
         -of"build/adead_d.obj" `
         -release `
         -O `
         -H `
         -Hd"build" `
-        src/adead_metaprog.d
+        src/adead_metaprog.d src/adead_ctfe.d
     
     if ($LASTEXITCODE -eq 0) {
         Write-Host "✅ Compilación exitosa" -ForegroundColor Green
@@ -42,14 +45,17 @@ if ($compiler -eq "dmd") {
     }
 } else {
     # Compilar con LDC
-    Write-Host "`nCompilando con LDC..." -ForegroundColor Yellow
+    Write-Host "`nCompilando módulos D con LDC..." -ForegroundColor Yellow
+    Write-Host "  - adead_metaprog.d" -ForegroundColor Gray
+    Write-Host "  - adead_ctfe.d" -ForegroundColor Gray
+    
     & ldc2 -c `
         -of="build/adead_d.obj" `
         -release `
         -O3 `
         -H `
         -Hd="build" `
-        src/adead_metaprog.d
+        src/adead_metaprog.d src/adead_ctfe.d
     
     if ($LASTEXITCODE -eq 0) {
         Write-Host "✅ Compilación exitosa" -ForegroundColor Green

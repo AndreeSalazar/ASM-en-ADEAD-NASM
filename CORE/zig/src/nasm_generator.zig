@@ -5,12 +5,21 @@
 const std = @import("std");
 const expr_parser = @import("expr_parser.zig");
 const statement_parser = @import("statement_parser.zig");
+const symbol_table = @import("symbol_table.zig");
+const optimizer = @import("optimizer.zig");
+const constant_propagation = @import("constant_propagation.zig");
+const cse = @import("cse.zig");
+const loop_optimizer = @import("loop_optimizer.zig");
+const register_allocator = @import("register_allocator.zig");
 
 /// Generador de código NASM
 pub const NASMGenerator = struct {
     allocator: std.mem.Allocator,
     float_count: usize,
     label_count: usize,
+    symbol_table: symbol_table.SymbolTable,
+    constant_table: constant_propagation.ConstantTable,
+    register_alloc: ?register_allocator.RegisterAllocator,
     data_section: std.ArrayListUnmanaged(u8),
     text_section: std.ArrayListUnmanaged(u8),
     
@@ -19,12 +28,20 @@ pub const NASMGenerator = struct {
             .allocator = allocator,
             .float_count = 0,
             .label_count = 0,
+            .symbol_table = symbol_table.SymbolTable.init(allocator),
+            .constant_table = constant_propagation.ConstantTable.init(allocator),
+            .register_alloc = null,
             .data_section = std.ArrayListUnmanaged(u8){},
             .text_section = std.ArrayListUnmanaged(u8){},
         };
     }
     
     pub fn deinit(self: *NASMGenerator) void {
+        self.symbol_table.deinit();
+        self.constant_table.deinit();
+        if (self.register_alloc) |*reg_alloc| {
+            reg_alloc.deinit();
+        }
         self.data_section.deinit(self.allocator);
         self.text_section.deinit(self.allocator);
     }
@@ -193,9 +210,22 @@ pub const NASMGenerator = struct {
     fn generateExpr(self: *NASMGenerator, expr: *expr_parser.Expr) !void {
         switch (expr.*) {
             .Number => |n| {
+                // CRÍTICO: Verificar tamaño ANTES de agregar código
+                const len_before = self.text_section.items.len;
+                
+                // Generar código
                 var buf: [64]u8 = undefined;
                 const code = try std.fmt.bufPrint(&buf, "    mov rax, {d}\n", .{n});
+                
+                // CRÍTICO: Agregar código y verificar que realmente se agregó
                 try self.text_section.appendSlice(self.allocator, code);
+                const len_after = self.text_section.items.len;
+                
+                // Si no se agregó código, hay un problema con el allocator
+                if (len_after == len_before) {
+                    // appendSlice falló silenciosamente - retornar error explícito
+                    return error.OutOfMemory;
+                }
             },
             .Float => |f| {
                 const float_name = try self.generateFloatLiteral(f);
@@ -204,13 +234,103 @@ pub const NASMGenerator = struct {
                 // Por ahora, asumimos que las comparaciones son con enteros
             },
             .Ident => |name| {
-                // Cargar variable desde stack (asumimos offset fijo por simplicidad)
-                // TODO: Trackear offsets de variables
+                // Cargar variable desde registro o stack usando register allocator si está disponible
+                if (self.register_alloc) |*reg_alloc| {
+                    if (reg_alloc.getLocation(name)) |var_location| {
+                        switch (var_location) {
+                            .Register => |reg| {
+                                // Variable está en un registro callee-saved
                 var buf: [128]u8 = undefined;
-                const code = try std.fmt.bufPrint(&buf, "    ; TODO: cargar variable {s}\n    mov rax, 0\n", .{name});
+                                const code = try std.fmt.bufPrint(&buf, "    mov rax, {s}    ; Cargar variable {s} desde registro\n", .{ reg.name(), name });
                 try self.text_section.appendSlice(self.allocator, code);
+                            },
+                            .Stack => |offset| {
+                                // Variable está en stack
+                                var buf: [128]u8 = undefined;
+                                const code = try std.fmt.bufPrint(&buf, "    mov rax, [rbp-{d}]    ; Cargar variable {s} desde stack\n", .{ offset, name });
+                                try self.text_section.appendSlice(self.allocator, code);
+                            },
+                        }
+                    } else {
+                        // Variable no encontrada en register allocator, intentar symbol_table
+                        if (self.symbol_table.get(name)) |location| {
+                            var buf: [128]u8 = undefined;
+                            const code = try std.fmt.bufPrint(&buf, "    mov rax, [rbp-{d}]\n", .{location.offset});
+                            try self.text_section.appendSlice(self.allocator, code);
+                        } else {
+                            // Variable no encontrada - error
+                            var buf: [256]u8 = undefined;
+                            const code = try std.fmt.bufPrint(&buf, "    ; ERROR: Variable '{s}' no encontrada\n    mov rax, 0\n", .{name});
+                            try self.text_section.appendSlice(self.allocator, code);
+                        }
+                    }
+                } else {
+                    // Sin register allocator, usar tabla de símbolos tradicional
+                    if (self.symbol_table.get(name)) |location| {
+                        var buf: [128]u8 = undefined;
+                        const code = try std.fmt.bufPrint(&buf, "    mov rax, [rbp-{d}]\n", .{location.offset});
+                        try self.text_section.appendSlice(self.allocator, code);
+                    } else {
+                        // Variable no encontrada - error
+                        var buf: [256]u8 = undefined;
+                        const code = try std.fmt.bufPrint(&buf, "    ; ERROR: Variable '{s}' no encontrada\n    mov rax, 0\n", .{name});
+                        try self.text_section.appendSlice(self.allocator, code);
+                    }
+                }
             },
             .BinaryOp => |bin| {
+                // OPTIMIZACIÓN: Intentar optimizar la expresión binaria
+                const optimized = optimizer.optimizeBinaryOp(self.allocator, bin);
+                if (optimized) |opt_expr| {
+                    // Expresión optimizada - generar código para la expresión optimizada
+                    try self.generateExpr(opt_expr);
+                    return;
+                }
+                
+                // Verificar si podemos usar shift para multiplicación o división
+                const left_val = switch (bin.left.*) {
+                    .Number => |n| n,
+                    else => null,
+                };
+                const right_val = switch (bin.right.*) {
+                    .Number => |n| n,
+                    else => null,
+                };
+                
+                // OPTIMIZACIÓN: x * potencia_de_2 → shl x, log2(potencia)
+                if (bin.op == .Mul) {
+                    if (optimizer.canUseShiftForMul(bin.op, left_val, right_val)) |shift_amount| {
+                        // Determinar qué operando es la variable (no constante)
+                        if (right_val != null and left_val == null) {
+                            // x * potencia_de_2 → shl x, shift_amount
+                            try self.generateExpr(bin.left);
+                            var shift_buf: [64]u8 = undefined;
+                            const shift_code = try std.fmt.bufPrint(&shift_buf, "    shl rax, {d}\n", .{shift_amount});
+                            try self.text_section.appendSlice(self.allocator, shift_code);
+                            return;
+                        } else if (left_val != null and right_val == null) {
+                            // potencia_de_2 * x → shl x, shift_amount
+                            try self.generateExpr(bin.right);
+                            var shift_buf: [64]u8 = undefined;
+                            const shift_code = try std.fmt.bufPrint(&shift_buf, "    shl rax, {d}\n", .{shift_amount});
+                            try self.text_section.appendSlice(self.allocator, shift_code);
+                            return;
+                        }
+                    }
+                }
+                
+                // OPTIMIZACIÓN: x / potencia_de_2 → shr x, log2(potencia)
+                if (bin.op == .Div) {
+                    if (optimizer.canUseShiftForDiv(bin.op, right_val)) |shift_amount| {
+                        // x / potencia_de_2 → shr x, shift_amount
+                        try self.generateExpr(bin.left);
+                        var shift_buf: [64]u8 = undefined;
+                        const shift_code = try std.fmt.bufPrint(&shift_buf, "    shr rax, {d}\n", .{shift_amount});
+                        try self.text_section.appendSlice(self.allocator, shift_code);
+                        return;
+                    }
+                }
+                
                 // Generar left
                 try self.generateExpr(bin.left);
                 try self.text_section.appendSlice(self.allocator, "    push rax\n");
@@ -321,6 +441,79 @@ pub const NASMGenerator = struct {
         }
     }
     
+    /// Generar código para imprimir un número desde rax
+    fn generatePrintNumberFromRax(self: *NASMGenerator) !void {
+        // Crear buffer temporal en stack para conversión
+        // Usar espacio después de las variables (stack_size + 32)
+        // Esto evita conflictos con variables existentes
+        const stack_size = if (self.register_alloc) |*reg_alloc|
+            reg_alloc.getStackSize()
+        else
+            self.symbol_table.getStackSize();
+        const buffer_offset = stack_size + 32; // Buffer después de todas las variables
+        
+        // Algoritmo de conversión: dividir por 10 y guardar dígitos
+        // Por simplicidad, usar un enfoque que funciona para números pequeños
+        // Para números grandes, necesitaríamos una función más compleja
+        
+        var code_buf: [1024]u8 = undefined;
+        const print_code = try std.fmt.bufPrint(&code_buf,
+            \\    ; Convertir número en rax a string e imprimir
+            \\    ; Buffer temporal en [rbp-{d}]
+            \\    mov rsi, rbp
+            \\    sub rsi, {d}        ; rsi = dirección del buffer
+            \\    mov rdi, rsi        ; rdi = fin del buffer (empezamos desde el final)
+            \\    add rdi, 31         ; último byte del buffer
+            \\    mov byte [rdi], 0xA  ; newline al final
+            \\    dec rdi
+            \\    mov rcx, rax        ; rcx = número a convertir
+            \\    mov rbx, 10         ; divisor
+            \\
+            \\    ; Si el número es 0, manejar caso especial
+            \\    cmp rcx, 0
+            \\    je .print_zero
+            \\
+            \\    ; Convertir dígitos
+            \\.convert_loop:
+            \\    mov rax, rcx
+            \\    mov rdx, 0
+            \\    div rbx            ; rax = cociente, rdx = resto (dígito)
+            \\    add dl, '0'         ; convertir dígito a ASCII
+            \\    mov [rdi], dl       ; guardar dígito
+            \\    dec rdi
+            \\    mov rcx, rax        ; siguiente iteración
+            \\    cmp rcx, 0
+            \\    jne .convert_loop
+            \\
+            \\    ; Calcular longitud
+            \\    mov rax, rbp
+            \\    sub rax, {d}
+            \\    add rax, 31         ; fin del buffer
+            \\    sub rax, rdi        ; longitud = fin - inicio
+            \\    mov r8, rax         ; r8 = longitud
+            \\    inc rdi             ; ajustar inicio (rdi apunta un byte antes)
+            \\    jmp .print_done
+            \\
+            \\.print_zero:
+            \\    mov byte [rdi], '0'
+            \\    mov r8, 2           ; longitud: "0\n"
+            \\    mov rdi, rbp
+            \\    sub rdi, {d}
+            \\    add rdi, 30
+            \\
+            \\.print_done:
+            \\    ; Llamar WriteFile
+            \\    mov rcx, [rbp+16]   ; stdout handle
+            \\    mov rdx, rdi        ; buffer pointer
+            \\    ; r8 ya tiene la longitud
+            \\    lea r9, [rbp+24]    ; lpNumberOfBytesWritten
+            \\    mov qword [rsp+32], 0  ; lpOverlapped = NULL
+            \\    call WriteFile
+            \\
+        , .{ buffer_offset, buffer_offset, buffer_offset, buffer_offset });
+        try self.text_section.appendSlice(self.allocator, print_code);
+    }
+    
     /// Generar código para un statement
     pub fn generateStatement(self: *NASMGenerator, stmt: statement_parser.Statement) !void {
         switch (stmt) {
@@ -328,33 +521,13 @@ pub const NASMGenerator = struct {
                 // Para números enteros, convertir a string e imprimir
                 switch (expr.*) {
                     .Number => |n| {
-                        // Convertir número a string e imprimir
-                        var num_str_buf: [64]u8 = undefined;
-                        const num_str = try std.fmt.bufPrint(&num_str_buf, "{d}\n", .{n});
+                        // Cargar número en rax
+                        var load_buf: [64]u8 = undefined;
+                        const load_code = try std.fmt.bufPrint(&load_buf, "    mov rax, {d}\n", .{n});
+                        try self.text_section.appendSlice(self.allocator, load_code);
                         
-                        const string_name = try std.fmt.allocPrint(self.allocator, "msg_{d}", .{self.float_count});
-                        self.float_count += 1;
-                        
-                        var buf: [256]u8 = undefined;
-                        const data_code = try std.fmt.bufPrint(&buf, "    {s}: db \"{s}\"\n", .{ string_name, num_str });
-                        try self.data_section.appendSlice(self.allocator, data_code);
-                        
-                        const len_name = try std.fmt.allocPrint(self.allocator, "{s}_len", .{string_name});
-                        const len_code = try std.fmt.bufPrint(&buf, "    {s}: equ $ - {s}\n", .{ len_name, string_name });
-                        try self.data_section.appendSlice(self.allocator, len_code);
-                        
-                        var write_buf: [512]u8 = undefined;
-                        const write_code = try std.fmt.bufPrint(&write_buf,
-                            \\    ; Print number
-                            \\    mov rcx, [rbp+16]
-                            \\    lea rdx, [rel {s}]
-                            \\    mov r8, {s}_len
-                            \\    lea r9, [rbp+24]
-                            \\    mov qword [rsp+32], 0
-                            \\    call WriteFile
-                            \\
-                        , .{ string_name, string_name });
-                        try self.text_section.appendSlice(self.allocator, write_code);
+                        // Imprimir desde rax
+                        try self.generatePrintNumberFromRax();
                     },
                     .String => |s| {
                         // String literal
@@ -382,27 +555,160 @@ pub const NASMGenerator = struct {
                         , .{ string_name, string_name });
                         try self.text_section.appendSlice(self.allocator, write_code);
                     },
-                    else => {
-                        // Para expresiones complejas, evaluar y convertir resultado a string
+                    .Ident => |name| {
+                        // Cargar variable y convertir a string para imprimir (usar registro o stack)
+                        var found = false;
+                        if (self.register_alloc) |*reg_alloc| {
+                            if (reg_alloc.getLocation(name)) |var_location| {
+                                found = true;
+                                switch (var_location) {
+                                    .Register => |reg| {
+                                        // Variable está en un registro callee-saved
+                                        var load_buf: [128]u8 = undefined;
+                                        const load_code = try std.fmt.bufPrint(&load_buf, "    mov rax, {s}    ; Cargar variable {s} desde registro\n", .{ reg.name(), name });
+                                        try self.text_section.appendSlice(self.allocator, load_code);
+                                    },
+                                    .Stack => |offset| {
+                                        // Variable está en stack
+                                        var load_buf: [128]u8 = undefined;
+                                        const load_code = try std.fmt.bufPrint(&load_buf, "    mov rax, [rbp-{d}]    ; Cargar variable {s} desde stack\n", .{ offset, name });
+                                        try self.text_section.appendSlice(self.allocator, load_code);
+                                    },
+                                }
+                                // Imprimir desde rax
+                                try self.generatePrintNumberFromRax();
+                            }
+                        }
+                        
+                        if (!found) {
+                            // Intentar con symbol_table tradicional
+                            if (self.symbol_table.get(name)) |location| {
+                                var load_buf: [128]u8 = undefined;
+                                const load_code = try std.fmt.bufPrint(&load_buf, "    mov rax, [rbp-{d}]    ; Cargar variable {s}\n", .{ location.offset, name });
+                                try self.text_section.appendSlice(self.allocator, load_code);
+                                
+                                // Imprimir desde rax
+                                try self.generatePrintNumberFromRax();
+                            } else {
+                                // Variable no encontrada
+                                var buf: [256]u8 = undefined;
+                                const code = try std.fmt.bufPrint(&buf, "    ; ERROR: Variable '{s}' no encontrada\n", .{name});
+                                try self.text_section.appendSlice(self.allocator, code);
+                            }
+                        }
+                    },
+                    .BinaryOp => {
+                        // Evaluar expresión binaria y imprimir resultado
                         try self.generateExpr(expr);
-                        // TODO: Convertir RAX a string e imprimir
+                        // Imprimir desde rax
+                        try self.generatePrintNumberFromRax();
+                    },
+                    else => {
+                        // Para otras expresiones, evaluar y convertir resultado a string
+                        try self.generateExpr(expr);
+                        // Imprimir desde rax
+                        try self.generatePrintNumberFromRax();
                     },
                 }
             },
             .Let => |let_stmt| {
-                // Generar valor
-                try self.generateExpr(let_stmt.value);
-                // TODO: Guardar en variable (necesita tracking de offsets)
-                var buf: [256]u8 = undefined;
-                const code = try std.fmt.bufPrint(&buf, "    ; TODO: guardar variable {s}\n", .{let_stmt.name});
+                // CRÍTICO: Verificar tamaño ANTES de generar expresión
+                const text_len_before_expr = self.text_section.items.len;
+                
+                // Generar valor (resultado en rax)
+                // IMPORTANTE: Asegurar que generateExpr realmente agregue código
+                self.generateExpr(let_stmt.value) catch |err| {
+                    // Si generateExpr falla, agregar código de error y continuar
+                    _ = err; // Usar err para evitar warning
+                    var error_buf: [256]u8 = undefined;
+                    const error_code = try std.fmt.bufPrint(&error_buf, 
+                        "    ; ERROR: generateExpr falló\n    mov rax, 0    ; Valor por defecto\n", .{});
+                    try self.text_section.appendSlice(self.allocator, error_code);
+                };
+                
+                // CRÍTICO: Verificar que generateExpr agregó código
+                const text_len_after_expr = self.text_section.items.len;
+                if (text_len_after_expr == text_len_before_expr) {
+                    // generateExpr no agregó código - esto es un error crítico
+                    // Agregar código de error y código mínimo para evitar crash
+                    var error_buf: [256]u8 = undefined;
+                    const error_code = try std.fmt.bufPrint(&error_buf, 
+                        "    ; ERROR: generateExpr no agregó código para expresión\n    mov rax, 0    ; Valor por defecto\n", .{});
+                    try self.text_section.appendSlice(self.allocator, error_code);
+                }
+                
+                // Asignar espacio para la variable y guardar valor (usar registro o stack)
+                if (self.register_alloc) |*reg_alloc| {
+                    if (reg_alloc.getLocation(let_stmt.name)) |var_location| {
+                        switch (var_location) {
+                            .Register => |reg| {
+                                // Variable está en un registro callee-saved
+                                var buf: [128]u8 = undefined;
+                                const code = try std.fmt.bufPrint(&buf, "    mov {s}, rax    ; Guardar variable {s} en registro\n", .{ reg.name(), let_stmt.name });
+                                
+                                // CRÍTICO: Verificar que appendSlice realmente agregue código
+                                const len_before_assign = self.text_section.items.len;
                 try self.text_section.appendSlice(self.allocator, code);
+                                const len_after_assign = self.text_section.items.len;
+                                if (len_after_assign == len_before_assign) {
+                                    return error.OutOfMemory;
+                                }
+                            },
+                            .Stack => |offset| {
+                                // Variable está en stack
+                                var buf: [128]u8 = undefined;
+                                const code = try std.fmt.bufPrint(&buf, "    mov [rbp-{d}], rax    ; Guardar variable {s} en stack\n", .{ offset, let_stmt.name });
+                                
+                                // CRÍTICO: Verificar que appendSlice realmente agregue código
+                                const len_before_assign = self.text_section.items.len;
+                                try self.text_section.appendSlice(self.allocator, code);
+                                const len_after_assign = self.text_section.items.len;
+                                if (len_after_assign == len_before_assign) {
+                                    return error.OutOfMemory;
+                                }
+                            },
+                        }
+                    } else {
+                        // Variable no encontrada en register allocator, usar symbol_table
+                        const location = try self.symbol_table.allocate(let_stmt.name);
+                        var buf: [128]u8 = undefined;
+                        const code = try std.fmt.bufPrint(&buf, "    mov [rbp-{d}], rax    ; Guardar variable {s}\n", .{ location.offset, let_stmt.name });
+                        
+                        const len_before_assign = self.text_section.items.len;
+                        try self.text_section.appendSlice(self.allocator, code);
+                        const len_after_assign = self.text_section.items.len;
+                        if (len_after_assign == len_before_assign) {
+                            return error.OutOfMemory;
+                        }
+                    }
+                } else {
+                    // Sin register allocator, usar tabla de símbolos tradicional
+                    const location = try self.symbol_table.allocate(let_stmt.name);
+                    var buf: [128]u8 = undefined;
+                    const code = try std.fmt.bufPrint(&buf, "    mov [rbp-{d}], rax    ; Guardar variable {s}\n", .{ location.offset, let_stmt.name });
+                    
+                    // CRÍTICO: Verificar que appendSlice realmente agregue código
+                    const len_before_assign = self.text_section.items.len;
+                    try self.text_section.appendSlice(self.allocator, code);
+                    const len_after_assign = self.text_section.items.len;
+                    if (len_after_assign == len_before_assign) {
+                        // appendSlice falló silenciosamente - esto es crítico
+                        return error.OutOfMemory;
+                    }
+                }
             },
             .Assign => |assign_stmt| {
-                // Generar valor
+                // Generar valor (resultado en rax)
                 try self.generateExpr(assign_stmt.value);
-                // TODO: Guardar en variable (necesita tracking de offsets)
-                var buf: [256]u8 = undefined;
-                const code = try std.fmt.bufPrint(&buf, "    ; TODO: asignar variable {s}\n", .{assign_stmt.name});
+                
+                // Obtener ubicación de variable existente o crear nueva
+                const location = if (self.symbol_table.get(assign_stmt.name)) |loc|
+                    loc
+                else
+                    try self.symbol_table.allocate(assign_stmt.name);
+                
+                var buf: [128]u8 = undefined;
+                const code = try std.fmt.bufPrint(&buf, "    mov [rbp-{d}], rax    ; Asignar variable {s}\n", .{ location.offset, assign_stmt.name });
                 try self.text_section.appendSlice(self.allocator, code);
             },
             .While => |while_stmt| {
@@ -563,20 +869,70 @@ pub const NASMGenerator = struct {
         try writer.writeAll("    push rbp\n");
         try writer.writeAll("    mov rbp, rsp\n");
         try writer.writeAll("    and rsp, -16\n");
-        try writer.writeAll("    sub rsp, 64\n");
+        
+        // Calcular tamaño de stack necesario para variables
+        const stack_size = if (self.register_alloc) |*reg_alloc|
+            reg_alloc.getStackSize()
+        else
+            self.symbol_table.getStackSize();
+        var stack_buf: [64]u8 = undefined;
+        const stack_code = try std.fmt.bufPrint(&stack_buf, "    sub rsp, {d}\n", .{stack_size});
+        try writer.writeAll(stack_code);
+        
         try writer.writeAll("    ; Get stdout handle\n");
         try writer.writeAll("    mov ecx, -11\n");
         try writer.writeAll("    call GetStdHandle\n");
         try writer.writeAll("    mov [rbp+16], rax\n");
         
-        // Código generado
-        if (self.text_section.items.len > 0) {
-            try writer.writeAll(self.text_section.items);
+        // CRÍTICO: Verificar que text_section tiene contenido antes de escribir
+        if (self.text_section.items.len == 0) {
+            // text_section está vacío - esto es un problema crítico
+            // Agregar código de error para identificar el problema
+            try writer.writeAll("    ; ERROR: text_section está vacío - ningún código generado\n");
+            try writer.writeAll("    ; Esto indica que generateStatement() no agregó código\n");
+            // Retornar error para que el sistema use fallback a C
+            return error.OutOfMemory; // Usar error estándar de Zig
         }
+        
+        // Código generado - escribir contenido de text_section
+        try writer.writeAll(self.text_section.items);
         
         // Exit
         try writer.writeAll("    ; Exit process\n");
         try writer.writeAll("    mov ecx, 0\n");
+        // Restaurar stack
+        const final_stack_size = if (self.register_alloc) |*reg_alloc|
+            reg_alloc.getStackSize()
+        else
+            self.symbol_table.getStackSize();
+        var restore_stack_buf: [64]u8 = undefined;
+        const restore_stack_code = try std.fmt.bufPrint(&restore_stack_buf, "    add rsp, {d}\n", .{final_stack_size});
+        try writer.writeAll(restore_stack_code);
+        
+        // Restaurar registros callee-saved si se están usando
+        if (self.register_alloc) |*reg_alloc| {
+            // Verificar si hay variables en registros
+            var has_registers = false;
+            var it = reg_alloc.allocations.iterator();
+            while (it.next()) |entry| {
+                switch (entry.value_ptr.*) {
+                    .Register => {
+                        has_registers = true;
+                        break;
+                    },
+                    .Stack => {},
+                }
+            }
+            
+            if (has_registers) {
+                // Restaurar registros callee-saved al final
+                try writer.writeAll("    pop r15\n");
+                try writer.writeAll("    pop r14\n");
+                try writer.writeAll("    pop r13\n");
+                try writer.writeAll("    pop r12\n");
+            }
+        }
+        
         try writer.writeAll("    call ExitProcess\n");
     }
 };
@@ -601,10 +957,11 @@ pub export fn generate_nasm_ffi(
     const input = if (input_len > 0) input_ptr[0..input_len] else "";
     const trimmed = std.mem.trim(u8, input, " \t\n\r");
     
-    // Detectar si es un statement (contiene "while", "if", "let", etc.)
+    // Detectar si es un statement (contiene "while", "if", "let", "print", etc.)
     const is_statement = std.mem.indexOf(u8, trimmed, "while") != null or
                         std.mem.indexOf(u8, trimmed, "if") != null or
-                        std.mem.indexOf(u8, trimmed, "let") != null;
+                        std.mem.indexOf(u8, trimmed, "let") != null or
+                        std.mem.indexOf(u8, trimmed, "print") != null;
     
     var generator = NASMGenerator.init(allocator);
     defer generator.deinit();
@@ -614,20 +971,40 @@ pub export fn generate_nasm_ffi(
         var stmt_parser = statement_parser.StatementParser.init(allocator, trimmed);
         var parsed_any = false;
         
-        // Parsear todos los statements hasta que no haya más
+        // OPTIMIZACIÓN FASE 2: Crear tablas de optimización compartidas para todo el programa
+        var constant_table = constant_propagation.ConstantTable.init(allocator);
+        defer constant_table.deinit();
+        
+        var cse_table = cse.CSETable.init(allocator);
+        defer cse_table.deinit();
+        
+        // LOGGING: Verificar input
+        const debug_info = std.fmt.allocPrint(allocator, "DEBUG: Input length: {d}, trimmed length: {d}\n", .{ input.len, trimmed.len }) catch "";
+        _ = debug_info; // Usar para evitar warning de unused
+        
+        // Parsear todos los statements primero (sin optimizaciones)
+        var parsed_statements = std.ArrayList(statement_parser.Statement).init(allocator);
+        defer parsed_statements.deinit();
+        
+        var statement_count: usize = 0;
         while (true) {
             // Skip whitespace antes de intentar parsear
             const old_pos = stmt_parser.pos;
             stmt_parser.skipWhitespace();
             
             // Si después de skip whitespace llegamos al final, terminamos
-            if (stmt_parser.pos >= trimmed.len) break;
+            if (stmt_parser.pos >= trimmed.len) {
+                // LOGGING: Fin del input
+                break;
+            }
             
             // Si la posición no cambió después de skip, puede ser un problema
             if (stmt_parser.pos == old_pos and stmt_parser.pos >= trimmed.len) break;
             
             // Intentar parsear un statement
-            const maybe_stmt = stmt_parser.parse() catch {
+            const maybe_stmt = stmt_parser.parse() catch |parse_err| {
+                // LOGGING: Error en parsing
+                _ = parse_err;
                 // Si falla el parsing, verificar si avanzamos
                 if (stmt_parser.pos == old_pos) {
                     // No avanzó, probablemente terminamos
@@ -635,7 +1012,6 @@ pub export fn generate_nasm_ffi(
                 }
                 // Si avanzó algo pero falló, puede ser un error real
                 // Pero si ya parseamos algo, continuar intentando
-                // Si ya parseamos algo, continuar (puede ser un statement que no soportamos aún)
                 if (parsed_any) {
                     // Continuar intentando parsear más statements
                     if (stmt_parser.pos >= trimmed.len) break;
@@ -646,10 +1022,10 @@ pub export fn generate_nasm_ffi(
             };
             if (maybe_stmt) |stmt| {
                 parsed_any = true;
-                generator.generateStatement(stmt) catch {
-                    // Si falla la generación, continuar con el siguiente statement
-                    // en lugar de fallar completamente
-                };
+                statement_count += 1;
+                
+                // Guardar statement parseado para optimización posterior
+                try parsed_statements.append(stmt);
                 
                 // Continuar parseando si hay más
                 if (stmt_parser.pos >= trimmed.len) break;
@@ -659,34 +1035,120 @@ pub export fn generate_nasm_ffi(
             }
         }
         
+        // CRÍTICO: Verificar si se parseó algo
         if (!parsed_any) {
-            // Si no se parseó nada, intentar como expresión
-            var parser = expr_parser.ExprParser.init(allocator, trimmed);
-            const expr = parser.parse() catch {
-                return -1;
+            // No se parseó ningún statement - esto es el problema
+            return -5; // Código de error: ningún statement parseado
+        }
+        
+        // OPTIMIZACIÓN FASE 2: Aplicar optimizaciones a todos los statements parseados
+        // 1. Primero aplicar CSE (Common Subexpression Elimination)
+        var cse_optimized: []statement_parser.Statement = undefined;
+        if (cse.applyCSE(allocator, parsed_statements.items)) |optimized| {
+            cse_optimized = optimized;
+        } else |err| {
+            // Si falla CSE, usar statements originales (duplicar para mantener consistencia)
+            _ = err;
+            cse_optimized = allocator.dupe(statement_parser.Statement, parsed_statements.items) catch {
+                return -6; // Error al duplicar statements
+            };
+        }
+        defer allocator.free(cse_optimized);
+        
+        // 2. Luego aplicar Constant Propagation
+        var cp_statements = std.ArrayList(statement_parser.Statement).init(allocator);
+        defer cp_statements.deinit();
+        
+        for (cse_optimized) |stmt| {
+            const cp_optimized = constant_propagation.propagateInStatement(
+                allocator,
+                stmt,
+                &constant_table
+            ) catch |err| {
+                // Si falla CP, usar statement original
+                _ = err;
+                null;
             };
             
-            if (expr == null) {
-                return -1;
+            if (cp_optimized) |opt_stmt| {
+                try cp_statements.append(opt_stmt);
+            } else {
+                try cp_statements.append(stmt);
+            }
             }
             
-            // Generar código para expresión simple
-            switch (expr.?.*) {
-                .Float => |f| {
-                    generator.generatePrintFloat(f) catch {
-                        return -1;
-                    };
-                },
-                .Number => |n| {
-                    const f_val = @as(f64, @floatFromInt(n));
-                    generator.generatePrintFloat(f_val) catch {
-                        return -1;
-                    };
-                },
-                else => {
-                    return -1;
-                },
+        // 3. Aplicar Loop Invariant Code Motion (LICM)
+        var licm_optimized: []statement_parser.Statement = undefined;
+        if (loop_optimizer.applyLICM(allocator, cp_statements.items)) |optimized| {
+            licm_optimized = optimized;
+        } else |err| {
+            // Si falla LICM, usar statements anteriores (duplicar para mantener consistencia)
+            _ = err;
+            licm_optimized = allocator.dupe(statement_parser.Statement, cp_statements.items) catch {
+                return -7; // Error al duplicar statements para LICM
+            };
+        }
+        defer allocator.free(licm_optimized);
+        
+        // 4. Aplicar Constant Propagation nuevamente después de LICM (por si hay nuevas constantes)
+        var cp2_statements = std.ArrayList(statement_parser.Statement).init(allocator);
+        defer cp2_statements.deinit();
+        
+        for (licm_optimized) |stmt| {
+            const cp_optimized = constant_propagation.propagateInStatement(
+                allocator,
+                stmt,
+                &constant_table
+            ) catch |err| {
+                // Si falla CP, usar statement original
+                _ = err;
+                null;
+            };
+            
+            if (cp_optimized) |opt_stmt| {
+                try cp2_statements.append(opt_stmt);
+            } else {
+                try cp2_statements.append(stmt);
             }
+        }
+        
+        // 5. Aplicar Register Allocation Inteligente
+        generator.register_alloc = register_allocator.applyRegisterAllocation(
+            allocator,
+            cp2_statements.items
+        ) catch |err| {
+            // Si falla Register Allocation, continuar sin él
+            _ = err;
+            null;
+        };
+        
+        // 6. Generar código para todos los statements optimizados
+        for (cp2_statements.items) |stmt| {
+            // CRÍTICO: Verificar tamaño de text_section ANTES de generar código
+            const text_section_len_before_stmt = generator.text_section.items.len;
+            
+            // Generar código para el statement - SI FALLA, RETORNAR ERROR
+            generator.generateStatement(stmt) catch |err| {
+                // Si falla la generación, retornar error específico
+                _ = err;
+                return -4; // Error en generación de código
+            };
+            
+            // CRÍTICO: Verificar que se agregó código a text_section DESPUÉS de generar
+            const text_section_len_after_stmt = generator.text_section.items.len;
+            
+            if (text_section_len_after_stmt == text_section_len_before_stmt) {
+                // No se agregó código a text_section - esto es un problema crítico
+                // Retornar error específico para identificar el problema
+                return -10; // Código de error: generateStatement no agregó código a text_section
+            }
+        }
+        
+        // CRÍTICO: Verificar que text_section tiene contenido después de generar
+        if (generator.text_section.items.len == 0) {
+            // Se parsearon statements pero text_section está vacío
+            // Esto indica que generateStatement() no agregó código
+            return -11; // Código de error: statements parseados pero text_section vacío
         }
     } else {
         // Parsear como expresión (código original)
@@ -834,9 +1296,40 @@ pub export fn generate_nasm_ffi(
     };
     
     const writer = Writer{ .list = &temp_buffer, .alloc = allocator };
-    generator.generateCompleteCode(writer) catch {
-        return -1;
+    
+    // CRÍTICO: Verificar que text_section tiene contenido ANTES de generar código completo
+    const text_section_len_before = generator.text_section.items.len;
+    
+    generator.generateCompleteCode(writer) catch |err| {
+        // Si falla, retornar error específico
+        _ = err;
+        return -6; // Error al generar código completo
     };
+    
+    // CRÍTICO: Verificar que se generó código (más que solo headers)
+    // Headers son aproximadamente 50-100 bytes, código real debería ser mucho más
+    const final_buffer_len = temp_buffer.items.len;
+    
+    // Verificar múltiples condiciones para detectar el problema
+    if (final_buffer_len <= 150) {
+        // Solo headers, sin código real
+        // Esto significa que text_section estaba vacío o no se agregó código
+        return -7; // Código de error: solo headers generados
+    }
+    
+    // Verificar que text_section tenía contenido antes de generar código completo
+    if (text_section_len_before == 0) {
+        // text_section estaba vacío antes de generateCompleteCode
+        // Esto indica que generateStatement() no agregó código
+        return -8; // Código de error: text_section vacío antes de generateCompleteCode
+    }
+    
+    // Verificar que el código generado incluye el contenido de text_section
+    if (text_section_len_before > 0 and final_buffer_len <= 200) {
+        // text_section tenía contenido pero el buffer final es muy pequeño
+        // Esto indica un problema en generateCompleteCode
+        return -9; // Código de error: text_section tenía contenido pero buffer final es pequeño
+    }
     
     // Copiar al buffer de salida
     if (temp_buffer.items.len >= output_buffer_len) {

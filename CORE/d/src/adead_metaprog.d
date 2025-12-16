@@ -18,7 +18,8 @@ import std.string;
 import std.conv;
 
 // Exportar para uso en otros módulos
-public import adead_d_to_zig;
+// Nota: adead_d_to_zig puede no estar disponible, comentado temporalmente
+// public import adead_d_to_zig;
 
 // ============================================================
 // Estructuras básicas para AST

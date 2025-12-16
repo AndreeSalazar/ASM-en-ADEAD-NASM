@@ -33,6 +33,19 @@ pub mod d_zig_asm;
 // Selector inteligente de pipeline
 pub mod pipeline_selector;
 
+// Pipeline optimizado completo: D → Zig → Rust → ASM Virgen
+pub mod optimized_pipeline;
+
+// Pipeline paralelo: Compilación paralela con caching
+pub mod parallel_pipeline;
+
+// Limpieza y optimización de ASM generado
+pub mod clean_asm;
+
+// FFI para D Language CTFE
+#[cfg(feature = "d-language")]
+pub mod d_ctfe;
+
 // Generador de código C (backend opcional)
 pub mod c_generator;
 pub mod c_to_nasm;

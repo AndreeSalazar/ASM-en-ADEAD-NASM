@@ -6,7 +6,10 @@
     "license": "MIT",
     "targetType": "library",
     "targetName": "adead_d",
-    "sourceFiles": ["src/adead_metaprog.d"],
+    "sourceFiles": [
+        "src/adead_metaprog.d",
+        "src/adead_ctfe.d"
+    ],
     "buildOptions": [
         "betterC",
         "allInstantiations"

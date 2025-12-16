@@ -91,6 +91,109 @@ impl CGenerator {
         self.output.push_str("size_t array_len(Array* arr) {\n");
         self.output.push_str("    return arr->length;\n");
         self.output.push_str("}\n\n");
+        
+        self.output.push_str("// Eliminar y retornar último elemento (pop)\n");
+        self.output.push_str("int64_t array_pop(Array* arr) {\n");
+        self.output.push_str("    if (arr->length == 0) {\n");
+        self.output.push_str("        fprintf(stderr, \"Error: pop de array vacío\\n\");\n");
+        self.output.push_str("        exit(1);\n");
+        self.output.push_str("    }\n");
+        self.output.push_str("    return arr->data[--arr->length];\n");
+        self.output.push_str("}\n\n");
+        
+        self.output.push_str("// Eliminar y retornar elemento en índice específico\n");
+        self.output.push_str("int64_t array_pop_at(Array* arr, size_t index) {\n");
+        self.output.push_str("    if (index >= arr->length) {\n");
+        self.output.push_str("        fprintf(stderr, \"Error: índice fuera de rango\\n\");\n");
+        self.output.push_str("        exit(1);\n");
+        self.output.push_str("    }\n");
+        self.output.push_str("    int64_t value = arr->data[index];\n");
+        self.output.push_str("    // Mover elementos hacia la izquierda\n");
+        self.output.push_str("    for (size_t i = index; i < arr->length - 1; i++) {\n");
+        self.output.push_str("        arr->data[i] = arr->data[i + 1];\n");
+        self.output.push_str("    }\n");
+        self.output.push_str("    arr->length--;\n");
+        self.output.push_str("    return value;\n");
+        self.output.push_str("}\n\n");
+        
+        self.output.push_str("// Insertar elemento en posición específica\n");
+        self.output.push_str("void array_insert(Array* arr, size_t index, int64_t value) {\n");
+        self.output.push_str("    if (index > arr->length) {\n");
+        self.output.push_str("        fprintf(stderr, \"Error: índice fuera de rango\\n\");\n");
+        self.output.push_str("        exit(1);\n");
+        self.output.push_str("    }\n");
+        self.output.push_str("    // Redimensionar si es necesario\n");
+        self.output.push_str("    if (arr->length >= arr->capacity) {\n");
+        self.output.push_str("        arr->capacity *= 2;\n");
+        self.output.push_str("        arr->data = (int64_t*)realloc(arr->data, arr->capacity * sizeof(int64_t));\n");
+        self.output.push_str("    }\n");
+        self.output.push_str("    // Mover elementos hacia la derecha\n");
+        self.output.push_str("    for (size_t i = arr->length; i > index; i--) {\n");
+        self.output.push_str("        arr->data[i] = arr->data[i - 1];\n");
+        self.output.push_str("    }\n");
+        self.output.push_str("    arr->data[index] = value;\n");
+        self.output.push_str("    arr->length++;\n");
+        self.output.push_str("}\n\n");
+        
+        self.output.push_str("// Eliminar primera ocurrencia de valor\n");
+        self.output.push_str("void array_remove(Array* arr, int64_t value) {\n");
+        self.output.push_str("    for (size_t i = 0; i < arr->length; i++) {\n");
+        self.output.push_str("        if (arr->data[i] == value) {\n");
+        self.output.push_str("            // Mover elementos hacia la izquierda\n");
+        self.output.push_str("            for (size_t j = i; j < arr->length - 1; j++) {\n");
+        self.output.push_str("                arr->data[j] = arr->data[j + 1];\n");
+        self.output.push_str("            }\n");
+        self.output.push_str("            arr->length--;\n");
+        self.output.push_str("            return;\n");
+        self.output.push_str("        }\n");
+        self.output.push_str("    }\n");
+        self.output.push_str("    fprintf(stderr, \"Error: valor no encontrado en array\\n\");\n");
+        self.output.push_str("    exit(1);\n");
+        self.output.push_str("}\n\n");
+        
+        self.output.push_str("// Encontrar índice de valor\n");
+        self.output.push_str("size_t array_index(Array* arr, int64_t value) {\n");
+        self.output.push_str("    for (size_t i = 0; i < arr->length; i++) {\n");
+        self.output.push_str("        if (arr->data[i] == value) {\n");
+        self.output.push_str("            return i;\n");
+        self.output.push_str("        }\n");
+        self.output.push_str("    }\n");
+        self.output.push_str("    fprintf(stderr, \"Error: valor no encontrado en array\\n\");\n");
+        self.output.push_str("    exit(1);\n");
+        self.output.push_str("}\n\n");
+        
+        self.output.push_str("// Contar ocurrencias de valor\n");
+        self.output.push_str("size_t array_count(Array* arr, int64_t value) {\n");
+        self.output.push_str("    size_t count = 0;\n");
+        self.output.push_str("    for (size_t i = 0; i < arr->length; i++) {\n");
+        self.output.push_str("        if (arr->data[i] == value) {\n");
+        self.output.push_str("            count++;\n");
+        self.output.push_str("        }\n");
+        self.output.push_str("    }\n");
+        self.output.push_str("    return count;\n");
+        self.output.push_str("}\n\n");
+        
+        self.output.push_str("// Ordenar array (bubble sort simple)\n");
+        self.output.push_str("void array_sort(Array* arr) {\n");
+        self.output.push_str("    for (size_t i = 0; i < arr->length; i++) {\n");
+        self.output.push_str("        for (size_t j = 0; j < arr->length - i - 1; j++) {\n");
+        self.output.push_str("            if (arr->data[j] > arr->data[j + 1]) {\n");
+        self.output.push_str("                int64_t temp = arr->data[j];\n");
+        self.output.push_str("                arr->data[j] = arr->data[j + 1];\n");
+        self.output.push_str("                arr->data[j + 1] = temp;\n");
+        self.output.push_str("            }\n");
+        self.output.push_str("        }\n");
+        self.output.push_str("    }\n");
+        self.output.push_str("}\n\n");
+        
+        self.output.push_str("// Invertir orden del array\n");
+        self.output.push_str("void array_reverse(Array* arr) {\n");
+        self.output.push_str("    for (size_t i = 0; i < arr->length / 2; i++) {\n");
+        self.output.push_str("        int64_t temp = arr->data[i];\n");
+        self.output.push_str("        arr->data[i] = arr->data[arr->length - 1 - i];\n");
+        self.output.push_str("        arr->data[arr->length - 1 - i] = temp;\n");
+        self.output.push_str("    }\n");
+        self.output.push_str("}\n\n");
 
         // Separar funciones y código principal
         let mut functions = Vec::new();
@@ -334,21 +437,62 @@ impl CGenerator {
                 format!("{}({})", name, args_code)
             }
             Expr::MethodCall { object, method, args } => {
-                // Manejar métodos como arr.append(x)
-                if method == "append" && args.len() == 1 {
-                    // arr.append(x) -> array_append(&arr, x)
-                    let arr_code = self.generate_expr(object);
-                    let val_code = self.generate_expr(&args[0]);
-                    return format!("array_append(&{}, {})", arr_code, val_code);
-                }
+                let arr_code = self.generate_expr(object);
                 
-                // Otros métodos (futuro)
-                let obj_code = self.generate_expr(object);
-                let args_code = args.iter()
-                    .map(|arg| self.generate_expr(arg))
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                format!("{}.{}({})", obj_code, method, args_code)
+                // Manejar métodos de arrays
+                match method.as_str() {
+                    "append" if args.len() == 1 => {
+                        // arr.append(x) -> array_append(&arr, x)
+                        let val_code = self.generate_expr(&args[0]);
+                        return format!("array_append(&{}, {})", arr_code, val_code);
+                    }
+                    "pop" if args.is_empty() => {
+                        // arr.pop() -> array_pop(&arr)
+                        return format!("array_pop(&{})", arr_code);
+                    }
+                    "pop" if args.len() == 1 => {
+                        // arr.pop(i) -> array_pop_at(&arr, i)
+                        let index_code = self.generate_expr(&args[0]);
+                        return format!("array_pop_at(&{}, (size_t)({}))", arr_code, index_code);
+                    }
+                    "insert" if args.len() == 2 => {
+                        // arr.insert(i, x) -> array_insert(&arr, i, x)
+                        let index_code = self.generate_expr(&args[0]);
+                        let val_code = self.generate_expr(&args[1]);
+                        return format!("array_insert(&{}, (size_t)({}), {})", arr_code, index_code, val_code);
+                    }
+                    "remove" if args.len() == 1 => {
+                        // arr.remove(x) -> array_remove(&arr, x)
+                        let val_code = self.generate_expr(&args[0]);
+                        return format!("array_remove(&{}, {})", arr_code, val_code);
+                    }
+                    "index" if args.len() == 1 => {
+                        // arr.index(x) -> array_index(&arr, x)
+                        let val_code = self.generate_expr(&args[0]);
+                        return format!("array_index(&{}, {})", arr_code, val_code);
+                    }
+                    "count" if args.len() == 1 => {
+                        // arr.count(x) -> array_count(&arr, x)
+                        let val_code = self.generate_expr(&args[0]);
+                        return format!("array_count(&{}, {})", arr_code, val_code);
+                    }
+                    "sort" if args.is_empty() => {
+                        // arr.sort() -> array_sort(&arr)
+                        return format!("array_sort(&{})", arr_code);
+                    }
+                    "reverse" if args.is_empty() => {
+                        // arr.reverse() -> array_reverse(&arr)
+                        return format!("array_reverse(&{})", arr_code);
+                    }
+                    _ => {
+                        // Otros métodos (futuro)
+                        let args_code = args.iter()
+                            .map(|arg| self.generate_expr(arg))
+                            .collect::<Vec<_>>()
+                            .join(", ");
+                        format!("{}.{}({})", arr_code, method, args_code)
+                    }
+                }
             }
             Expr::ArrayLiteral(_) => {
                 // ArrayLiteral no debería usarse directamente en expresiones
