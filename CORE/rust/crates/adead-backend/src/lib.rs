@@ -1107,6 +1107,23 @@ impl CodeGenerator {
                         
                         // array_pop retorna el valor en RAX (ya está ahí)
                     }
+                    "reverse" if args.is_empty() => {
+                        // arr.reverse() -> array_reverse(arr)
+                        // Generar expresión del array (puntero al Array)
+                        self.generate_expr_windows(object)?;
+                        self.text_section.push("    push rax  ; guardar puntero al Array".to_string());
+                        
+                        // Preparar parámetros: RCX = puntero al Array
+                        self.text_section.push("    pop rcx  ; puntero al Array".to_string());
+                        
+                        // Llamar a array_reverse
+                        self.text_section.push("    sub rsp, 32  ; shadow space".to_string());
+                        self.text_section.push("    call array_reverse".to_string());
+                        self.text_section.push("    add rsp, 32  ; restaurar shadow space".to_string());
+                        
+                        // array_reverse no retorna valor (void), pero dejamos 0 en rax
+                        self.text_section.push("    mov rax, 0  ; void return".to_string());
+                    }
                     _ => {
                         // Método genérico: llamar a fn_{method}
                         self.generate_expr_windows(object)?;
@@ -2208,6 +2225,65 @@ impl CodeGenerator {
         self.text_section.push("    pop rdx  ; valor".to_string());
         self.text_section.push("    mov [rbx], rdx  ; guardar valor".to_string());
         self.text_section.push("    inc qword [rcx + 8]  ; incrementar length".to_string());
+        
+        // Epilogue
+        self.text_section.push("    leave".to_string());
+        self.text_section.push("    ret".to_string());
+        self.text_section.push("".to_string());
+        
+        // array_reverse: Invertir orden del array
+        // Parámetros: RCX = puntero al Array
+        // Retorna: void
+        self.text_section.push("array_reverse:".to_string());
+        self.text_section.push("    ; Prologue".to_string());
+        self.text_section.push("    push rbp".to_string());
+        self.text_section.push("    mov rbp, rsp".to_string());
+        
+        // Verificar que el array no esté vacío o tenga solo 1 elemento
+        self.text_section.push("    ; Verificar si necesita reversión".to_string());
+        self.text_section.push("    mov rax, [rcx + 8]  ; length".to_string());
+        self.text_section.push("    cmp rax, 1".to_string());
+        self.text_section.push("    jle .reverse_done  ; si length <= 1, no hacer nada".to_string());
+        
+        // Setup: left = 0, right = length - 1
+        self.text_section.push("    ; Setup: left = 0, right = length - 1".to_string());
+        self.text_section.push("    mov rdx, 0  ; left index = 0".to_string());
+        self.text_section.push("    mov r8, rax  ; length".to_string());
+        self.text_section.push("    dec r8  ; right index = length - 1".to_string());
+        self.text_section.push("    mov r9, [rcx + 0]  ; puntero a data".to_string());
+        
+        // Loop: intercambiar elementos mientras left < right
+        self.text_section.push("    ; Loop: intercambiar elementos".to_string());
+        self.text_section.push(".reverse_loop:".to_string());
+        self.text_section.push("    cmp rdx, r8  ; comparar left con right".to_string());
+        self.text_section.push("    jge .reverse_done  ; si left >= right, terminar".to_string());
+        
+        // Intercambiar arr[left] y arr[right]
+        self.text_section.push("    ; Intercambiar arr[left] y arr[right]".to_string());
+        // Cargar arr[left]
+        self.text_section.push("    mov rax, rdx  ; left index".to_string());
+        self.text_section.push("    shl rax, 3  ; left * 8 bytes".to_string());
+        self.text_section.push("    mov r10, r9  ; puntero a data".to_string());
+        self.text_section.push("    add r10, rax  ; dirección de arr[left]".to_string());
+        self.text_section.push("    mov r11, [r10]  ; temp = arr[left]".to_string());
+        
+        // Cargar arr[right]
+        self.text_section.push("    mov rax, r8  ; right index".to_string());
+        self.text_section.push("    shl rax, 3  ; right * 8 bytes".to_string());
+        self.text_section.push("    mov r12, r9  ; puntero a data".to_string());
+        self.text_section.push("    add r12, rax  ; dirección de arr[right]".to_string());
+        self.text_section.push("    mov r13, [r12]  ; arr[right]".to_string());
+        
+        // Intercambiar
+        self.text_section.push("    mov [r10], r13  ; arr[left] = arr[right]".to_string());
+        self.text_section.push("    mov [r12], r11  ; arr[right] = temp".to_string());
+        
+        // Incrementar left, decrementar right
+        self.text_section.push("    inc rdx  ; left++".to_string());
+        self.text_section.push("    dec r8  ; right--".to_string());
+        self.text_section.push("    jmp .reverse_loop".to_string());
+        
+        self.text_section.push(".reverse_done:".to_string());
         
         // Epilogue
         self.text_section.push("    leave".to_string());

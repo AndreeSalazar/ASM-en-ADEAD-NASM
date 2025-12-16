@@ -22,3 +22,7 @@ arr.append(100)
 print arr[3]        ; Debe imprimir: 100
 print len(arr)      ; Debe imprimir: 4
 
+
+
+
+

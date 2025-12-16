@@ -38,9 +38,11 @@ pub struct CodeFeatures {
 /// Tipo de pipeline recomendado
 #[derive(Debug, Clone, PartialEq)]
 pub enum RecommendedPipeline {
-    /// Parser Manual → C++ Optimizer → C → GCC/Clang → Rust Cleaner → ASM Virgen (flujo principal)
+    /// Parser Manual → C++ Generator → GCC++/Clang++ → Rust Cleaner → ASM Virgen (flujo principal)
+    ParserManualCpp,
+    /// Parser Manual → C++ Optimizer → C → GCC/Clang → Rust Cleaner → ASM Virgen (fallback)
     ParserManualCppC,
-    /// Parser Manual → C → GCC/Clang → Rust Cleaner → ASM Virgen (fallback sin C++ Optimizer)
+    /// Parser Manual → C → GCC/Clang → Rust Cleaner → ASM Virgen (fallback sin C++)
     ParserManualC,
     /// Rust directo (fallback completo)
     RustDirect,
@@ -109,9 +111,9 @@ fn calculate_complexity(source: &str) -> u32 {
 
 /// Seleccionar el mejor pipeline según las características
 pub fn select_optimal_pipeline(features: &CodeFeatures) -> RecommendedPipeline {
-    // Siempre usar Parser Manual + C++ Optimizer + C como flujo principal
-    // C++ Optimizer proporciona optimizaciones compile-time
-    RecommendedPipeline::ParserManualCppC
+    // Siempre usar Parser Manual + C++ Generator como flujo principal
+    // C++ Generator usa std::vector, RAII, constexpr para código más limpio
+    RecommendedPipeline::ParserManualCpp
 }
 
 /// Generar código ASM usando el pipeline seleccionado
@@ -121,8 +123,40 @@ pub fn generate_asm_with_pipeline(
     output_path: Option<&Path>,
 ) -> Result<String, String> {
     match pipeline {
+        RecommendedPipeline::ParserManualCpp => {
+            // ADead → Parser Manual → C++ Generator → GCC++/Clang++ → Rust Cleaner → ASM (flujo principal)
+            let program = crate::c_manual_parser::CManualParser::parse_program(source)
+                .map_err(|e| format!("Parser manual error: {:?}", e))?;
+            
+            // Generar código C++ usando C++ Generator
+            let cpp_code = crate::cpp_generator::generate_cpp_code(&program);
+            
+            // Compilar código C++ a ASM usando GCC++/Clang++
+            let temp_path = output_path
+                .and_then(|p| p.to_str().map(|s| s.to_string()))
+                .unwrap_or_else(|| "temp.cpp".to_string());
+            
+            match compile_cpp_to_asm_for_pipeline(&cpp_code, &temp_path) {
+                Ok(asm_code) => {
+                    // Verificar que el ASM tiene contenido válido (NASM o GAS)
+                    if asm_code.contains("section") || asm_code.contains(".text") || 
+                       asm_code.contains(".globl") || asm_code.contains("main:") ||
+                       asm_code.len() > 100 {
+                        // Limpiar ASM usando Rust Cleaner
+                        Ok(crate::clean_asm::clean_asm(&asm_code))
+                    } else {
+                        Ok(format!("// Código C++ generado\n{}", cpp_code))
+                    }
+                }
+                Err(e) => {
+                    eprintln!("   ⚠️  No se pudo compilar C++ a ASM: {}, retornando código C++", e);
+                    Ok(format!("// Código C++ generado\n{}", cpp_code))
+                }
+            }
+        }
+        
         RecommendedPipeline::ParserManualCppC => {
-            // ADead → Parser Manual → C++ Optimizer → C → GCC/Clang → ASM (flujo principal)
+            // ADead → Parser Manual → C++ Optimizer → C → GCC/Clang → ASM (fallback)
             let program = crate::c_manual_parser::CManualParser::parse_program(source)
                 .map_err(|e| format!("Parser manual error: {:?}", e))?;
             
@@ -222,6 +256,122 @@ pub fn process_adead_intelligent(source: &str) -> Result<(RecommendedPipeline, S
     Ok((pipeline, asm_code))
 }
 
+/// Verificar si un compilador soporta C++20
+fn check_cpp20_support(compiler: &str) -> bool {
+    // Crear un archivo temporal de prueba C++20 más completo
+    let test_code = r#"
+#include <version>
+#if __cplusplus >= 202002L
+int main() { return 0; }
+#else
+#error "C++20 not supported"
+#endif
+"#;
+    
+    let temp_dir = std::env::temp_dir();
+    let test_file = temp_dir.join(format!("adead_cpp20_test_{}.cpp", std::process::id()));
+    let obj_file = temp_dir.join(format!("adead_cpp20_test_{}.o", std::process::id()));
+    
+    if fs::write(&test_file, test_code).is_err() {
+        return false;
+    }
+    
+    // Intentar compilar con C++20
+    let mut cmd = Command::new(compiler);
+    cmd.arg("-std=c++20")
+       .arg("-c")
+       .arg(&test_file)
+       .arg("-o")
+       .arg(&obj_file);
+    
+    // Si el compilador es "clang" o "gcc" (sin ++), especificar lenguaje C++
+    if !compiler.contains("++") && (compiler.contains("clang") || compiler.contains("gcc")) {
+        cmd.arg("-x").arg("c++");
+    }
+    
+    // Ejecutar y verificar resultado
+    let output = cmd.output();
+    let result = output.is_ok() && output.as_ref().unwrap().status.success();
+    
+    // Limpiar archivos temporales
+    let _ = fs::remove_file(&test_file);
+    let _ = fs::remove_file(&obj_file);
+    
+    result
+}
+
+/// Compilar código C++ a ASM usando GCC++/Clang++ (para pipeline ParserManualCpp)
+fn compile_cpp_to_asm_for_pipeline(cpp_code: &str, input_path: &str) -> Result<String, String> {
+    use std::path::PathBuf;
+    
+    // Crear archivo C++ temporal
+    let temp_dir = std::env::temp_dir();
+    let cpp_file = temp_dir.join(format!("adead_temp_{}.cpp", std::process::id()));
+    
+    fs::write(&cpp_file, cpp_code)
+        .map_err(|e| format!("Failed to write C++ file: {}", e))?;
+    
+    // Buscar compilador C++
+    let compiler = find_cpp_compiler_for_pipeline()
+        .ok_or_else(|| "No se encontró GCC++ ni Clang++".to_string())?;
+    
+    // Crear archivo ASM temporal
+    let asm_file = cpp_file.with_extension("asm");
+    
+    // Compilar C++ a ASM
+    let mut cmd = Command::new(&compiler);
+    cmd.arg("-S");
+    
+    // Si el compilador es "clang" o "gcc" (sin ++), especificar lenguaje C++
+    if !compiler.contains("++") && (compiler.contains("clang") || compiler.contains("gcc")) {
+        cmd.arg("-x").arg("c++");
+    }
+    
+    // Detectar soporte C++20 y usar si está disponible
+    // C++20 es preferido porque tiene mejores features (ranges, concepts, format)
+    let cpp_std = if check_cpp20_support(&compiler) {
+        "-std=c++20"  // Usar C++20 si está disponible (preferido)
+    } else {
+        "-std=c++17"  // Fallback a C++17 si C++20 no está disponible
+    };
+    
+    cmd.arg(cpp_std)
+       .arg("-O2")
+       .arg("-fno-asynchronous-unwind-tables")
+       .arg("-fno-exceptions")
+       .arg("-fno-stack-protector")
+       .arg("-mno-red-zone")
+       .arg("-o")
+       .arg(&asm_file)
+       .arg(&cpp_file);
+    
+    // Ajustar flags según compilador
+    if compiler.contains("clang") {
+        cmd.arg("-mllvm").arg("--x86-asm-syntax=intel");
+    } else {
+        cmd.arg("-masm=intel");
+    }
+    
+    let output = cmd.output()
+        .map_err(|e| format!("Failed to execute compiler: {}", e))?;
+    
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let _ = fs::remove_file(&cpp_file);
+        return Err(format!("Compilation failed: {}", stderr));
+    }
+    
+    // Leer ASM generado
+    let asm = fs::read_to_string(&asm_file)
+        .map_err(|e| format!("Failed to read ASM file: {}", e))?;
+    
+    // Limpiar archivos temporales
+    let _ = fs::remove_file(&cpp_file);
+    let _ = fs::remove_file(&asm_file);
+    
+    Ok(asm)
+}
+
 /// Compilar código C a ASM usando GCC/Clang (para pipeline ParserManualC)
 fn compile_c_to_asm_for_pipeline(c_code: &str, input_path: &str) -> Result<String, String> {
     use std::path::PathBuf;
@@ -277,6 +427,60 @@ fn compile_c_to_asm_for_pipeline(c_code: &str, input_path: &str) -> Result<Strin
     let _ = fs::remove_file(&asm_file);
     
     Ok(asm)
+}
+
+/// Buscar compilador C++ para el pipeline (con detección de C++20)
+fn find_cpp_compiler_for_pipeline() -> Option<String> {
+    // Lista de compiladores a probar (en orden de preferencia)
+    let mut compilers_to_try = Vec::new();
+    
+    // Primero probar compiladores en PATH
+    compilers_to_try.push("clang++".to_string());
+    compilers_to_try.push("g++".to_string());
+    compilers_to_try.push("clang".to_string());
+    compilers_to_try.push("gcc".to_string());
+    
+    // Luego probar rutas comunes de Windows
+    #[cfg(target_os = "windows")]
+    {
+        compilers_to_try.extend(vec![
+            "C:\\msys64\\mingw64\\bin\\g++.exe".to_string(),
+            "C:\\msys64\\clang64\\bin\\clang++.exe".to_string(),
+            "C:\\Program Files\\LLVM\\bin\\clang++.exe".to_string(),
+            "C:\\msys64\\mingw64\\bin\\gcc.exe".to_string(),
+            "C:\\msys64\\clang64\\bin\\clang.exe".to_string(),
+        ]);
+    }
+    
+    // Buscar compilador que funcione (preferir C++20)
+    let mut cpp20_compiler: Option<String> = None;
+    let mut cpp17_compiler: Option<String> = None;
+    
+    for compiler in compilers_to_try {
+        // Verificar si existe (para rutas absolutas) o está en PATH
+        let compiler_exists = if Path::new(&compiler).exists() {
+            true
+        } else if compiler.contains("++") || compiler.contains("clang") || compiler.contains("gcc") {
+            // Para compiladores en PATH, verificar que respondan a --version
+            Command::new(&compiler).arg("--version").output().is_ok()
+        } else {
+            false
+        };
+        
+        if compiler_exists {
+            // Verificar soporte C++20 primero (preferido)
+            if check_cpp20_support(&compiler) {
+                cpp20_compiler = Some(compiler.clone());
+                // Continuar buscando por si hay uno mejor, pero guardar este
+            } else if cpp17_compiler.is_none() {
+                // Guardar como fallback C++17 solo si no tenemos C++20
+                cpp17_compiler = Some(compiler);
+            }
+        }
+    }
+    
+    // Retornar C++20 si está disponible (preferido), sino C++17
+    cpp20_compiler.or(cpp17_compiler)
 }
 
 /// Buscar compilador C para el pipeline
@@ -347,7 +551,7 @@ mod tests {
             has_arithmetic: false,
             has_comparisons: false,
         };
-        assert_eq!(select_optimal_pipeline(&features), RecommendedPipeline::ParserManualCppC);
+        assert_eq!(select_optimal_pipeline(&features), RecommendedPipeline::ParserManualCpp);
     }
     
     #[test]
@@ -364,7 +568,7 @@ mod tests {
             has_comparisons: true,
         };
         let pipeline = select_optimal_pipeline(&features);
-        assert_eq!(pipeline, RecommendedPipeline::ParserManualCppC);
+        assert_eq!(pipeline, RecommendedPipeline::ParserManualCpp);
     }
 }
 

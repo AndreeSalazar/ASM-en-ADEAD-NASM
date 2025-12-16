@@ -1,13 +1,5 @@
-cargo:warning=ADead D module encontrado en: C:\Users\andre\OneDrive\Documentos\ASM en ADEAD\CORE\d\build\adead_d.obj
-cargo:warning=NOTA: D existe pero las funciones no están completamente implementadas
-cargo:warning=El sistema usará stubs de D (funciones que retornan None)
-cargo:warning=Para habilitar D en el futuro, implementa todas las funciones en d/src/
-cargo:rerun-if-changed=C:\Users\andre\OneDrive\Documentos\ASM en ADEAD\CORE\d\build\adead_d.obj
-cargo:rustc-link-search=native=C:\Users\andre\OneDrive\Documentos\ASM en ADEAD\CORE\zig
-cargo:rustc-link-lib=static=adead_zig
-cargo:rustc-link-lib=ucrt
-cargo:warning=ADead Zig library encontrado: C:\Users\andre\OneDrive\Documentos\ASM en ADEAD\CORE\zig\adead_zig.lib
-cargo:rerun-if-changed=C:\Users\andre\OneDrive\Documentos\ASM en ADEAD\CORE\zig\adead_zig.lib
+cargo:warning=ADead C++ Optimizer library no encontrado, compilando sin optimizador C++
+cargo:warning=Para habilitar, compila el módulo C++ primero: cd CORE/cpp && ./build.sh
 OUT_DIR = Some(C:\Users\andre\OneDrive\Documentos\ASM en ADEAD\CORE\rust\target\release\build\adead-parser-c8f390aa557fd417\out)
 OPT_LEVEL = Some(3)
 TARGET = Some(x86_64-pc-windows-msvc)

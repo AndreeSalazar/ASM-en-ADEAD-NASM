@@ -28,6 +28,9 @@ pub mod cpp_optimizer;
 pub mod c_generator;
 pub mod c_to_nasm;
 
+// Generador de código C++ (backend principal)
+pub mod cpp_generator;
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Expr {
     Number(i64),

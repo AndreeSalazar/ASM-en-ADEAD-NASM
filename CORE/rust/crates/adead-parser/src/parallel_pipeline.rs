@@ -10,7 +10,7 @@
  * Fecha: Diciembre 2025
  */
 
-use crate::optimized_pipeline::OptimizedPipeline;
+// use crate::optimized_pipeline::OptimizedPipeline;  // Removido - usar pipeline_selector en su lugar
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -276,16 +276,16 @@ impl ParallelPipeline {
             }
         }
         
-        // Compilar usando pipeline optimizado
+        // Compilar usando pipeline inteligente
         let input_path_str = input_path_canonical.to_string_lossy().to_string();
-        let asm_content = match OptimizedPipeline::process_complete(&source, &input_path_str) {
-            Ok(asm) => asm,
+        let asm_content = match crate::pipeline_selector::process_adead_intelligent(&source) {
+            Ok((_pipeline, asm)) => asm,
             Err(e) => {
                 return CompilationResult {
                     input_path: input_path.clone(),
                     output_path: output_path.clone(),
                     success: false,
-                    error: Some(format!("Error en pipeline optimizado: {}", e)),
+                    error: Some(format!("Error en pipeline inteligente: {}", e)),
                     duration_ms: start_time.elapsed().unwrap_or_default().as_millis() as u64,
                 };
             }
