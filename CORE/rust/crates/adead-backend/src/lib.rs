@@ -71,7 +71,13 @@ impl CodeGenerator {
         self.text_section.push("extern GetStdHandle".to_string());
         self.text_section.push("extern WriteFile".to_string());
         self.text_section.push("extern ExitProcess".to_string());
+        self.text_section.push("extern VirtualAlloc".to_string());
+        self.text_section.push("extern VirtualFree".to_string());
         self.text_section.push("global main".to_string());
+        
+        // Generar funciones helper de Array en NASM (antes de main)
+        self.generate_array_helpers_nasm();
+        
         self.text_section.push("main:".to_string());
         
         // Setup stack frame (Windows x64)
@@ -633,31 +639,43 @@ impl CodeGenerator {
             }
             Expr::ArrayLiteral(elements) => {
                 // Array literal: [1, 2, 3]
-                // Estrategia: stack-allocated array
-                // 1. Reservar espacio en stack para todos los elementos
-                // 2. Calcular offset base
-                // 3. Generar cada elemento y almacenarlo
+                // Estrategia: usar array_from_values (estructura Array dinámica en heap)
+                // 1. Crear array temporal en stack con los valores
+                // 2. Llamar a array_from_values(count, pointer)
+                // 3. Retornar puntero al Array (en heap)
                 
-                let array_size = elements.len() * 8; // 8 bytes por elemento (int64)
+                let count = elements.len();
+                let array_size = count * 8; // 8 bytes por elemento (int64)
                 let base_offset = self.stack_offset;
                 
-                // Reservar espacio en stack
+                // Reservar espacio en stack para valores temporales
                 self.stack_offset += array_size as i64;
-                self.text_section.push(format!("    ; Array literal: {} elementos ({} bytes)", elements.len(), array_size));
-                self.text_section.push(format!("    sub rsp, {}  ; reservar espacio para array", array_size));
+                self.text_section.push(format!("    ; Array literal: {} elementos", count));
+                self.text_section.push(format!("    sub rsp, {}  ; reservar espacio temporal para valores", array_size));
                 
-                // Generar y almacenar cada elemento
+                // Generar y almacenar cada elemento en el array temporal
                 for (i, element) in elements.iter().enumerate() {
                     self.generate_expr_windows(element)?;
-                    // Almacenar en la posición correcta del array
-                    // [rbp - base_offset - (i * 8)] donde i va de 0 a len-1
                     let element_offset = base_offset + (i as i64 * 8);
-                    self.text_section.push(format!("    mov [rbp - {}], rax  ; array[{}]", element_offset + 8, i));
+                    self.text_section.push(format!("    mov [rbp - {}], rax  ; valor temporal[{}]", element_offset + 8, i));
                 }
                 
-                // Retornar dirección base del array (offset desde rbp)
-                // Usamos LEA para calcular la dirección
-                self.text_section.push(format!("    lea rax, [rbp - {}]  ; dirección base del array", base_offset + 8));
+                // Preparar parámetros para array_from_values(count, pointer)
+                // RCX = count, RDX = puntero a valores temporales
+                self.text_section.push(format!("    mov rcx, {}  ; count", count));
+                self.text_section.push(format!("    lea rdx, [rbp - {}]  ; puntero a valores temporales", base_offset + 8));
+                
+                // Llamar a array_from_values
+                self.text_section.push("    sub rsp, 32  ; shadow space".to_string());
+                self.text_section.push("    call array_from_values".to_string());
+                self.text_section.push("    add rsp, 32  ; restaurar shadow space".to_string());
+                
+                // Liberar espacio temporal del stack
+                self.text_section.push(format!("    add rsp, {}  ; liberar espacio temporal", array_size));
+                self.stack_offset -= array_size as i64;
+                
+                // RAX contiene el puntero al Array (en heap)
+                // Este puntero debe ser almacenado en una variable para uso posterior
             }
             Expr::Borrow { expr, .. } => {
                 // Borrowing: generar dirección de la expresión
@@ -820,60 +838,111 @@ impl CodeGenerator {
                 }
             }
             Expr::Call { module, name, args } => {
-                // Windows x64 calling convention
-                let mut stack_args = Vec::new();
-                for (i, arg) in args.iter().enumerate() {
-                    if i >= 4 {
+                // Detectar built-ins como len(arr)
+                if module.is_none() && name == "len" && args.len() == 1 {
+                    // len(arr) -> array_len(arr)
+                    // Generar expresión del array (puntero al Array)
+                    self.generate_expr_windows(&args[0])?;
+                    self.text_section.push("    push rax  ; guardar puntero al Array".to_string());
+                    
+                    // Preparar parámetros: RCX = puntero al Array
+                    self.text_section.push("    pop rcx  ; puntero al Array".to_string());
+                    
+                    // Llamar a array_len (no necesita shadow space porque no llama a funciones externas)
+                    self.text_section.push("    call array_len".to_string());
+                    
+                    // array_len retorna la longitud en RAX (ya está ahí)
+                } else {
+                    // Llamada a función normal
+                    // Windows x64 calling convention
+                    let mut stack_args = Vec::new();
+                    for (i, arg) in args.iter().enumerate() {
+                        if i >= 4 {
+                            self.generate_expr_windows(arg)?;
+                            self.text_section.push("    push rax".to_string());
+                            stack_args.push(i);
+                        }
+                    }
+                    
+                    for (i, arg) in args.iter().enumerate().take(4) {
                         self.generate_expr_windows(arg)?;
-                        self.text_section.push("    push rax".to_string());
-                        stack_args.push(i);
+                        let reg = match i {
+                            0 => "rcx",
+                            1 => "rdx",
+                            2 => "r8",
+                            3 => "r9",
+                            _ => unreachable!(),
+                        };
+                        if i == 0 && args.len() > 1 {
+                            self.text_section.push("    mov r10, rax".to_string());
+                                self.text_section.push(format!("    mov {}, r10", reg));
+                        } else {
+                                self.text_section.push(format!("    mov {}, rax", reg));
+                        }
                     }
-                }
-                
-                for (i, arg) in args.iter().enumerate().take(4) {
-                    self.generate_expr_windows(arg)?;
-                    let reg = match i {
-                        0 => "rcx",
-                        1 => "rdx",
-                        2 => "r8",
-                        3 => "r9",
-                        _ => unreachable!(),
-                    };
-                    if i == 0 && args.len() > 1 {
-                        self.text_section.push("    mov r10, rax".to_string());
-                            self.text_section.push(format!("    mov {}, r10", reg));
+                    
+                    // Llamar función (con namespace si existe) (Sprint 1.3)
+                    let function_name = if let Some(module_name) = module {
+                        format!("fn_{}_{}", module_name, name)
                     } else {
-                            self.text_section.push(format!("    mov {}, rax", reg));
+                        format!("fn_{}", name)
+                    };
+                    
+                    self.text_section.push("    sub rsp, 32  ; shadow space".to_string());
+                    self.text_section.push(format!("    call {}", function_name));
+                    if !stack_args.is_empty() {
+                        self.text_section.push(format!("    add rsp, {}", (stack_args.len() * 8) + 32));
+                    } else {
+                        self.text_section.push("    add rsp, 32".to_string());
                     }
-                }
-                
-                // Llamar función (con namespace si existe) (Sprint 1.3)
-                let function_name = if let Some(module_name) = module {
-                    format!("fn_{}_{}", module_name, name)
-                } else {
-                    format!("fn_{}", name)
-                };
-                
-                self.text_section.push("    sub rsp, 32  ; shadow space".to_string());
-                self.text_section.push(format!("    call {}", function_name));
-                if !stack_args.is_empty() {
-                    self.text_section.push(format!("    add rsp, {}", (stack_args.len() * 8) + 32));
-                } else {
-                    self.text_section.push("    add rsp, 32".to_string());
                 }
             }
             Expr::Assign { name, value } => {
-                // Evaluate value first
+                // Verificar si es asignación a índice de array: arr[0] = value
+                // El parser marca esto con name = "_array_set" y value es BinaryOp con Index
+                if name == "_array_set" {
+                    if let Expr::BinaryOp { left, right, .. } = value.as_ref() {
+                        if let Expr::Index { array, index } = left.as_ref() {
+                            // Generar expresión del array (puntero al Array)
+                            self.generate_expr_windows(array)?;
+                            self.text_section.push("    push rax  ; guardar puntero al Array".to_string());
+                            
+                            // Generar expresión del índice
+                            self.generate_expr_windows(index)?;
+                            self.text_section.push("    push rax  ; guardar índice".to_string());
+                            
+                            // Generar expresión del valor
+                            self.generate_expr_windows(right)?;
+                            // rax contiene el valor
+                            
+                            // Preparar parámetros para array_set: RCX = puntero al Array, RDX = índice, R8 = valor
+                            self.text_section.push("    mov r8, rax  ; valor".to_string());
+                            self.text_section.push("    pop rdx  ; índice".to_string());
+                            self.text_section.push("    pop rcx  ; puntero al Array".to_string());
+                            
+                            // Llamar a array_set
+                            self.text_section.push("    sub rsp, 32  ; shadow space".to_string());
+                            self.text_section.push("    call array_set".to_string());
+                            self.text_section.push("    add rsp, 32  ; restaurar shadow space".to_string());
+                            
+                            // array_set no retorna valor (void), pero dejamos el valor en rax por si se necesita
+                            self.text_section.push("    mov rax, r8  ; restaurar valor en rax".to_string());
+                            return Ok(());
+                        }
+                    }
+                }
+                
+                // Asignación normal: variable = value
                 self.generate_expr_windows(value)?;
                 // Store in variable
                 if let Some(&offset) = self.variables.get(name) {
-                    self.text_section.push(format!("    mov [rbp - {}], rax", offset + 8));
+                    self.text_section.push(format!("    mov [rbp - {}], rax  ; asignar a variable {}", offset + 8, name));
                 } else {
                     // Variable doesn't exist, create it
                     let offset = self.stack_offset;
                     self.stack_offset += 8;
                     self.variables.insert(name.clone(), offset);
-                    self.text_section.push(format!("    mov [rbp - {}], rax", offset + 8));
+                    self.text_section.push(format!("    mov [rbp - {}], rax  ; crear variable {}", offset + 8, name));
                 }
             }
             // Option/Result constructors (O0.4) - Tagged unions en NASM
@@ -975,44 +1044,86 @@ impl CodeGenerator {
             }
             Expr::Index { array, index } => {
                 // Indexación: arr[0]
-                // Estrategia:
-                // 1. Generar expresión del array (dirección base en rax)
+                // Estrategia: usar array_get (estructura Array dinámica)
+                // 1. Generar expresión del array (puntero al Array en rax)
                 // 2. Generar expresión del índice
-                // 3. Calcular dirección: base + (index * 8) 
-                // 4. Cargar valor desde esa dirección
+                // 3. Llamar a array_get(array_ptr, index)
+                // 4. Retornar valor en RAX
                 
                 self.generate_expr_windows(array)?;
-                // Guardar dirección base en stack
-                self.text_section.push("    push rax  ; guardar dirección base del array".to_string());
+                // Guardar puntero al Array en stack
+                self.text_section.push("    push rax  ; guardar puntero al Array".to_string());
                 
                 self.generate_expr_windows(index)?;
                 // rax contiene el índice
-                // Multiplicar por 8 (tamaño de int64)
-                self.text_section.push("    mov rcx, rax  ; rcx = índice".to_string());
-                self.text_section.push("    mov rax, 8".to_string());
-                self.text_section.push("    imul rax, rcx  ; rax = índice * 8 (offset en bytes)".to_string());
+                // Preparar parámetros: RCX = puntero al Array, RDX = índice
+                self.text_section.push("    mov rdx, rax  ; índice".to_string());
+                self.text_section.push("    pop rcx  ; puntero al Array".to_string());
                 
-                // Restaurar dirección base y sumar offset
-                self.text_section.push("    pop rbx  ; restaurar dirección base".to_string());
-                self.text_section.push("    add rax, rbx  ; rax = dirección base + offset".to_string());
+                // Llamar a array_get
+                // Nota: array_get no necesita shadow space porque no llama a funciones externas
+                self.text_section.push("    call array_get".to_string());
                 
-                // Cargar valor desde la dirección calculada
-                self.text_section.push("    mov rax, [rax]  ; cargar array[index]".to_string());
+                // RAX contiene el valor del elemento
             }
             Expr::MethodCall { object, method, args } => {
-                self.generate_expr_windows(object)?;
-                self.text_section.push("    push rax  ; guardar self".to_string());
-                
-                for arg in args {
-                    self.generate_expr_windows(arg)?;
-                    self.text_section.push("    push rax".to_string());
-                }
-                
-                    self.text_section.push(format!("    call fn_{}", method));
-                
-                let cleanup_size = (args.len() + 1) * 8;
-                if cleanup_size > 0 {
-                    self.text_section.push(format!("    add rsp, {}", cleanup_size));
+                // Detectar métodos de arrays y llamar a funciones helper específicas
+                match method.as_str() {
+                    "append" if args.len() == 1 => {
+                        // arr.append(x) -> array_append(arr, x)
+                        // Generar expresión del array (puntero al Array)
+                        self.generate_expr_windows(object)?;
+                        self.text_section.push("    push rax  ; guardar puntero al Array".to_string());
+                        
+                        // Generar expresión del valor a agregar
+                        self.generate_expr_windows(&args[0])?;
+                        self.text_section.push("    push rax  ; guardar valor".to_string());
+                        
+                        // Preparar parámetros: RCX = puntero al Array, RDX = valor
+                        self.text_section.push("    pop rdx  ; valor".to_string());
+                        self.text_section.push("    pop rcx  ; puntero al Array".to_string());
+                        
+                        // Llamar a array_append
+                        self.text_section.push("    sub rsp, 32  ; shadow space".to_string());
+                        self.text_section.push("    call array_append".to_string());
+                        self.text_section.push("    add rsp, 32  ; restaurar shadow space".to_string());
+                        
+                        // array_append no retorna valor (void), pero dejamos 0 en rax
+                        self.text_section.push("    mov rax, 0  ; void return".to_string());
+                    }
+                    "pop" if args.is_empty() => {
+                        // arr.pop() -> array_pop(arr)
+                        // Generar expresión del array (puntero al Array)
+                        self.generate_expr_windows(object)?;
+                        self.text_section.push("    push rax  ; guardar puntero al Array".to_string());
+                        
+                        // Preparar parámetros: RCX = puntero al Array
+                        self.text_section.push("    pop rcx  ; puntero al Array".to_string());
+                        
+                        // Llamar a array_pop
+                        self.text_section.push("    sub rsp, 32  ; shadow space".to_string());
+                        self.text_section.push("    call array_pop".to_string());
+                        self.text_section.push("    add rsp, 32  ; restaurar shadow space".to_string());
+                        
+                        // array_pop retorna el valor en RAX (ya está ahí)
+                    }
+                    _ => {
+                        // Método genérico: llamar a fn_{method}
+                        self.generate_expr_windows(object)?;
+                        self.text_section.push("    push rax  ; guardar self".to_string());
+                        
+                        for arg in args {
+                            self.generate_expr_windows(arg)?;
+                            self.text_section.push("    push rax".to_string());
+                        }
+                        
+                        self.text_section.push(format!("    call fn_{}", method));
+                        
+                        let cleanup_size = (args.len() + 1) * 8;
+                        if cleanup_size > 0 {
+                            self.text_section.push(format!("    add rsp, {}", cleanup_size));
+                        }
+                    }
                 }
             }
             Expr::Match { expr, arms } => {
@@ -1734,28 +1845,21 @@ impl CodeGenerator {
         let label = format!("msg{}", self.string_counter);
         self.string_counter += 1;
         
+        // Eliminar cualquier \n al final del string para evitar doble salto de línea
+        let s_clean = s.trim_end_matches('\n');
+        
         // Escape string for NASM (pero preservar \n como 0xA)
-        let escaped = s
+        let escaped = s_clean
             .replace('\\', "\\\\")
             .replace('\n', "\\n")  // Convertir \n a \\n para NASM
             .replace('\t', "\\t")
             .replace('"', "\\\"");
         
-        // Si el string no termina en \n, agregar 0xA al final
-        let needs_newline = !s.ends_with('\n');
-        
-        if needs_newline {
-            self.data_section.push(format!(
-                "{}: db \"{}\", 0xA",
-                label, escaped
-            ));
-        } else {
-            // Ya tiene \n, solo usar el string escapado
-            self.data_section.push(format!(
-                "{}: db \"{}\"",
-                label, escaped
-            ));
-        }
+        // Siempre agregar 0xA al final (ya limpiamos el string de \n al final)
+        self.data_section.push(format!(
+            "{}: db \"{}\", 0xA",
+            label, escaped
+        ));
         
         self.data_section.push(format!(
             "{}_len: equ $ - {}",
@@ -1768,6 +1872,347 @@ impl CodeGenerator {
         let label = format!("{}_{}", prefix, self.label_counter);
         self.label_counter += 1;
         label
+    }
+
+    /// Generar funciones helper de Array en NASM
+    /// Estructura Array: [data: qword, length: qword, capacity: qword]
+    /// Total: 24 bytes (3 qwords)
+    fn generate_array_helpers_nasm(&mut self) {
+        // ============================================
+        // Estructura Array en NASM (24 bytes):
+        // - data: qword (puntero a memoria dinámica)
+        // - length: qword (número de elementos)
+        // - capacity: qword (capacidad total)
+        // ============================================
+        
+        // array_new: Crear array vacío
+        // Retorna: RAX = puntero al Array (en heap)
+        self.text_section.push("array_new:".to_string());
+        self.text_section.push("    ; Prologue".to_string());
+        self.text_section.push("    push rbp".to_string());
+        self.text_section.push("    mov rbp, rsp".to_string());
+        self.text_section.push("    sub rsp, 32  ; shadow space".to_string());
+        
+        // Allocar memoria para Array (24 bytes)
+        self.text_section.push("    ; Allocar memoria para Array (24 bytes)".to_string());
+        self.text_section.push("    mov rcx, 0  ; lpAddress (NULL = auto)".to_string());
+        self.text_section.push("    mov rdx, 24  ; dwSize (24 bytes para Array struct)".to_string());
+        self.text_section.push("    mov r8, 0x1000  ; flAllocationType (MEM_COMMIT)".to_string());
+        self.text_section.push("    mov r9, 0x04  ; flProtect (PAGE_READWRITE)".to_string());
+        self.text_section.push("    sub rsp, 32  ; shadow space".to_string());
+        self.text_section.push("    call VirtualAlloc".to_string());
+        self.text_section.push("    add rsp, 32  ; restaurar shadow space".to_string());
+        
+        // Inicializar Array: length=0, capacity=4, data=NULL (se asignará después)
+        self.text_section.push("    ; Inicializar Array".to_string());
+        self.text_section.push("    mov qword [rax + 0], 0  ; data = NULL (se asignará después)".to_string());
+        self.text_section.push("    mov qword [rax + 8], 0  ; length = 0".to_string());
+        self.text_section.push("    mov qword [rax + 16], 4  ; capacity = 4".to_string());
+        
+        // Allocar memoria para data (capacity * 8 bytes)
+        self.text_section.push("    ; Allocar memoria para data (capacity * 8 bytes = 32 bytes)".to_string());
+        self.text_section.push("    push rax  ; guardar puntero al Array".to_string());
+        self.text_section.push("    mov rcx, 0  ; lpAddress".to_string());
+        self.text_section.push("    mov rdx, 32  ; dwSize (4 elementos * 8 bytes)".to_string());
+        self.text_section.push("    mov r8, 0x1000  ; MEM_COMMIT".to_string());
+        self.text_section.push("    mov r9, 0x04  ; PAGE_READWRITE".to_string());
+        self.text_section.push("    sub rsp, 32  ; shadow space".to_string());
+        self.text_section.push("    call VirtualAlloc".to_string());
+        self.text_section.push("    add rsp, 32  ; restaurar shadow space".to_string());
+        
+        // Asignar data al Array
+        self.text_section.push("    pop rbx  ; restaurar puntero al Array".to_string());
+        self.text_section.push("    mov [rbx + 0], rax  ; data = puntero a memoria".to_string());
+        self.text_section.push("    mov rax, rbx  ; retornar puntero al Array".to_string());
+        
+        // Epilogue
+        self.text_section.push("    leave".to_string());
+        self.text_section.push("    ret".to_string());
+        self.text_section.push("".to_string());
+        
+        // array_from_values: Crear array desde valores iniciales
+        // Parámetros: RCX = count, RDX = puntero a valores (int64_t*)
+        // Retorna: RAX = puntero al Array
+        self.text_section.push("array_from_values:".to_string());
+        self.text_section.push("    ; Prologue".to_string());
+        self.text_section.push("    push rbp".to_string());
+        self.text_section.push("    mov rbp, rsp".to_string());
+        self.text_section.push("    sub rsp, 32  ; shadow space".to_string());
+        self.text_section.push("    push rcx  ; guardar count".to_string());
+        self.text_section.push("    push rdx  ; guardar puntero a valores".to_string());
+        
+        // Calcular capacity: max(count * 2, 4)
+        self.text_section.push("    ; Calcular capacity: max(count * 2, 4)".to_string());
+        self.text_section.push("    mov rax, rcx  ; count".to_string());
+        self.text_section.push("    shl rax, 1  ; count * 2".to_string());
+        self.text_section.push("    cmp rax, 4".to_string());
+        self.text_section.push("    jge .capacity_ok".to_string());
+        self.text_section.push("    mov rax, 4  ; mínimo 4".to_string());
+        self.text_section.push(".capacity_ok:".to_string());
+        self.text_section.push("    push rax  ; guardar capacity".to_string());
+        
+        // Allocar memoria para Array (24 bytes)
+        self.text_section.push("    ; Allocar memoria para Array".to_string());
+        self.text_section.push("    mov rcx, 0".to_string());
+        self.text_section.push("    mov rdx, 24".to_string());
+        self.text_section.push("    mov r8, 0x1000".to_string());
+        self.text_section.push("    mov r9, 0x04".to_string());
+        self.text_section.push("    sub rsp, 32".to_string());
+        self.text_section.push("    call VirtualAlloc".to_string());
+        self.text_section.push("    add rsp, 32".to_string());
+        self.text_section.push("    push rax  ; guardar puntero al Array".to_string());
+        
+        // Allocar memoria para data (capacity * 8 bytes)
+        self.text_section.push("    ; Allocar memoria para data".to_string());
+        self.text_section.push("    pop rbx  ; capacity (del stack)".to_string());
+        self.text_section.push("    push rbx  ; guardar capacity de nuevo".to_string());
+        self.text_section.push("    mov rax, rbx  ; capacity".to_string());
+        self.text_section.push("    shl rax, 3  ; capacity * 8 bytes".to_string());
+        self.text_section.push("    mov rcx, 0".to_string());
+        self.text_section.push("    mov rdx, rax  ; size".to_string());
+        self.text_section.push("    mov r8, 0x1000".to_string());
+        self.text_section.push("    mov r9, 0x04".to_string());
+        self.text_section.push("    sub rsp, 32".to_string());
+        self.text_section.push("    call VirtualAlloc".to_string());
+        self.text_section.push("    add rsp, 32".to_string());
+        self.text_section.push("    push rax  ; guardar puntero a data".to_string());
+        
+        // Copiar valores a data
+        self.text_section.push("    ; Copiar valores a data".to_string());
+        self.text_section.push("    pop rdi  ; puntero a data (destino)".to_string());
+        self.text_section.push("    pop rbx  ; puntero al Array (del stack)".to_string());
+        self.text_section.push("    mov [rbx + 0], rdi  ; data = puntero".to_string());
+        self.text_section.push("    pop rdx  ; capacity".to_string());
+        self.text_section.push("    mov [rbx + 16], rdx  ; capacity".to_string());
+        self.text_section.push("    pop rcx  ; count".to_string());
+        self.text_section.push("    mov [rbx + 8], rcx  ; length = count".to_string());
+        self.text_section.push("    pop rsi  ; puntero a valores fuente".to_string());
+        
+        // Loop para copiar valores
+        self.text_section.push("    ; Loop para copiar valores".to_string());
+        self.text_section.push("    mov rcx, [rbx + 8]  ; count".to_string());
+        self.text_section.push("    test rcx, rcx".to_string());
+        self.text_section.push("    jz .copy_done".to_string());
+        self.text_section.push(".copy_loop:".to_string());
+        self.text_section.push("    mov rax, [rsi]  ; cargar valor fuente".to_string());
+        self.text_section.push("    mov [rdi], rax  ; guardar en destino".to_string());
+        self.text_section.push("    add rsi, 8  ; siguiente elemento fuente".to_string());
+        self.text_section.push("    add rdi, 8  ; siguiente elemento destino".to_string());
+        self.text_section.push("    dec rcx".to_string());
+        self.text_section.push("    jnz .copy_loop".to_string());
+        self.text_section.push(".copy_done:".to_string());
+        self.text_section.push("    mov rax, rbx  ; retornar puntero al Array".to_string());
+        
+        // Epilogue
+        self.text_section.push("    leave".to_string());
+        self.text_section.push("    ret".to_string());
+        self.text_section.push("".to_string());
+        
+        // array_get: Obtener elemento por índice
+        // Parámetros: RCX = puntero al Array, RDX = índice
+        // Retorna: RAX = valor del elemento
+        self.text_section.push("array_get:".to_string());
+        self.text_section.push("    ; Prologue".to_string());
+        self.text_section.push("    push rbp".to_string());
+        self.text_section.push("    mov rbp, rsp".to_string());
+        
+        // Bounds checking
+        self.text_section.push("    ; Bounds checking".to_string());
+        self.text_section.push("    cmp rdx, [rcx + 8]  ; comparar índice con length".to_string());
+        self.text_section.push("    jge .array_get_error".to_string());
+        
+        // Obtener elemento
+        self.text_section.push("    ; Obtener elemento".to_string());
+        self.text_section.push("    mov rax, [rcx + 0]  ; cargar puntero a data".to_string());
+        self.text_section.push("    mov rdx, rdx  ; índice".to_string());
+        self.text_section.push("    shl rdx, 3  ; índice * 8 bytes".to_string());
+        self.text_section.push("    add rax, rdx  ; dirección del elemento".to_string());
+        self.text_section.push("    mov rax, [rax]  ; cargar valor".to_string());
+        
+        // Epilogue
+        self.text_section.push("    leave".to_string());
+        self.text_section.push("    ret".to_string());
+        self.text_section.push("".to_string());
+        
+        // Error handler
+        self.text_section.push(".array_get_error:".to_string());
+        self.text_section.push("    ; Error: índice fuera de rango".to_string());
+        self.text_section.push("    mov ecx, 1  ; exit code 1 (error)".to_string());
+        self.text_section.push("    call ExitProcess".to_string());
+        self.text_section.push("".to_string());
+        
+        // array_set: Establecer elemento por índice
+        // Parámetros: RCX = puntero al Array, RDX = índice, R8 = valor
+        // Retorna: void
+        self.text_section.push("array_set:".to_string());
+        self.text_section.push("    ; Prologue".to_string());
+        self.text_section.push("    push rbp".to_string());
+        self.text_section.push("    mov rbp, rsp".to_string());
+        
+        // Bounds checking
+        self.text_section.push("    ; Bounds checking".to_string());
+        self.text_section.push("    cmp rdx, [rcx + 8]  ; comparar índice con length".to_string());
+        self.text_section.push("    jge .array_set_error".to_string());
+        
+        // Establecer elemento
+        self.text_section.push("    ; Establecer elemento".to_string());
+        self.text_section.push("    mov rax, [rcx + 0]  ; cargar puntero a data".to_string());
+        self.text_section.push("    mov rdx, rdx  ; índice".to_string());
+        self.text_section.push("    shl rdx, 3  ; índice * 8 bytes".to_string());
+        self.text_section.push("    add rax, rdx  ; dirección del elemento".to_string());
+        self.text_section.push("    mov [rax], r8  ; guardar valor".to_string());
+        
+        // Epilogue
+        self.text_section.push("    leave".to_string());
+        self.text_section.push("    ret".to_string());
+        self.text_section.push("".to_string());
+        
+        // Error handler
+        self.text_section.push(".array_set_error:".to_string());
+        self.text_section.push("    ; Error: índice fuera de rango".to_string());
+        self.text_section.push("    mov ecx, 1  ; exit code 1 (error)".to_string());
+        self.text_section.push("    call ExitProcess".to_string());
+        self.text_section.push("".to_string());
+        
+        // array_len: Obtener longitud del array
+        // Parámetros: RCX = puntero al Array
+        // Retorna: RAX = longitud
+        self.text_section.push("array_len:".to_string());
+        self.text_section.push("    mov rax, [rcx + 8]  ; cargar length".to_string());
+        self.text_section.push("    ret".to_string());
+        self.text_section.push("".to_string());
+        
+        // array_pop: Eliminar y retornar último elemento
+        // Parámetros: RCX = puntero al Array
+        // Retorna: RAX = valor del último elemento
+        self.text_section.push("array_pop:".to_string());
+        self.text_section.push("    ; Prologue".to_string());
+        self.text_section.push("    push rbp".to_string());
+        self.text_section.push("    mov rbp, rsp".to_string());
+        
+        // Verificar que el array no esté vacío
+        self.text_section.push("    ; Verificar que el array no esté vacío".to_string());
+        self.text_section.push("    mov rax, [rcx + 8]  ; length".to_string());
+        self.text_section.push("    test rax, rax".to_string());
+        self.text_section.push("    jz .array_pop_error".to_string());
+        
+        // Obtener último elemento
+        self.text_section.push("    ; Obtener último elemento".to_string());
+        self.text_section.push("    dec rax  ; length - 1 (índice del último)".to_string());
+        self.text_section.push("    mov rdx, [rcx + 0]  ; puntero a data".to_string());
+        self.text_section.push("    shl rax, 3  ; índice * 8 bytes".to_string());
+        self.text_section.push("    add rdx, rax  ; dirección del último elemento".to_string());
+        self.text_section.push("    mov rax, [rdx]  ; cargar valor del último elemento".to_string());
+        self.text_section.push("    push rax  ; guardar valor".to_string());
+        
+        // Decrementar length
+        self.text_section.push("    ; Decrementar length".to_string());
+        self.text_section.push("    dec qword [rcx + 8]  ; length--".to_string());
+        
+        // Retornar valor
+        self.text_section.push("    pop rax  ; restaurar valor".to_string());
+        
+        // Epilogue
+        self.text_section.push("    leave".to_string());
+        self.text_section.push("    ret".to_string());
+        self.text_section.push("".to_string());
+        
+        // Error handler
+        self.text_section.push(".array_pop_error:".to_string());
+        self.text_section.push("    ; Error: pop de array vacío".to_string());
+        self.text_section.push("    mov ecx, 1  ; exit code 1 (error)".to_string());
+        self.text_section.push("    call ExitProcess".to_string());
+        self.text_section.push("".to_string());
+        
+        // array_append: Agregar elemento al array
+        // Parámetros: RCX = puntero al Array, RDX = valor
+        // Retorna: void
+        self.text_section.push("array_append:".to_string());
+        self.text_section.push("    ; Prologue".to_string());
+        self.text_section.push("    push rbp".to_string());
+        self.text_section.push("    mov rbp, rsp".to_string());
+        self.text_section.push("    sub rsp, 32  ; shadow space".to_string());
+        self.text_section.push("    push rcx  ; guardar puntero al Array".to_string());
+        self.text_section.push("    push rdx  ; guardar valor".to_string());
+        
+        // Verificar si necesita realloc
+        self.text_section.push("    ; Verificar si necesita realloc".to_string());
+        self.text_section.push("    mov rax, [rcx + 8]  ; length".to_string());
+        self.text_section.push("    cmp rax, [rcx + 16]  ; comparar con capacity".to_string());
+        self.text_section.push("    jl .no_realloc".to_string());
+        
+        // Realloc: duplicar capacity
+        self.text_section.push("    ; Realloc: duplicar capacity".to_string());
+        self.text_section.push("    pop rcx  ; puntero al Array".to_string());
+        self.text_section.push("    mov rax, [rcx + 16]  ; capacity actual".to_string());
+        self.text_section.push("    shl rax, 1  ; capacity * 2".to_string());
+        self.text_section.push("    mov [rcx + 16], rax  ; actualizar capacity".to_string());
+        self.text_section.push("    push rcx  ; guardar puntero al Array".to_string());
+        self.text_section.push("    shl rax, 3  ; capacity * 8 bytes".to_string());
+        
+        // VirtualAlloc nuevo bloque
+        self.text_section.push("    ; VirtualAlloc nuevo bloque".to_string());
+        self.text_section.push("    mov rdx, rax  ; nuevo size".to_string());
+        self.text_section.push("    mov rcx, 0".to_string());
+        self.text_section.push("    mov r8, 0x1000".to_string());
+        self.text_section.push("    mov r9, 0x04".to_string());
+        self.text_section.push("    sub rsp, 32".to_string());
+        self.text_section.push("    call VirtualAlloc".to_string());
+        self.text_section.push("    add rsp, 32".to_string());
+        self.text_section.push("    push rax  ; guardar nuevo puntero".to_string());
+        
+        // Copiar datos antiguos
+        self.text_section.push("    ; Copiar datos antiguos".to_string());
+        self.text_section.push("    pop rdi  ; destino (nuevo)".to_string());
+        self.text_section.push("    pop rcx  ; puntero al Array".to_string());
+        self.text_section.push("    mov rsi, [rcx + 0]  ; fuente (antiguo)".to_string());
+        self.text_section.push("    mov rdx, [rcx + 8]  ; length".to_string());
+        self.text_section.push("    push rcx  ; guardar puntero al Array".to_string());
+        self.text_section.push("    mov rcx, rdx  ; contador (length)".to_string());
+        self.text_section.push("    test rcx, rcx".to_string());
+        self.text_section.push("    jz .copy_done_append".to_string());
+        self.text_section.push(".copy_loop_append:".to_string());
+        self.text_section.push("    mov rax, [rsi]".to_string());
+        self.text_section.push("    mov [rdi], rax".to_string());
+        self.text_section.push("    add rsi, 8".to_string());
+        self.text_section.push("    add rdi, 8".to_string());
+        self.text_section.push("    dec rcx".to_string());
+        self.text_section.push("    jnz .copy_loop_append".to_string());
+        self.text_section.push(".copy_done_append:".to_string());
+        
+        // VirtualFree bloque antiguo
+        self.text_section.push("    ; VirtualFree bloque antiguo".to_string());
+        self.text_section.push("    pop rcx  ; puntero al Array".to_string());
+        self.text_section.push("    mov rdx, [rcx + 0]  ; puntero antiguo".to_string());
+        self.text_section.push("    push rcx  ; guardar puntero al Array".to_string());
+        self.text_section.push("    mov rcx, rdx  ; lpAddress".to_string());
+        self.text_section.push("    mov rdx, 0  ; dwSize (0 = liberar todo)".to_string());
+        self.text_section.push("    mov r8, 0x8000  ; MEM_RELEASE".to_string());
+        self.text_section.push("    sub rsp, 32".to_string());
+        self.text_section.push("    call VirtualFree".to_string());
+        self.text_section.push("    add rsp, 32".to_string());
+        
+        // Actualizar data pointer
+        self.text_section.push("    ; Actualizar data pointer".to_string());
+        self.text_section.push("    pop rcx  ; puntero al Array".to_string());
+        self.text_section.push("    mov [rcx + 0], rdi  ; data = nuevo puntero".to_string());
+        self.text_section.push("    push rcx  ; guardar puntero al Array".to_string());
+        
+        // Agregar elemento
+        self.text_section.push(".no_realloc:".to_string());
+        self.text_section.push("    pop rcx  ; puntero al Array".to_string());
+        self.text_section.push("    mov rax, [rcx + 8]  ; length".to_string());
+        self.text_section.push("    mov rbx, [rcx + 0]  ; data pointer".to_string());
+        self.text_section.push("    shl rax, 3  ; length * 8 bytes".to_string());
+        self.text_section.push("    add rbx, rax  ; dirección del nuevo elemento".to_string());
+        self.text_section.push("    pop rdx  ; valor".to_string());
+        self.text_section.push("    mov [rbx], rdx  ; guardar valor".to_string());
+        self.text_section.push("    inc qword [rcx + 8]  ; incrementar length".to_string());
+        
+        // Epilogue
+        self.text_section.push("    leave".to_string());
+        self.text_section.push("    ret".to_string());
+        self.text_section.push("".to_string());
     }
 }
 

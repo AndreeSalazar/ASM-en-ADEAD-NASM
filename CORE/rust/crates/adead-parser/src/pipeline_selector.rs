@@ -11,14 +11,15 @@
  * 4. Generar ASM puro y limpio
  * 5. Ejecutar
  * 
- * Arquitectura: Zig + Rust + C + Parser Manual + D Language
+ * Arquitectura: Parser Manual (Rust) + C++ Optimizer + C Generator (Rust) + Rust Cleaner
  * 
  * Autor: Eddi Andreé Salazar Matos
  * Fecha: Diciembre 2025
  */
 
-use crate::zig_nasm_generator;
 use std::path::Path;
+use std::process::Command;
+use std::fs;
 
 /// Características detectadas en el código ADead
 #[derive(Debug, Clone, PartialEq)]
@@ -37,16 +38,10 @@ pub struct CodeFeatures {
 /// Tipo de pipeline recomendado
 #[derive(Debug, Clone, PartialEq)]
 pub enum RecommendedPipeline {
-    /// Parser Manual → C → GCC/Clang → ASM (flujo principal actual)
+    /// Parser Manual → C++ Optimizer → C → GCC/Clang → Rust Cleaner → ASM Virgen (flujo principal)
+    ParserManualCppC,
+    /// Parser Manual → C → GCC/Clang → Rust Cleaner → ASM Virgen (fallback sin C++ Optimizer)
     ParserManualC,
-    /// Zig → NASM directo (máxima eficiencia para casos simples)
-    ZigDirect,
-    /// Zig → Rust → NASM (eficiente + seguro)
-    ZigRust,
-    /// D → Zig → NASM (metaprogramming + eficiencia)
-    DZig,
-    /// D → Zig → Rust → NASM (máxima potencia: metaprogramming + eficiencia + seguridad)
-    DZigRust,
     /// Rust directo (fallback completo)
     RustDirect,
 }
@@ -114,58 +109,9 @@ fn calculate_complexity(source: &str) -> u32 {
 
 /// Seleccionar el mejor pipeline según las características
 pub fn select_optimal_pipeline(features: &CodeFeatures) -> RecommendedPipeline {
-    // Caso 1: Código muy simple (solo prints, literales)
-    if features.complexity_score == 0 && !features.has_expressions {
-        return RecommendedPipeline::ZigDirect;
-    }
-    
-    // Caso 2: Estructuras complejas anidadas (while con if) - PRIORIDAD MÁXIMA
-    // Si tiene while Y if statements (bloques anidados), usar Parser Manual + C (principal)
-    if (features.has_nested_blocks && features.has_while_loops && features.has_if_statements) ||
-       (features.has_while_loops && features.has_if_statements) {
-        // Para máxima robustez: D → Zig → Rust → NASM
-        // Pero si D no está disponible, usar Parser Manual + C (flujo principal)
-        #[cfg(feature = "d-language")]
-        {
-            return RecommendedPipeline::DZigRust;
-        }
-        #[cfg(not(feature = "d-language"))]
-        {
-            return RecommendedPipeline::ParserManualC;
-        }
-    }
-    
-    // Caso 3: While loops simples (sin if anidado)
-    if features.has_while_loops {
-        // Usar Parser Manual + C (flujo principal) o Zig si está disponible
-        #[cfg(not(feature = "no-zig"))]
-        {
-            return RecommendedPipeline::ZigDirect;
-        }
-        #[cfg(feature = "no-zig")]
-        {
-            // Zig no disponible, usar Parser Manual + C
-            return RecommendedPipeline::ParserManualC;
-        }
-    }
-    
-    // Caso 4: Expresiones aritméticas con validación necesaria
-    if features.has_expressions && features.has_variables {
-        return RecommendedPipeline::ZigRust;
-    }
-    
-    // Caso 5: Floats simples
-    if features.has_floats && !features.has_arithmetic {
-        return RecommendedPipeline::ZigDirect;
-    }
-    
-    // Caso 6: If statements simples
-    if features.has_if_statements && !features.has_nested_blocks {
-        return RecommendedPipeline::ParserManualC;
-    }
-    
-    // Default: Parser Manual + C (flujo principal)
-    RecommendedPipeline::ParserManualC
+    // Siempre usar Parser Manual + C++ Optimizer + C como flujo principal
+    // C++ Optimizer proporciona optimizaciones compile-time
+    RecommendedPipeline::ParserManualCppC
 }
 
 /// Generar código ASM usando el pipeline seleccionado
@@ -175,10 +121,39 @@ pub fn generate_asm_with_pipeline(
     output_path: Option<&Path>,
 ) -> Result<String, String> {
     match pipeline {
-        RecommendedPipeline::ZigDirect => {
-            // ADead → Zig → NASM (directo, sin capas)
-            zig_nasm_generator::generate_nasm_direct(source)
-                .ok_or_else(|| "Zig directo falló".to_string())
+        RecommendedPipeline::ParserManualCppC => {
+            // ADead → Parser Manual → C++ Optimizer → C → GCC/Clang → ASM (flujo principal)
+            let program = crate::c_manual_parser::CManualParser::parse_program(source)
+                .map_err(|e| format!("Parser manual error: {:?}", e))?;
+            
+            // Optimizar AST usando C++ Optimizer (si está disponible)
+            let optimized_program = crate::cpp_optimizer::optimize_ast(&program)
+                .unwrap_or(program); // Fallback a programa sin optimizar si C++ no está disponible
+            
+            let c_code = crate::c_generator::generate_c_code(&optimized_program);
+            
+            // Compilar código C a ASM usando GCC/Clang
+            let temp_path = output_path
+                .and_then(|p| p.to_str().map(|s| s.to_string()))
+                .unwrap_or_else(|| "temp.c".to_string());
+            
+            match compile_c_to_asm_for_pipeline(&c_code, &temp_path) {
+                Ok(asm_code) => {
+                    // Verificar que el ASM tiene contenido válido (NASM o GAS)
+                    if asm_code.contains("section") || asm_code.contains(".text") || 
+                       asm_code.contains(".globl") || asm_code.contains("main:") ||
+                       asm_code.len() > 100 {
+                        // Limpiar ASM usando Rust Cleaner
+                        Ok(crate::clean_asm::clean_asm(&asm_code))
+                    } else {
+                        Ok(format!("// Código C generado\n{}", c_code))
+                    }
+                }
+                Err(e) => {
+                    eprintln!("   ⚠️  No se pudo compilar C a ASM: {}, retornando código C", e);
+                    Ok(format!("// Código C generado\n{}", c_code))
+                }
+            }
         }
         
         RecommendedPipeline::ParserManualC => {
@@ -187,44 +162,29 @@ pub fn generate_asm_with_pipeline(
             let program = crate::c_manual_parser::CManualParser::parse_program(source)
                 .map_err(|e| format!("Parser manual error: {:?}", e))?;
             let c_code = crate::c_generator::generate_c_code(&program);
-            // Retornar código C (GCC/Clang lo compila después)
-            Ok(format!("// Código C generado\n{}", c_code))
-        }
-        
-        RecommendedPipeline::ZigRust => {
-            // ADead → Zig (parse) → Rust (validación) → NASM
-            // Por ahora, usar Zig directo (Rust validación se hace después)
-            zig_nasm_generator::generate_nasm_direct(source)
-                .ok_or_else(|| "Zig → Rust pipeline falló".to_string())
-        }
-        
-        RecommendedPipeline::DZig => {
-            // ADead → D → Zig → NASM
-            #[cfg(feature = "d-language")]
-            {
-                crate::d_zig_asm::compile_adead_to_asm_via_zig(source)
-                    .ok_or_else(|| "D → Zig pipeline falló".to_string())
-            }
-            #[cfg(not(feature = "d-language"))]
-            {
-                // Fallback a Zig directo si D no está disponible
-                zig_nasm_generator::generate_nasm_direct(source)
-                    .ok_or_else(|| "D no disponible, Zig falló".to_string())
-            }
-        }
-        
-        RecommendedPipeline::DZigRust => {
-            // ADead → D (metaprogramming) → Zig → Rust (validación) → NASM
-            #[cfg(feature = "d-language")]
-            {
-                crate::d_zig_asm::compile_adead_to_asm_via_zig(source)
-                    .ok_or_else(|| "D → Zig → Rust pipeline falló".to_string())
-            }
-            #[cfg(not(feature = "d-language"))]
-            {
-                // Fallback a Zig → Rust si D no está disponible
-                zig_nasm_generator::generate_nasm_direct(source)
-                    .ok_or_else(|| "D no disponible, Zig → Rust falló".to_string())
+            
+            // Compilar código C a ASM usando GCC/Clang
+            // Usar el output_path o un path temporal
+            let temp_path = output_path
+                .and_then(|p| p.to_str().map(|s| s.to_string()))
+                .unwrap_or_else(|| "temp.c".to_string());
+            
+            match compile_c_to_asm_for_pipeline(&c_code, &temp_path) {
+                Ok(asm_code) => {
+                    // Verificar que el ASM tiene contenido válido (NASM o GAS)
+                    if asm_code.contains("section") || asm_code.contains(".text") || 
+                       asm_code.contains(".globl") || asm_code.contains("main:") ||
+                       asm_code.len() > 100 {
+                        // Limpiar ASM usando Rust Cleaner
+                        Ok(crate::clean_asm::clean_asm(&asm_code))
+                    } else {
+                        Ok(format!("// Código C generado\n{}", c_code))
+                    }
+                }
+                Err(e) => {
+                    eprintln!("   ⚠️  No se pudo compilar C a ASM: {}, retornando código C", e);
+                    Ok(format!("// Código C generado\n{}", c_code))
+                }
             }
         }
         
@@ -256,36 +216,102 @@ pub fn process_adead_intelligent(source: &str) -> Result<(RecommendedPipeline, S
     let pipeline = select_optimal_pipeline(&features);
     
     // 3. Generar ASM usando el pipeline seleccionado
+    // Nota: generate_asm_with_pipeline ya aplica clean_asm internamente
     let asm_code = generate_asm_with_pipeline(source, &pipeline, None)?;
     
-    // 4. Optimizar y limpiar código ASM
-    let optimized_asm = optimize_asm(&asm_code)?;
-    
-    Ok((pipeline, optimized_asm))
+    Ok((pipeline, asm_code))
 }
 
-/// Optimizar código ASM generado
-fn optimize_asm(asm: &str) -> Result<String, String> {
-    let mut optimized = asm.to_string();
+/// Compilar código C a ASM usando GCC/Clang (para pipeline ParserManualC)
+fn compile_c_to_asm_for_pipeline(c_code: &str, input_path: &str) -> Result<String, String> {
+    use std::path::PathBuf;
     
-    // Eliminar instrucciones redundantes
-    // mov rax, rax -> (eliminar)
-    optimized = optimized.replace("    mov rax, rax\n", "");
+    // Crear archivo C temporal
+    let temp_dir = std::env::temp_dir();
+    let c_file = temp_dir.join(format!("adead_temp_{}.c", std::process::id()));
     
-    // Optimizar secuencias comunes
-    // push rax; pop rax -> (eliminar)
-    // (esto requiere análisis más complejo, por ahora básico)
+    fs::write(&c_file, c_code)
+        .map_err(|e| format!("Failed to write C file: {}", e))?;
     
-    // Limpiar espacios múltiples
-    while optimized.contains("  \n") {
-        optimized = optimized.replace("  \n", " \n");
+    // Buscar compilador C
+    let compiler = find_c_compiler_for_pipeline()
+        .ok_or_else(|| "No se encontró GCC ni Clang".to_string())?;
+    
+    // Crear archivo ASM temporal
+    let asm_file = c_file.with_extension("asm");
+    
+    // Compilar C a ASM
+    let mut cmd = Command::new(&compiler);
+    cmd.arg("-S")
+       .arg("-O2")
+       .arg("-fno-asynchronous-unwind-tables")
+       .arg("-fno-exceptions")
+       .arg("-fno-stack-protector")
+       .arg("-mno-red-zone")
+       .arg("-o")
+       .arg(&asm_file)
+       .arg(&c_file);
+    
+    // Ajustar flags según compilador
+    if compiler.contains("clang") {
+        cmd.arg("-mllvm").arg("--x86-asm-syntax=intel");
+    } else {
+        cmd.arg("-masm=intel");
     }
     
-    // Asegurar formato consistente
-    optimized = optimized.replace("\r\n", "\n");
+    let output = cmd.output()
+        .map_err(|e| format!("Failed to execute compiler: {}", e))?;
     
-    Ok(optimized)
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let _ = fs::remove_file(&c_file);
+        return Err(format!("Compilation failed: {}", stderr));
+    }
+    
+    // Leer ASM generado
+    let asm = fs::read_to_string(&asm_file)
+        .map_err(|e| format!("Failed to read ASM file: {}", e))?;
+    
+    // Limpiar archivos temporales
+    let _ = fs::remove_file(&c_file);
+    let _ = fs::remove_file(&asm_file);
+    
+    Ok(asm)
 }
+
+/// Buscar compilador C para el pipeline
+fn find_c_compiler_for_pipeline() -> Option<String> {
+    // Priorizar Clang sobre GCC
+    if Command::new("clang").arg("--version").output().is_ok() {
+        return Some("clang".to_string());
+    }
+    if Command::new("gcc").arg("--version").output().is_ok() {
+        return Some("gcc".to_string());
+    }
+    
+    // Buscar en ubicaciones comunes (Windows)
+    #[cfg(target_os = "windows")]
+    {
+        let common_paths = vec![
+            "C:\\msys64\\mingw64\\bin\\gcc.exe",
+            "C:\\msys64\\clang64\\bin\\clang.exe",
+            "C:\\Program Files\\LLVM\\bin\\clang.exe",
+        ];
+        
+        for path in common_paths {
+            if Path::new(path).exists() {
+                if Command::new(path).arg("--version").output().is_ok() {
+                    return Some(path.to_string());
+                }
+            }
+        }
+    }
+    
+    None
+}
+
+// Nota: La optimización de ASM se hace en clean_asm::clean_asm()
+// Esta función ya no es necesaria porque clean_asm se aplica en generate_asm_with_pipeline
 
 #[cfg(test)]
 mod tests {
@@ -321,7 +347,7 @@ mod tests {
             has_arithmetic: false,
             has_comparisons: false,
         };
-        assert_eq!(select_optimal_pipeline(&features), RecommendedPipeline::ZigDirect);
+        assert_eq!(select_optimal_pipeline(&features), RecommendedPipeline::ParserManualCppC);
     }
     
     #[test]
@@ -338,7 +364,7 @@ mod tests {
             has_comparisons: true,
         };
         let pipeline = select_optimal_pipeline(&features);
-        assert!(matches!(pipeline, RecommendedPipeline::ParserManualC | RecommendedPipeline::DZigRust));
+        assert_eq!(pipeline, RecommendedPipeline::ParserManualCppC);
     }
 }
 

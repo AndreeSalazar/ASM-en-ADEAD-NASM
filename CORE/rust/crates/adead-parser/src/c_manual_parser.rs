@@ -25,7 +25,11 @@ impl CManualParser {
         let mut i = 0;
         
         while i < lines.len() {
-            let line = lines[i].trim();
+            let mut line = lines[i].trim();
+            // Eliminar comentarios (líneas que empiezan con ; o comentarios al final de línea)
+            if let Some(comment_pos) = line.find(';') {
+                line = line[..comment_pos].trim();
+            }
             if line.is_empty() {
                 i += 1;
                 continue;
@@ -253,7 +257,11 @@ impl CManualParser {
         let mut i = 0;
         
         while i < lines.len() {
-            let line = lines[i].trim();
+            let mut line = lines[i].trim();
+            // Eliminar comentarios (líneas que empiezan con ; o comentarios al final de línea)
+            if let Some(comment_pos) = line.find(';') {
+                line = line[..comment_pos].trim();
+            }
             if line.is_empty() {
                 i += 1;
                 continue;

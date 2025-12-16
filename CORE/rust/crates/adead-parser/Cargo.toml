@@ -17,6 +17,5 @@ cc = "1.0"
 
 [features]
 default = []
-d-language = []
-no-zig = []  # Feature activada automáticamente por build.rs si Zig no está disponible
+cpp-optimizer = []  # Feature para habilitar C++ Optimizer (opcional)
 

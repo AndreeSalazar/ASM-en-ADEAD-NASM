@@ -2,19 +2,9 @@
 use chumsky::prelude::*;
 
 // ═══════════════════════════════════════════════════════════════════════════
-// FLUJO ESTABLECIDO: ADead → Zig (parsea) → Rust (seguridad) → NASM → .exe
+// FLUJO ESTABLECIDO: ADead → Parser Manual → C++ Optimizer → C → GCC/Clang → Rust Cleaner → ASM Virgen
 // ═══════════════════════════════════════════════════════════════════════════
-// ZIG ES EL PARSER PRINCIPAL - Rust solo hace seguridad y codegen
-// Módulo FFI para parser Zig (PRINCIPAL)
-mod zig_ffi_parser;
-
-// Parser Rust solo como último recurso si Zig falla
-mod zig_struct_parser;
-
-// Parser de expresiones aritméticas usando Zig
-mod zig_expr_parser;
-// Generador NASM directo desde Zig (flujo: ADead → Zig → NASM)
-pub mod zig_nasm_generator;
+// ARQUITECTURA TRÍO: Parser Manual (Rust) + C++ Optimizer + C Generator (Rust) + Rust Cleaner
 // Parser manual especializado para C → Rust → ASM (reemplaza Tree-sitter)
 pub mod c_manual_parser;
 pub mod c_while_if_parser;
@@ -22,19 +12,8 @@ pub mod c_while_if_parser;
 // Resolución de módulos (Sprint 1.3 - Import básico)
 pub mod module_resolver;
 
-// FFI para integración con D Language (metaprogramming avanzado)
-#[cfg(feature = "d-language")]
-pub mod d_ffi;
-
-// Pipeline D → Zig → ASM Directo
-#[cfg(feature = "d-language")]
-pub mod d_zig_asm;
-
 // Selector inteligente de pipeline
 pub mod pipeline_selector;
-
-// Pipeline optimizado completo: D → Zig → Rust → ASM Virgen
-pub mod optimized_pipeline;
 
 // Pipeline paralelo: Compilación paralela con caching
 pub mod parallel_pipeline;
@@ -42,9 +21,8 @@ pub mod parallel_pipeline;
 // Limpieza y optimización de ASM generado
 pub mod clean_asm;
 
-// FFI para D Language CTFE
-#[cfg(feature = "d-language")]
-pub mod d_ctfe;
+// C++ Optimizer Module (FFI para optimizaciones compile-time)
+pub mod cpp_optimizer;
 
 // Generador de código C (backend opcional)
 pub mod c_generator;
@@ -504,35 +482,13 @@ fn extract_struct(source: &str, start_byte_pos: usize) -> Result<(Stmt, String, 
     // rest ya contiene desde "struct Nombre" hasta después del último "end"
     let full_struct = rest[..end_pos + 3].to_string(); // +3 para incluir "end"
     
-    // ZIG ES EL PARSER PRINCIPAL - Intentar parsear con Zig primero
-    use zig_ffi_parser::parse_struct_with_zig_ffi;
-    if let Ok(stmt) = parse_struct_with_zig_ffi(&full_struct) {
-        let end_byte_pos = start_byte_pos + end_pos + 3;
-        return Ok((stmt, full_struct, end_byte_pos));
-    }
-    
-    // Fallback: Solo si Zig falla completamente, usar parser Rust
-    // (Esto no debería pasar si Zig está bien configurado)
-    match zig_struct_parser::parse_struct_from_string(&full_struct) {
-        Ok((parsed_name, fields, init, destroy)) => {
-            let stmt = Stmt::Struct {
-                name: parsed_name,
-                fields,
-                init,
-                destroy,
-            };
-            // Convertir la posición relativa a absoluta en bytes
-            // end_pos es relativo a 'rest', así que sumamos start_byte_pos
-            // +3 para incluir "end"
-            let end_byte_pos = start_byte_pos + end_pos + 3;
-            Ok((stmt, full_struct, end_byte_pos))
-        }
-        Err(e) => Err(ADeadError::ParseError {
-            line: 1,
-            col: 1,
-            message: format!("Error parseando struct: {}", e),
-        })
-    }
+    // Parsear struct usando parser Rust estándar
+    // TODO: Implementar parser de structs en Rust (por ahora usar parse básico)
+    Err(ADeadError::ParseError {
+        line: 1,
+        col: 1,
+        message: format!("Struct parsing not yet fully implemented. Struct content: {}", full_struct),
+    })
 }
 
 fn program_parser() -> impl Parser<char, Program, Error = Simple<char>> {
@@ -560,13 +516,12 @@ fn stmt_parser() -> impl Parser<char, Stmt, Error = Simple<char>> + Clone {
     recursive(|stmt| {
         let ident = text::ident().padded();
         let expr = expr_parser();
-        // Los parsers de expr se clonan cuando se necesitan, pero ahora usan Zig directamente
+        // Los parsers de expr se clonan cuando se necesitan
         let expr_for_print = expr.clone();
         let expr_for_while = expr.clone();
         let expr_for_expr_stmt = expr.clone();
 
-        // Print statement: Intentar Rust primero para booleanos, luego Zig para otros casos
-        // CRÍTICO: Rust parser debe usarse primero para booleanos ya que Zig no los soporta
+        // Print statement: Usar parser Rust estándar
         let print = just("print")
             .padded()
             .ignore_then(
@@ -580,21 +535,15 @@ fn stmt_parser() -> impl Parser<char, Stmt, Error = Simple<char>> + Clone {
                         let expr_clone = expr.clone(); // Clonar el parser de Rust
                         move |expr_str: String, span| {
                             let trimmed = expr_str.trim();
-                            // CRÍTICO: Detectar booleanos PRIMERO (antes de Zig)
-                            // Zig no soporta booleanos todavía, así que crear directamente Expr::Bool
+                            // Detectar booleanos primero
                             if trimmed == "true" {
                                 Ok(Expr::Bool(true))
                             } else if trimmed == "false" {
                                 Ok(Expr::Bool(false))
                             } else {
-                                // Para otros casos: Intentar Zig PRIMERO para floats e integer expressions
-                                if let Some(zig_expr) = zig_expr_parser::parse_expr_with_zig(trimmed) {
-                                    Ok(zig_expr)
-                                } else {
-                                    // Si Zig falla, intentar Rust parser
-                                    expr_clone.clone().parse(trimmed)
-                                        .map_err(|_| Simple::custom(span, format!("Parse error: could not parse expression '{}'", trimmed)))
-                                }
+                                // Usar parser Rust estándar para todas las expresiones
+                                expr_clone.clone().parse(trimmed)
+                                    .map_err(|_| Simple::custom(span, format!("Parse error: could not parse expression '{}'", trimmed)))
                             }
                         }
                     })
@@ -776,13 +725,7 @@ fn stmt_parser() -> impl Parser<char, Stmt, Error = Simple<char>> + Clone {
                 (method_name, StructMethod { visibility: vis, params, body })
             });
 
-        // INTEGRACIÓN ZIG: Parser de structs usando parser Zig-style
-        // SOLUCIÓN SIMPLIFICADA: Capturar caracteres línea por línea hasta encontrar
-        // el patrón "end" seguido de nueva línea y luego un keyword de statement
-        // o fin de input. Esto identifica el "end" final del struct.
-        
-        // INTEGRACIÓN ZIG: Parser de structs usando parser Zig-style
-        // SOLUCIÓN DEFINITIVA: Capturar caracteres con take_until hasta "end\n"
+        // Parser de structs: Capturar caracteres con take_until hasta "end\n"
         // y luego procesar el string manualmente para encontrar el "end" correcto
         
         let struct_stmt = just("struct")
@@ -854,25 +797,11 @@ fn stmt_parser() -> impl Parser<char, Stmt, Error = Simple<char>> + Clone {
             )
             .then_ignore(just("end").padded())
             .try_map(|(name, content), span| {
-                // Reconstruir el struct completo para el parser Zig
-                let full_struct = format!("struct {}\n{}end", name, content.trim());
-                
-                // Parsear con parser Zig-style
-                match zig_struct_parser::parse_struct_from_string(&full_struct) {
-                    Ok((parsed_name, fields, init, destroy)) => {
-                        Ok(Stmt::Struct {
-                            name: parsed_name,
-                            fields,
-                            init,
-                            destroy,
-                        })
-                    }
-                    Err(e) => {
-                        Err(Simple::custom(span, format!("Zig parser error: {}", e)))
-                    }
-                }
+                // TODO: Implementar parser completo de structs en Rust
+                // Por ahora, crear struct básico sin campos
+                Err(Simple::custom(span, format!("Struct parsing not yet fully implemented for struct: {}", name)))
             })
-            .labelled("struct statement (Zig parser)");
+            .labelled("struct statement");
 
         // Assignment: ident = expr (as statement)
         let assign_stmt = ident
@@ -1321,8 +1250,7 @@ fn expr_parser() -> impl Parser<char, Expr, Error = Simple<char>> + Clone {
                 right: Box::new(r),
             });
 
-        // Intentar usar Zig primero para expresiones con comparaciones
-        // Zig parsea mejor: <, <=, >, >=, ==, !=
+        // Operadores de comparación
         // IMPORTANTE: Los operadores de dos caracteres (<=, >=, ==, !=) DEBEN ir antes de los de un carácter (<, >)
         let comparison = sum
             .clone()
@@ -1342,10 +1270,7 @@ fn expr_parser() -> impl Parser<char, Expr, Error = Simple<char>> + Clone {
                 right: Box::new(r),
             });
 
-        // ZIG ES EL PARSER PRINCIPAL - Intentar parsear con Zig primero
-        // Capturar toda la expresión restante y parsearla con Zig
-        // Nota: Esto es complejo dentro de un parser recursivo, así que usamos el parser Rust
-        // y Zig se usa directamente en print/while donde capturamos el string completo
+        // Parser de expresiones usando parser Rust estándar
         // IMPORTANTE: sum debe estar antes de comparison para evitar loops
         sum.clone()
             .or(comparison) // Comparaciones después de sum

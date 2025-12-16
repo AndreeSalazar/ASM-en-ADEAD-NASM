@@ -1,0 +1,24 @@
+; Ejemplo completo de arrays estilo Python con métodos y built-ins
+; Prueba: arr.append(), arr.pop(), len(arr)
+
+let arr = [1, 2, 3]
+print arr[0]        ; Debe imprimir: 1
+
+arr[0] = 10
+print arr[0]        ; Debe imprimir: 10
+
+let length = len(arr)
+print length        ; Debe imprimir: 3
+
+arr.append(4)
+print len(arr)      ; Debe imprimir: 4
+print arr[3]        ; Debe imprimir: 4
+
+let last = arr.pop()
+print last          ; Debe imprimir: 4
+print len(arr)      ; Debe imprimir: 3
+
+arr.append(100)
+print arr[3]        ; Debe imprimir: 100
+print len(arr)      ; Debe imprimir: 4
+
