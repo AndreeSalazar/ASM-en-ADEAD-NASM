@@ -27,13 +27,28 @@ if (-not (Get-Command zig -ErrorAction SilentlyContinue)) {
 
 # Paso 1: Ensamblar
 Write-Host "[1/4] Ensamblando..." -ForegroundColor Yellow
+if (-not (Test-Path $asmFile)) {
+    Write-Host "ERROR: Archivo .asm no encontrado: $asmFile" -ForegroundColor Red
+    exit 1
+}
+
 & nasm -f win64 $asmFile -o $objFile
 if ($LASTEXITCODE -ne 0) {
-    Write-Host "ERROR: Fallo al ensamblar" -ForegroundColor Red
+    Write-Host "ERROR: Fallo al ensamblar con NASM" -ForegroundColor Red
+    Write-Host "  Verifica que el archivo .asm sea válido y que NASM esté correctamente instalado." -ForegroundColor Yellow
+    exit 1
+}
+
+if (-not (Test-Path $objFile)) {
+    Write-Host "ERROR: Archivo .obj no fue generado: $objFile" -ForegroundColor Red
     exit 1
 }
 
 $objSize = (Get-Item $objFile).Length
+if ($objSize -eq 0) {
+    Write-Host "ERROR: El archivo .obj generado está vacío" -ForegroundColor Red
+    exit 1
+}
 $objSizeKB = [math]::Round($objSize / 1KB, 2)
 Write-Host "  OK: $objFile generado ($objSizeKB KB)`n" -ForegroundColor Green
 
@@ -51,10 +66,21 @@ Write-Host "[2/4] Linkeando con Zig (flags optimizados)..." -ForegroundColor Yel
 
 if ($LASTEXITCODE -ne 0) {
     Write-Host "ERROR: Fallo al linkear con Zig" -ForegroundColor Red
+    Write-Host "  Verifica que Zig esté instalado y en PATH" -ForegroundColor Yellow
+    exit 1
+}
+
+if (-not (Test-Path $exeFile)) {
+    Write-Host "ERROR: Archivo .exe no fue generado: $exeFile" -ForegroundColor Red
+    Write-Host "  Verifica permisos de escritura en el directorio" -ForegroundColor Yellow
     exit 1
 }
 
 $exeSize = (Get-Item $exeFile).Length
+if ($exeSize -eq 0) {
+    Write-Host "ERROR: El archivo .exe generado está vacío" -ForegroundColor Red
+    exit 1
+}
 $exeSizeKB = [math]::Round($exeSize / 1KB, 2)
 Write-Host "  OK: $exeFile generado ($exeSizeKB KB)`n" -ForegroundColor Green
 

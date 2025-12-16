@@ -28,16 +28,35 @@ if %ERRORLEVEL% NEQ 0 (
 
 REM Paso 1: Ensamblar con NASM
 echo [1/4] Ensamblando %ASM_FILE%...
-nasm -f win64 "%ASM_FILE%" -o "%OBJ_FILE%"
-if %ERRORLEVEL% NEQ 0 (
-    echo ERROR: Fallo al ensamblar con NASM
+if not exist "%ASM_FILE%" (
+    echo ERROR: Archivo .asm no encontrado: %ASM_FILE%
     pause
     exit /b 1
 )
+
+nasm -f win64 "%ASM_FILE%" -o "%OBJ_FILE%"
+if %ERRORLEVEL% NEQ 0 (
+    echo ERROR: Fallo al ensamblar con NASM
+    echo Verifica que el archivo .asm sea válido y que NASM esté correctamente instalado.
+    pause
+    exit /b 1
+)
+
+if not exist "%OBJ_FILE%" (
+    echo ERROR: Archivo .obj no fue generado: %OBJ_FILE%
+    pause
+    exit /b 1
+)
+
 echo    OK: %OBJ_FILE% generado
 
 REM Verificar tamaño del .obj
 for %%A in ("%OBJ_FILE%") do set OBJ_SIZE=%%~zA
+if !OBJ_SIZE! EQU 0 (
+    echo ERROR: El archivo .obj generado está vacío
+    pause
+    exit /b 1
+)
 set /a OBJ_SIZE_KB=!OBJ_SIZE!/1024
 echo    Tamaño .obj: !OBJ_SIZE_KB! KB
 echo.
@@ -80,8 +99,20 @@ pause
 exit /b 1
 
 :check_size
+REM Verificar que el .exe fue generado
+if not exist "%EXE_FILE%" (
+    echo ERROR: Archivo .exe no fue generado: %EXE_FILE%
+    pause
+    exit /b 1
+)
+
 REM Verificar tamaño del .exe
 for %%A in ("%EXE_FILE%") do set EXE_SIZE=%%~zA
+if !EXE_SIZE! EQU 0 (
+    echo ERROR: El archivo .exe generado está vacío
+    pause
+    exit /b 1
+)
 set /a EXE_SIZE_KB=!EXE_SIZE!/1024
 echo    Tamaño .exe (sin UPX): !EXE_SIZE_KB! KB
 echo.

@@ -1,0 +1,16 @@
+OPCIÓN 1: Usar ruta completa (RECOMENDADO - más fácil):
+
+cd "Pruebas Zig Linker"
+& "C:\upx-5.0.2-win64\upx.exe" --best --lzma test_simple.exe
+
+
+OPCIÓN 2: Actualizar PATH primero (para usar solo "upx"):
+
+$env:Path += ";C:\upx-5.0.2-win64"
+cd "Pruebas Zig Linker"
+upx --best --lzma test_simple.exe
+
+
+NOTA: Si el archivo ya está comprimido, verás el error "AlreadyPackedException".
+      En ese caso, primero descomprime con: upx -d test_simple.exe
+

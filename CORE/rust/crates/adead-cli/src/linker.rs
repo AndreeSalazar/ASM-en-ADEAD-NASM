@@ -16,31 +16,34 @@ pub enum LinkerType {
 
 /// Detectar qué linker está disponible en el sistema
 pub fn detect_linker() -> LinkerType {
-    // Intentar Zig primero (recomendado)
-    if Command::new("zig")
+    // Intentar Zig primero (recomendado para mejor optimización)
+    if let Ok(output) = Command::new("zig")
         .arg("version")
         .output()
-        .is_ok()
     {
-        return LinkerType::Zig;
+        if output.status.success() {
+            return LinkerType::Zig;
+        }
     }
     
-    // Intentar GCC
-    if Command::new("g++")
+    // Intentar GCC (mejor para tamaño mínimo)
+    if let Ok(output) = Command::new("g++")
         .arg("--version")
         .output()
-        .is_ok()
     {
-        return LinkerType::Gcc;
+        if output.status.success() {
+            return LinkerType::Gcc;
+        }
     }
     
-    // Intentar Clang
-    if Command::new("clang++")
+    // Intentar Clang (alternativa)
+    if let Ok(output) = Command::new("clang++")
         .arg("--version")
         .output()
-        .is_ok()
     {
-        return LinkerType::Clang;
+        if output.status.success() {
+            return LinkerType::Clang;
+        }
     }
     
     LinkerType::None
@@ -171,8 +174,22 @@ pub fn link_with_zig(obj_files: &[PathBuf], exe_file: &Path) -> Result<()> {
         let exe_file_abs = exe_file.canonicalize()
             .unwrap_or_else(|_| exe_file.to_path_buf());
         if !exe_file_abs.exists() {
-            anyhow::bail!("Archivo .exe no fue generado en: {} ni en: {}", exe_file.display(), exe_file_abs.display());
+            anyhow::bail!("Archivo .exe no fue generado en: {} ni en: {}. Verifica permisos de escritura.", exe_file.display(), exe_file_abs.display());
         }
+    }
+    
+    // Verificar que el archivo no esté vacío
+    let exe_size = std::fs::metadata(exe_file)
+        .or_else(|_| {
+            // Intentar con ruta absoluta si falla
+            let exe_file_abs = exe_file.canonicalize()
+                .unwrap_or_else(|_| exe_file.to_path_buf());
+            std::fs::metadata(&exe_file_abs)
+        })
+        .with_context(|| format!("Error al verificar tamaño del ejecutable"))?
+        .len();
+    if exe_size == 0 {
+        anyhow::bail!("El archivo .exe generado está vacío. Posible error en el proceso de linking.");
     }
     
     Ok(())
@@ -206,15 +223,24 @@ pub fn link_with_gcc(obj_files: &[PathBuf], exe_file: &Path) -> Result<()> {
     
     let output = cmd
         .output()
-        .with_context(|| format!("Error al linkear con GCC"))?;
+        .with_context(|| format!("Error al ejecutar GCC. Verifica que GCC (MinGW) esté instalado y en PATH."))?;
     
     if !output.status.success() {
         let error_msg = String::from_utf8_lossy(&output.stderr);
-        anyhow::bail!("Error al linkear con GCC: {}", error_msg);
+        let stdout_msg = String::from_utf8_lossy(&output.stdout);
+        anyhow::bail!("Error al linkear con GCC:\nSTDERR: {}\nSTDOUT: {}", error_msg, stdout_msg);
     }
     
     if !exe_file.exists() {
-        anyhow::bail!("Archivo .exe no fue generado: {}", exe_file.display());
+        anyhow::bail!("Archivo .exe no fue generado: {}. Verifica permisos de escritura.", exe_file.display());
+    }
+    
+    // Verificar que el archivo no esté vacío
+    let exe_size = std::fs::metadata(exe_file)
+        .with_context(|| format!("Error al verificar tamaño del ejecutable"))?
+        .len();
+    if exe_size == 0 {
+        anyhow::bail!("El archivo .exe generado está vacío. Posible error en el proceso de linking.");
     }
     
     Ok(())
@@ -248,15 +274,24 @@ pub fn link_with_clang(obj_files: &[PathBuf], exe_file: &Path) -> Result<()> {
     
     let output = cmd
         .output()
-        .with_context(|| format!("Error al linkear con Clang"))?;
+        .with_context(|| format!("Error al ejecutar Clang. Verifica que Clang esté instalado y en PATH."))?;
     
     if !output.status.success() {
         let error_msg = String::from_utf8_lossy(&output.stderr);
-        anyhow::bail!("Error al linkear con Clang: {}", error_msg);
+        let stdout_msg = String::from_utf8_lossy(&output.stdout);
+        anyhow::bail!("Error al linkear con Clang:\nSTDERR: {}\nSTDOUT: {}", error_msg, stdout_msg);
     }
     
     if !exe_file.exists() {
-        anyhow::bail!("Archivo .exe no fue generado: {}", exe_file.display());
+        anyhow::bail!("Archivo .exe no fue generado: {}. Verifica permisos de escritura.", exe_file.display());
+    }
+    
+    // Verificar que el archivo no esté vacío
+    let exe_size = std::fs::metadata(exe_file)
+        .with_context(|| format!("Error al verificar tamaño del ejecutable"))?
+        .len();
+    if exe_size == 0 {
+        anyhow::bail!("El archivo .exe generado está vacío. Posible error en el proceso de linking.");
     }
     
     Ok(())
@@ -280,7 +315,13 @@ pub fn link_objs_to_exe(obj_files: &[PathBuf], exe_file: &Path, preferred_linker
             link_with_clang(obj_files, exe_file)
         }
         LinkerType::None => {
-            anyhow::bail!("No se encontró ningún linker disponible (Zig, GCC o Clang). Por favor instala uno de ellos.");
+            anyhow::bail!(
+                "No se encontró ningún linker disponible (Zig, GCC o Clang).\n\
+                Por favor instala uno de ellos:\n\
+                - Zig: https://ziglang.org/download/\n\
+                - GCC (MinGW-w64): https://www.mingw-w64.org/downloads/\n\
+                - Clang: https://clang.llvm.org/get_started.html"
+            );
         }
     }
 }
