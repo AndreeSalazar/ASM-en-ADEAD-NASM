@@ -355,6 +355,19 @@ impl BorrowChecker {
                 
                 Ok(())
             }
+            Expr::FieldAssign { object, field, value } => {
+                // Verificar que el objeto puede ser accedido
+                self.check_expr(object)?;
+                // Verificar el valor a asignar
+                self.check_expr(value)?;
+                
+                // O5 - Verificar acceso al campo
+                self.check_field_access(object, field)?;
+                
+                // TODO: Verificar que el objeto es mutable para permitir asignación
+                
+                Ok(())
+            }
             Expr::MethodCall { object, method, args } => {
                 // Verificar objeto y argumentos
                 self.check_expr(object)?;

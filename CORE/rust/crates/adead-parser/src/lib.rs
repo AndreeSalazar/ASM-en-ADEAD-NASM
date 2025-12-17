@@ -78,6 +78,11 @@ pub enum Expr {
         object: Box<Expr>,
         field: String,
     },
+    FieldAssign {               // expr.field_name = value
+        object: Box<Expr>,
+        field: String,
+        value: Box<Expr>,
+    },
     MethodCall {                // expr.method_name(args)
         object: Box<Expr>,
         method: String,
@@ -772,8 +777,8 @@ fn stmt_parser() -> impl Parser<char, Stmt, Error = Simple<char>> + Clone {
         // Struct definition: struct Nombre { campo1 campo2 ... }
         // Los campos pueden estar separados por comas, espacios o newlines
         let struct_stmt = just("struct")
-            .padded()
-            .ignore_then(text::ident())
+                    .padded()
+                    .ignore_then(text::ident())
             .then(
                 just("{")
                     .padded()
@@ -833,7 +838,7 @@ fn stmt_parser() -> impl Parser<char, Stmt, Error = Simple<char>> + Clone {
                             .repeated()
                     )
                     .then_ignore(just("}").padded())
-            )
+                )
             .map(|(class_name, methods)| {
                 // Extraer constructor (new) y otros métodos
                 let mut init_method = None;
@@ -881,6 +886,18 @@ fn stmt_parser() -> impl Parser<char, Stmt, Error = Simple<char>> + Clone {
             })
             .labelled("class statement");
 
+        // Field assignment: ident.field = expr (as statement)
+        let field_assign_stmt = ident
+            .clone()
+            .then(just('.').ignore_then(ident.clone()))
+            .then_ignore(just("=").padded())
+            .then(expr.clone())
+            .map(|((obj_name, field_name), value)| Stmt::Expr(Expr::FieldAssign {
+                object: Box::new(Expr::Ident(obj_name)),
+                field: field_name,
+                value: Box::new(value),
+            }));
+        
         // Assignment: ident = expr (as statement)
         let assign_stmt = ident
             .clone()
@@ -919,6 +936,7 @@ fn stmt_parser() -> impl Parser<char, Stmt, Error = Simple<char>> + Clone {
             .or(let_stmt)
             .or(fn_stmt)
             .or(return_stmt)
+            .or(field_assign_stmt)  // Field assignment ANTES de assign_stmt
             .or(assign_stmt)
             .or(expr_stmt)
             .padded()
@@ -1107,14 +1125,14 @@ fn expr_parser() -> impl Parser<char, Expr, Error = Simple<char>> + Clone {
             .padded()  // Permite whitespace después del nombre del struct
             .then_ignore(just("{").padded())  // Consume la llave de apertura
             .then(
-                text::ident()
+                        text::ident()
                     .padded()
-                    .then_ignore(just(":").padded())
-                    .then(expr.clone())
-                    .map(|(field_name, value)| (field_name, value))
-                    .separated_by(just(",").padded())
+                            .then_ignore(just(":").padded())
+                            .then(expr.clone())
+                            .map(|(field_name, value)| (field_name, value))
+                            .separated_by(just(",").padded())
                     .allow_trailing()
-            )
+                    )
             .then_ignore(just("}").padded())  // Consume la llave de cierre
             .map(|(struct_name, fields)| {
                 Expr::StructLiteral {

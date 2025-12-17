@@ -19,8 +19,14 @@
 use std::collections::HashSet;
 
 /// Limpia código ASM generado, eliminando overhead y optimizando
+/// Convierte automáticamente GAS a NASM si es necesario
 pub fn clean_asm(asm: &str) -> String {
     let mut cleaned = asm.to_string();
+    
+    // Paso 0: Convertir GAS a NASM si el código está en formato GAS
+    if is_gas_syntax(&cleaned) {
+        cleaned = convert_gas_to_nasm(&cleaned);
+    }
     
     // Paso 1: Eliminar metadatos SEH de Windows (si existen)
     cleaned = remove_seh_metadata(&cleaned);
@@ -47,6 +53,234 @@ pub fn clean_asm(asm: &str) -> String {
     cleaned = normalize_format(&cleaned);
     
     cleaned
+}
+
+/// Detecta si el código ASM está en formato GAS (AT&T/GNU)
+fn is_gas_syntax(asm: &str) -> bool {
+    // Indicadores de sintaxis GAS
+    asm.contains(".globl") ||
+    asm.contains(".text") ||
+    asm.contains(".def ") ||
+    asm.contains(".endef") ||
+    asm.contains(".short ") ||
+    asm.contains(".long ") ||
+    asm.contains(".ascii") ||
+    asm.contains(".intel_syntax") ||
+    asm.contains(".p2align") ||
+    asm.contains("@feat.00") ||
+    asm.contains(".scl ")
+}
+
+/// Convierte código GAS (GNU Assembler) a formato NASM
+fn convert_gas_to_nasm(gas_asm: &str) -> String {
+    let mut nasm_output = String::new();
+    let mut in_text_section = false;
+    let mut in_data_section = false;
+    let mut skip_until_text = false;
+    let mut brace_depth = 0;
+    
+    // Header NASM para Windows x64
+    nasm_output.push_str("; ASM generado por ADead - Formato NASM (Windows x64)\n");
+    nasm_output.push_str("; Convertido desde GAS a NASM\n\n");
+    nasm_output.push_str("bits 64\n");
+    nasm_output.push_str("default rel\n\n");
+    
+    // Definir las funciones externas que necesitamos
+    nasm_output.push_str("extern printf\n");
+    nasm_output.push_str("extern ExitProcess\n\n");
+    
+    for line in gas_asm.lines() {
+        let trimmed = line.trim();
+        
+        // Saltar líneas vacías
+        if trimmed.is_empty() {
+            continue;
+        }
+        
+        // Saltar comentarios # de GAS
+        if trimmed.starts_with('#') {
+            continue;
+        }
+        
+        // Saltar directivas GAS que no tienen equivalente en NASM
+        if trimmed.starts_with(".def ") ||
+           trimmed.starts_with(".scl ") ||
+           trimmed.starts_with(".type ") ||
+           trimmed.starts_with(".endef") ||
+           trimmed.starts_with(".intel_syntax") ||
+           trimmed.starts_with(".p2align") ||
+           trimmed.starts_with(".file ") ||
+           trimmed.starts_with(".ident ") ||
+           trimmed.starts_with(".addrsig") ||
+           trimmed.starts_with(".cv_") ||
+           trimmed.starts_with(".Lcfi") ||
+           trimmed.starts_with(".cfi_") ||
+           trimmed.starts_with("@feat.00") ||
+           trimmed.contains("@feat.00") ||
+           trimmed.starts_with(".section") && trimmed.contains("debug") ||
+           trimmed.starts_with(".short ") ||
+           trimmed.starts_with(".long ") && !in_data_section ||
+           trimmed.starts_with(".byte ") && !in_data_section ||
+           trimmed.starts_with(".asciz") ||
+           trimmed.starts_with(".Ltmp") ||
+           trimmed.starts_with(".LBB") ||
+           trimmed.starts_with(".Lfunc") {
+            continue;
+        }
+        
+        // Saltar secciones de debug completas
+        if trimmed.starts_with(".section") && (trimmed.contains("debug") || trimmed.contains("pdata") || trimmed.contains("xdata")) {
+            skip_until_text = true;
+            continue;
+        }
+        
+        // Si estamos saltando hasta .text, continuar
+        if skip_until_text {
+            if trimmed == ".text" || trimmed.starts_with(".text") {
+                skip_until_text = false;
+                in_text_section = true;
+                nasm_output.push_str("\nsection .text\n");
+            }
+            continue;
+        }
+        
+        // Convertir .text
+        if trimmed == ".text" || trimmed.starts_with(".text") {
+            in_text_section = true;
+            in_data_section = false;
+            nasm_output.push_str("\nsection .text\n");
+            continue;
+        }
+        
+        // Convertir .data
+        if trimmed == ".data" || trimmed.starts_with(".data") {
+            in_data_section = true;
+            in_text_section = false;
+            nasm_output.push_str("\nsection .data\n");
+            continue;
+        }
+        
+        // Convertir .globl a global
+        if trimmed.starts_with(".globl ") {
+            let symbol = trimmed.strip_prefix(".globl ").unwrap().trim();
+            // Limpiar el nombre del símbolo
+            let clean_symbol = clean_symbol_name(symbol);
+            if !clean_symbol.is_empty() && !clean_symbol.starts_with("@") && !clean_symbol.starts_with(".") {
+                nasm_output.push_str(&format!("global {}\n", clean_symbol));
+            }
+            continue;
+        }
+        
+        // Convertir labels
+        if trimmed.ends_with(':') {
+            let label = trimmed.trim_end_matches(':');
+            // Limpiar el nombre del label
+            let clean_label = clean_symbol_name(label);
+            // Saltar labels internos de GAS
+            if clean_label.starts_with(".L") || clean_label.starts_with("@") || clean_label.is_empty() {
+                continue;
+            }
+            nasm_output.push_str(&format!("{}:\n", clean_label));
+            continue;
+        }
+        
+        // Convertir instrucciones
+        let converted = convert_gas_instruction_to_nasm(trimmed);
+        if !converted.is_empty() {
+            nasm_output.push_str(&format!("    {}\n", converted));
+        }
+    }
+    
+    nasm_output
+}
+
+/// Limpia el nombre de un símbolo GAS para NASM
+fn clean_symbol_name(symbol: &str) -> String {
+    let mut clean = symbol.trim().to_string();
+    
+    // Eliminar caracteres especiales de GAS
+    clean = clean.replace("\"", "");
+    
+    // Si es un símbolo complejo de C++ (mangled), simplificarlo
+    if clean.starts_with("??") || clean.contains("@") || clean.contains("?$") {
+        // Es un símbolo mangled de C++, probablemente no lo necesitamos
+        return String::new();
+    }
+    
+    clean
+}
+
+/// Convierte una instrucción GAS a formato NASM
+fn convert_gas_instruction_to_nasm(gas_instr: &str) -> String {
+    let trimmed = gas_instr.trim();
+    
+    // Saltar comentarios
+    if trimmed.starts_with(';') || trimmed.starts_with('#') {
+        return String::new();
+    }
+    
+    // Saltar directivas GAS
+    if trimmed.starts_with('.') {
+        return String::new();
+    }
+    
+    // Extraer la instrucción y operandos
+    let parts: Vec<&str> = trimmed.splitn(2, char::is_whitespace).collect();
+    if parts.is_empty() {
+        return String::new();
+    }
+    
+    let instr = parts[0].to_lowercase();
+    let operands = if parts.len() > 1 { parts[1].trim() } else { "" };
+    
+    // Instrucciones que no necesitan conversión
+    let simple_instructions = [
+        "ret", "nop", "leave", "syscall", "int3", "hlt", "cli", "sti",
+        "pushfq", "popfq", "cdq", "cqo", "cbw", "cwde", "cdqe"
+    ];
+    
+    if simple_instructions.contains(&instr.as_str()) {
+        return instr;
+    }
+    
+    // Instrucciones con operandos
+    if !operands.is_empty() {
+        let converted_operands = convert_gas_operands_to_nasm(operands);
+        return format!("{} {}", instr, converted_operands);
+    }
+    
+    instr
+}
+
+/// Convierte operandos de GAS a NASM
+fn convert_gas_operands_to_nasm(operands: &str) -> String {
+    let mut result = operands.to_string();
+    
+    // Convertir referencias de memoria: [rip + ...] ya está en formato correcto
+    // Pero necesitamos manejar las strings de C++
+    
+    // Eliminar prefijos de tamaño de GAS (qword ptr, dword ptr ya están en Intel)
+    
+    // Convertir llamadas externas de C++
+    if result.contains("??") || result.contains("@") {
+        // Simplificar llamadas a funciones de runtime C++
+        if result.contains("printf") || result.contains("_Insert_string") {
+            return "printf".to_string();
+        }
+        if result.contains("cout") {
+            return "printf".to_string();
+        }
+        // Otras funciones de C++ runtime - saltar
+        return String::new();
+    }
+    
+    // Convertir constantes
+    result = result.replace("$", "");
+    
+    // Limpiar espacios extra
+    result = result.split_whitespace().collect::<Vec<_>>().join(" ");
+    
+    result
 }
 
 /// Elimina metadatos SEH (Structured Exception Handling) de Windows

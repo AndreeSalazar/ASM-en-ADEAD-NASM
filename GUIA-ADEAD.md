@@ -18,7 +18,7 @@ Variables let/mut                                     Bool nativo
 Arrays (10 métodos)                                   Diccionarios
 Strings (6 métodos)                                   Tuples
 Funciones ABI-safe                                    Sets
-Stdlib (11 funciones)                                 
+Stdlib (11 funciones)                                        
 Control flow completo                                 OOP/Clases
 For loops (range)                                     Herencia
 Break/Continue                                        Interfaces/Traits

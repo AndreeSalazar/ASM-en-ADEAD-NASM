@@ -34,6 +34,8 @@ pub struct CodeGenerator {
     source_lines: Vec<(usize, String)>, // (line_number, source_line) para debug symbols
     current_line: usize, // Línea actual del código fuente
     loop_stack: Vec<LoopContext>, // Stack de contextos de loop para break/continue
+    struct_definitions: HashMap<String, Vec<String>>, // Track struct field names for offset calculation
+    variable_types: HashMap<String, String>, // Track variable types (for struct field access)
 }
 
 impl CodeGenerator {
@@ -50,6 +52,8 @@ impl CodeGenerator {
             source_lines: Vec::new(),
             current_line: 0,
             loop_stack: Vec::new(),
+            struct_definitions: HashMap::new(),
+            variable_types: HashMap::new(),
         }
     }
     
@@ -399,10 +403,11 @@ impl CodeGenerator {
                             self.text_section.push("    mov qword [rsp+32], 0  ; lpOverlapped = NULL (quinto parámetro en shadow space)".to_string());
                             self.text_section.push("    call WriteFile".to_string());
                             
-                            // Restaurar stack
+                            // Restaurar registros del push anterior (para balance de stack en tiempo de ejecución)
+                            // NOTA: NO decrementamos stack_offset aquí porque los buffers deben permanecer
+                            // válidos para evitar sobrescritura entre diferentes prints
                             self.text_section.push("    pop rdx  ; restaurar dirección buffer".to_string());
                             self.text_section.push("    pop rbx  ; restaurar resultado".to_string());
-                            self.stack_offset -= 24; // Liberar buffer
                             
                             // Generar función helper para convertir int64 a string (runtime)
                             self.text_section.push(format!("    jmp {}_end", conv_label));
@@ -465,38 +470,35 @@ impl CodeGenerator {
                             let rev_loop = self.new_label("rev_loop_rt");
                             let rev_done = self.new_label("rev_done_rt");
                             self.text_section.push(format!("{}:", rev_start));
-                            // Usar r8 que tiene la dirección original del buffer (guardada al inicio, nunca modificado)
+                            // Guardar rbx en r9 ANTES de las comparaciones para evitar stack imbalance
+                            self.text_section.push("    mov r9, rbx  ; guardar fin del string en r9 (preservado)".to_string());
                             self.text_section.push("    mov rcx, r8  ; inicio para el loop de reverso (r8 tiene dirección original)".to_string());
                             self.text_section.push("    mov rdx, rbx  ; fin para el loop de reverso".to_string());
                             self.text_section.push("    dec rdx  ; excluir newline del reverso".to_string());
                             self.text_section.push("    cmp rcx, rdx".to_string());
                             self.text_section.push(format!("    jge {}", rev_done));
-                            // CRÍTICO: Guardar rbx (fin del string) antes del loop de reversión
-                            // porque el loop modificará rbx
-                            self.text_section.push("    push rbx  ; guardar fin del string antes de reversión".to_string());
                             
                             self.text_section.push(format!("{}:", rev_loop));
-                            self.text_section.push("    mov al, [rcx]  ; byte desde inicio".to_string());
-                            self.text_section.push("    mov bl, [rdx]  ; byte desde fin (rbx temporal, se restaurará después)".to_string());
-                            self.text_section.push("    mov [rcx], bl".to_string());
-                            self.text_section.push("    mov [rdx], al".to_string());
+                            // Usar r10 y r11 para el swap en lugar de al/bl para evitar corromper rbx
+                            self.text_section.push("    movzx r10, byte [rcx]  ; byte desde inicio".to_string());
+                            self.text_section.push("    movzx r11, byte [rdx]  ; byte desde fin".to_string());
+                            self.text_section.push("    mov [rcx], r11b".to_string());
+                            self.text_section.push("    mov [rdx], r10b".to_string());
                             self.text_section.push("    inc rcx".to_string());
                             self.text_section.push("    dec rdx".to_string());
                             self.text_section.push("    cmp rcx, rdx".to_string());
                             self.text_section.push(format!("    jl {}", rev_loop));
                             self.text_section.push(format!("{}:", rev_done));
                             
-                            // Restaurar rbx (fin del string) después del loop
-                            self.text_section.push("    pop rbx  ; restaurar fin del string después de reversión".to_string());
+                            // Restaurar rbx desde r9 (siempre se ejecuta, sin importar si hubo reversión)
+                            self.text_section.push("    mov rbx, r9  ; restaurar fin del string desde r9".to_string());
                             
                             // Calcular longitud: rbx (fin) - dirección inicial del buffer
                             self.text_section.push("    mov rax, rbx  ; fin del string (incluye newline)".to_string());
                             self.text_section.push("    sub rax, r8  ; longitud = fin - inicio (r8 tiene la dirección original)".to_string());
                             
-                            // Restaurar registros (en orden inverso del push)
-                            // Stack tiene: [rbp] [rbx] [rcx] [rdx_buffer] <- top
-                            // Hacer pop rdx para balancear el stack primero
-                            self.text_section.push("    pop rdx  ; balancear stack (descartar valor del stack)".to_string());
+                            // Restaurar registros
+                            self.text_section.push("    pop rdx  ; balancear stack".to_string());
                             self.text_section.push("    pop rcx  ; restaurar rcx original".to_string());
                             self.text_section.push("    pop rbx".to_string());
                             self.text_section.push("    pop rbp".to_string());
@@ -586,6 +588,10 @@ impl CodeGenerator {
                             self.text_section.push("    mov qword [rsp+32], 0  ; lpOverlapped = NULL (quinto parámetro en shadow space)".to_string());
                             self.text_section.push("    call WriteFile".to_string());
                             
+                            // CRÍTICO: Restaurar registros del push anterior (para balance de stack)
+                            self.text_section.push("    pop rdx  ; restaurar dirección buffer".to_string());
+                            self.text_section.push("    pop rbx  ; restaurar resultado".to_string());
+                            
                             // Generar función helper para convertir int64 a string (runtime)
                             self.text_section.push(format!("    jmp {}_end", conv_label));
                             self.text_section.push(format!("{}:", conv_label));
@@ -647,38 +653,35 @@ impl CodeGenerator {
                             let rev_loop = self.new_label("rev_loop_rt");
                             let rev_done = self.new_label("rev_done_rt");
                             self.text_section.push(format!("{}:", rev_start));
-                            // Usar r8 que tiene la dirección original del buffer (guardada al inicio, nunca modificado)
+                            // Guardar rbx en r9 ANTES de las comparaciones para evitar stack imbalance
+                            self.text_section.push("    mov r9, rbx  ; guardar fin del string en r9 (preservado)".to_string());
                             self.text_section.push("    mov rcx, r8  ; inicio para el loop de reverso (r8 tiene dirección original)".to_string());
                             self.text_section.push("    mov rdx, rbx  ; fin para el loop de reverso".to_string());
                             self.text_section.push("    dec rdx  ; excluir newline del reverso".to_string());
                             self.text_section.push("    cmp rcx, rdx".to_string());
                             self.text_section.push(format!("    jge {}", rev_done));
-                            // CRÍTICO: Guardar rbx (fin del string) antes del loop de reversión
-                            // porque el loop modificará rbx
-                            self.text_section.push("    push rbx  ; guardar fin del string antes de reversión".to_string());
                             
                             self.text_section.push(format!("{}:", rev_loop));
-                            self.text_section.push("    mov al, [rcx]  ; byte desde inicio".to_string());
-                            self.text_section.push("    mov bl, [rdx]  ; byte desde fin (rbx temporal, se restaurará después)".to_string());
-                            self.text_section.push("    mov [rcx], bl".to_string());
-                            self.text_section.push("    mov [rdx], al".to_string());
+                            // Usar r10 y r11 para el swap en lugar de al/bl para evitar corromper rbx
+                            self.text_section.push("    movzx r10, byte [rcx]  ; byte desde inicio".to_string());
+                            self.text_section.push("    movzx r11, byte [rdx]  ; byte desde fin".to_string());
+                            self.text_section.push("    mov [rcx], r11b".to_string());
+                            self.text_section.push("    mov [rdx], r10b".to_string());
                             self.text_section.push("    inc rcx".to_string());
                             self.text_section.push("    dec rdx".to_string());
                             self.text_section.push("    cmp rcx, rdx".to_string());
                             self.text_section.push(format!("    jl {}", rev_loop));
                             self.text_section.push(format!("{}:", rev_done));
                             
-                            // Restaurar rbx (fin del string) después del loop
-                            self.text_section.push("    pop rbx  ; restaurar fin del string después de reversión".to_string());
+                            // Restaurar rbx desde r9 (siempre se ejecuta, sin importar si hubo reversión)
+                            self.text_section.push("    mov rbx, r9  ; restaurar fin del string desde r9".to_string());
                             
                             // Calcular longitud: rbx (fin) - dirección inicial del buffer
                             self.text_section.push("    mov rax, rbx  ; fin del string (incluye newline)".to_string());
                             self.text_section.push("    sub rax, r8  ; longitud = fin - inicio (r8 tiene la dirección original)".to_string());
                             
-                            // Restaurar registros (en orden inverso del push)
-                            // Stack tiene: [rbp] [rbx] [rcx] [rdx_buffer] <- top
-                            // Hacer pop rdx para balancear el stack primero
-                            self.text_section.push("    pop rdx  ; balancear stack (descartar valor del stack)".to_string());
+                            // Restaurar registros
+                            self.text_section.push("    pop rdx  ; balancear stack".to_string());
                             self.text_section.push("    pop rcx  ; restaurar rcx original".to_string());
                             self.text_section.push("    pop rbx".to_string());
                             self.text_section.push("    pop rbp".to_string());
@@ -697,10 +700,13 @@ impl CodeGenerator {
             Stmt::Let { mutable, name, value } => {
                 self.add_debug_comment(&format!("let {} = ...", if *mutable { format!("mut {}", name) } else { name.clone() }));
                 // Si el valor es un StructLiteral, registrar para destrucción RAII si tiene destroy
+                // y también registrar el tipo de la variable
                 let struct_name = if let Expr::StructLiteral { name: struct_name, .. } = value {
                     if self.structs_with_destroy.contains_key(struct_name) {
                         self.variables_to_destroy.push((name.clone(), struct_name.clone()));
                     }
+                    // Registrar el tipo de la variable para acceso a campos
+                    self.variable_types.insert(name.clone(), struct_name.clone());
                     Some(struct_name.clone())
                 } else {
                     None
@@ -985,7 +991,11 @@ impl CodeGenerator {
                 // Nota: NO llamamos leave/ret aquí porque el epilogue de la función lo hará
                 // El código de la función saltará al epilogue después de return
             }
-            Stmt::Struct { name, fields: _, init, destroy: _ } => {
+            Stmt::Struct { name, fields, init, destroy: _ } => {
+                // Registrar campos del struct para cálculo de offsets
+                let field_names: Vec<String> = fields.iter().map(|f| f.name.clone()).collect();
+                self.struct_definitions.insert(name.clone(), field_names);
+                
                 // Registrar struct y generar código para constructor si existe
                 if let Some(init_method) = init {
                     // Generar función de constructor: StructName_init
@@ -1506,32 +1516,80 @@ impl CodeGenerator {
             }
             // Structs (Fase 1.2 - O1, O3, O4)
             Expr::StructLiteral { name, fields } => {
+                // Registrar los campos del struct para poder calcular offsets después
+                let field_names: Vec<String> = fields.iter().map(|(n, _)| n.clone()).collect();
+                if !self.struct_definitions.contains_key(name) {
+                    self.struct_definitions.insert(name.clone(), field_names);
+                }
+                
                 // Generar struct literal en stack
                 let struct_size = fields.len() * 8;
                 let offset = self.stack_offset;
                 self.stack_offset += struct_size as i64;
-                self.text_section.push(format!("    sub rsp, {}  ; espacio para struct ({} campos)", struct_size, fields.len()));
+                self.text_section.push(format!("    sub rsp, {}  ; espacio para struct {} ({} campos)", struct_size, name, fields.len()));
                 
-                // Preparar argumentos para constructor si existe
-                // Por ahora, asumimos que el constructor toma los campos como parámetros
-                // TODO: Mejorar para manejar constructores con diferentes firmas
-                
-                // Generar valores de campos primero
+                // Generar valores de campos
                 for (i, (field_name, value)) in fields.iter().enumerate() {
                     self.generate_expr_windows(value)?;
                     let field_offset = offset + (i as i64 * 8) + 8;
-                    self.text_section.push(format!("    mov [rbp - {}], rax  ; campo '{}'", field_offset, field_name));
+                    self.text_section.push(format!("    mov [rbp - {}], rax  ; {}.{}", field_offset, name, field_name));
                 }
                 
-                // Si hay constructor, llamarlo (por ahora, solo guardamos la dirección)
-                // TODO: Implementar llamada real al constructor cuando se use StructLiteral en Let
-                
-                    self.text_section.push(format!("    lea rax, [rbp - {}]  ; dirección del struct", offset + 8));
+                    self.text_section.push(format!("    lea rax, [rbp - {}]  ; dirección del struct {}", offset + 8, name));
             }
             Expr::FieldAccess { object, field } => {
+                // Determinar el tipo del objeto para calcular el offset correcto
+                let struct_type = self.get_struct_type_from_expr(object);
+                
                 self.generate_expr_windows(object)?;
-                self.text_section.push(format!("    ; accediendo campo '{}' (offset simplificado: 0)", field));
-                self.text_section.push("    mov rax, [rax]  ; cargar primer campo (simplificado)".to_string());
+                
+                // Calcular offset del campo (negativo porque stack crece hacia abajo)
+                let field_offset = if let Some(ref type_name) = struct_type {
+                    if let Some(fields) = self.struct_definitions.get(type_name) {
+                        fields.iter().position(|f| f == field).unwrap_or(0) * 8
+                    } else {
+                        0
+                    }
+                } else {
+                    0
+                };
+                
+                self.text_section.push(format!("    ; accediendo campo '{}' (offset: -{})", field, field_offset));
+                if field_offset == 0 {
+                    self.text_section.push("    mov rax, [rax]  ; cargar campo (offset 0)".to_string());
+                } else {
+                    self.text_section.push(format!("    mov rax, [rax - {}]  ; cargar campo", field_offset));
+                }
+            }
+            Expr::FieldAssign { object, field, value } => {
+                // Asignación a campo de struct: obj.field = value
+                let struct_type = self.get_struct_type_from_expr(object);
+                
+                // Primero generar el valor a asignar
+                self.generate_expr_windows(value)?;
+                self.text_section.push("    push rax  ; guardar valor a asignar".to_string());
+                
+                // Luego obtener la dirección del objeto
+                self.generate_expr_windows(object)?;
+                
+                // Calcular offset del campo
+                let field_offset = if let Some(ref type_name) = struct_type {
+                    if let Some(fields) = self.struct_definitions.get(type_name) {
+                        fields.iter().position(|f| f == field).unwrap_or(0) * 8
+                    } else {
+                        0
+                    }
+                } else {
+                    0
+                };
+                
+                self.text_section.push("    pop rbx  ; restaurar valor a asignar".to_string());
+                self.text_section.push(format!("    ; asignando a campo '{}' (offset: -{})", field, field_offset));
+                if field_offset == 0 {
+                    self.text_section.push("    mov [rax], rbx  ; asignar campo (offset 0)".to_string());
+                } else {
+                    self.text_section.push(format!("    mov [rax - {}], rbx  ; asignar campo", field_offset));
+                }
             }
             Expr::Index { array, index } => {
                 // Indexación: arr[0] o s[0] (para strings, solo lectura de carácter)
@@ -1990,16 +2048,19 @@ impl CodeGenerator {
             }
             Stmt::Let { mutable, name, value } => {
                 // Si el valor es un StructLiteral, registrar para destrucción RAII si tiene destroy
+                // y también registrar el tipo de la variable
                 let struct_name = if let Expr::StructLiteral { name: struct_name, .. } = value {
                     if self.structs_with_destroy.contains_key(struct_name) {
                         self.variables_to_destroy.push((name.clone(), struct_name.clone()));
                     }
+                    // Registrar el tipo de la variable para acceso a campos
+                    self.variable_types.insert(name.clone(), struct_name.clone());
                     Some(struct_name.clone())
                 } else {
                     None
                 };
                 
-                self.generate_expr_windows(value)?;
+                self.generate_expr(value)?;
                 
                 // Si es un struct con constructor, llamarlo aquí
                 // Por ahora, solo guardamos la dirección del struct
@@ -2181,7 +2242,11 @@ impl CodeGenerator {
                 self.text_section.push("    pop rbp".to_string());
                 self.text_section.push("    ret".to_string());
             }
-            Stmt::Struct { name, fields: _, init, destroy: _ } => {
+            Stmt::Struct { name, fields, init, destroy: _ } => {
+                // Registrar campos del struct para cálculo de offsets
+                let field_names: Vec<String> = fields.iter().map(|f| f.name.clone()).collect();
+                self.struct_definitions.insert(name.clone(), field_names);
+                
                 // Registrar struct y generar código para constructor si existe
                 if let Some(init_method) = init {
                     // Generar función de constructor: StructName_init
@@ -2191,19 +2256,21 @@ impl CodeGenerator {
                     self.text_section.push("    push rbp".to_string());
                     self.text_section.push("    mov rbp, rsp".to_string());
                     
-                    // Guardar parámetros en stack (Windows x64 calling convention)
+                    // Guardar parámetros en stack (System V AMD64 calling convention)
                     for (i, param) in init_method.params.iter().enumerate() {
                         let offset = self.stack_offset;
                         self.stack_offset += 8;
                         self.variables.insert(param.name.clone(), offset);
                         
                         let reg = match i {
-                            0 => "rcx",
-                            1 => "rdx",
-                            2 => "r8",
-                            3 => "r9",
+                            0 => "rdi",
+                            1 => "rsi",
+                            2 => "rdx",
+                            3 => "rcx",
+                            4 => "r8",
+                            5 => "r9",
                             _ => {
-                                let stack_offset = 16 + (i - 4) * 8;
+                                let stack_offset = 16 + (i - 6) * 8;
                                     self.text_section.push(format!("    mov rax, [rbp + {}]", stack_offset));
                                     self.text_section.push(format!("    mov [rbp - {}], rax", offset + 8));
                                 continue;
@@ -2214,7 +2281,7 @@ impl CodeGenerator {
                     
                     // Generar cuerpo del constructor
                     for s in &init_method.body {
-                        self.generate_stmt_windows(s)?;
+                        self.generate_stmt(s)?;
                     }
                     
                     self.text_section.push("    leave".to_string());
@@ -2295,20 +2362,81 @@ impl CodeGenerator {
                 self.text_section.push("    mov rax, 0".to_string());
             }
             // Structs (Fase 1.2 - O1, O3, O4)
-            Expr::StructLiteral { name: _, fields } => {
-                // Por ahora, implementación simplificada
-                // TODO: Implementar layout de memoria real basado en tipos de campos
+            Expr::StructLiteral { name, fields } => {
+                // Registrar los campos del struct para poder calcular offsets después
+                let field_names: Vec<String> = fields.iter().map(|(n, _)| n.clone()).collect();
+                if !self.struct_definitions.contains_key(name) {
+                    self.struct_definitions.insert(name.clone(), field_names);
+                }
+                
+                // Generar struct literal en stack
                 let struct_size = fields.len() * 8;
-                self.text_section.push(format!("    sub rsp, {}  ; espacio para struct", struct_size));
-                // Generar valores (simplificado)
-                if let Some((_, first_value)) = fields.first() {
-                    self.generate_expr(first_value)?;
+                let offset = self.stack_offset;
+                self.stack_offset += struct_size as i64;
+                self.text_section.push(format!("    sub rsp, {}  ; espacio para struct {} ({} campos)", struct_size, name, fields.len()));
+                
+                // Generar valores de campos
+                for (i, (field_name, value)) in fields.iter().enumerate() {
+                    self.generate_expr(value)?;
+                    let field_offset = offset + (i as i64 * 8) + 8;
+                    self.text_section.push(format!("    mov [rbp - {}], rax  ; {}.{}", field_offset, name, field_name));
+                }
+                
+                self.text_section.push(format!("    lea rax, [rbp - {}]  ; dirección del struct {}", offset + 8, name));
+            }
+            Expr::FieldAccess { object, field } => {
+                // Determinar el tipo del objeto para calcular el offset correcto
+                let struct_type = self.get_struct_type_from_expr(object);
+                
+                self.generate_expr(object)?;
+                
+                // Calcular offset del campo (negativo porque stack crece hacia abajo)
+                let field_offset = if let Some(ref type_name) = struct_type {
+                    if let Some(fields) = self.struct_definitions.get(type_name) {
+                        fields.iter().position(|f| f == field).unwrap_or(0) * 8
+                    } else {
+                        0
+                    }
+                } else {
+                    0
+                };
+                
+                self.text_section.push(format!("    ; accediendo campo '{}' (offset: -{})", field, field_offset));
+                if field_offset == 0 {
+                    self.text_section.push("    mov rax, [rax]  ; cargar campo (offset 0)".to_string());
+                } else {
+                    self.text_section.push(format!("    mov rax, [rax - {}]  ; cargar campo", field_offset));
                 }
             }
-            Expr::FieldAccess { object, field: _ } => {
-                // Acceso a campo (simplificado)
+            Expr::FieldAssign { object, field, value } => {
+                // Asignación a campo de struct: obj.field = value (Linux)
+                let struct_type = self.get_struct_type_from_expr(object);
+                
+                // Primero generar el valor a asignar
+                self.generate_expr(value)?;
+                self.text_section.push("    push rax  ; guardar valor a asignar".to_string());
+                
+                // Luego obtener la dirección del objeto
                 self.generate_expr(object)?;
-                self.text_section.push("    mov rax, [rax]  ; cargar campo (simplificado)".to_string());
+                
+                // Calcular offset del campo
+                let field_offset = if let Some(ref type_name) = struct_type {
+                    if let Some(fields) = self.struct_definitions.get(type_name) {
+                        fields.iter().position(|f| f == field).unwrap_or(0) * 8
+                    } else {
+                        0
+                    }
+                } else {
+                    0
+                };
+                
+                self.text_section.push("    pop rbx  ; restaurar valor a asignar".to_string());
+                self.text_section.push(format!("    ; asignando a campo '{}' (offset: -{})", field, field_offset));
+                if field_offset == 0 {
+                    self.text_section.push("    mov [rax], rbx  ; asignar campo (offset 0)".to_string());
+                } else {
+                    self.text_section.push(format!("    mov [rax - {}], rbx  ; asignar campo", field_offset));
+                }
             }
             Expr::Index { array, index } => {
                 // Indexación: arr[0] (Linux)
@@ -2642,6 +2770,27 @@ impl CodeGenerator {
                 }
             }
             _ => false,
+        }
+    }
+    
+    /// Determinar el tipo de struct de una expresión (para calcular offsets de campos)
+    fn get_struct_type_from_expr(&self, expr: &Expr) -> Option<String> {
+        match expr {
+            Expr::Ident(name) => {
+                // Buscar en variable_types primero
+                if let Some(type_name) = self.variable_types.get(name) {
+                    return Some(type_name.clone());
+                }
+                // Fallback: buscar en struct_definitions para ver si existe un struct con ese nombre
+                for (struct_name, _) in &self.struct_definitions {
+                    if name.to_lowercase().contains(&struct_name.to_lowercase()) {
+                        return Some(struct_name.clone());
+                    }
+                }
+                None
+            }
+            Expr::StructLiteral { name, .. } => Some(name.clone()),
+            _ => None,
         }
     }
     

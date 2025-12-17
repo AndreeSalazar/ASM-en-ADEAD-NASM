@@ -54,32 +54,12 @@ impl CppGenerator {
         // Resetear contador de variables temporales
         self.variable_counter = 0;
         
-        // Cabecera estándar de C++
-        // El compilador detectará automáticamente si usar C++17 o C++20
-        self.output.push_str("#include <iostream>\n");
-        self.output.push_str("#include <vector>\n");
-        self.output.push_str("#include <string>\n");
-        self.output.push_str("#include <algorithm>\n");  // Para std::find, std::count, std::sort, std::reverse, std::remove
-        self.output.push_str("#include <cstdint>\n");
-        
-        // C++20 features (se incluyen condicionalmente si el compilador soporta C++20)
-        // El compilador ignorará estas líneas si no soporta C++20
-        self.output.push_str("#if __cplusplus >= 202002L\n");
-        self.output.push_str("#include <ranges>\n");  // C++20 ranges para operaciones más expresivas
-        self.output.push_str("#include <concepts>\n");  // C++20 concepts para mejor type checking
-        self.output.push_str("#include <format>\n");  // C++20 std::format para mejor formateo
-        self.output.push_str("#endif\n");
-        
-        self.output.push_str("\n");
-        
-        // Usar namespace std para simplificar código generado
-        self.output.push_str("using namespace std;\n");
-        
-        // C++20: Usar std::ranges si está disponible
-        self.output.push_str("#if __cplusplus >= 202002L\n");
-        self.output.push_str("using namespace std::ranges;\n");
-        self.output.push_str("#endif\n");
-        
+        // Cabecera estándar de C (usando printf para ASM más limpio)
+        // Esto genera código ASM más simple y compatible con NASM
+        self.output.push_str("#include <stdio.h>\n");
+        self.output.push_str("#include <stdlib.h>\n");
+        self.output.push_str("#include <stdint.h>\n");
+        self.output.push_str("#include <string.h>\n");
         self.output.push_str("\n");
 
         // Separar structs/classes, funciones y código principal
@@ -136,85 +116,36 @@ impl CppGenerator {
                 self.indent();
                 match expr {
                     Expr::String(s) => {
-                        // C++20: usar std::format si está disponible, sino cout
-                        self.output.push_str("#if __cplusplus >= 202002L\n");
-                        self.indent();
-                        self.output.push_str(&format!("cout << std::format(\"{}\\n\", \"{}\");\n", 
-                            "{:s}", s.replace('"', "\\\"")));
-                        self.indent();
-                        self.output.push_str("#else\n");
-                        self.indent();
-                        self.output.push_str(&format!("cout << \"{}\" << endl;\n", s.replace('"', "\\\"")));
-                        self.indent();
-                        self.output.push_str("#endif\n");
+                        // Usar printf para ASM limpio
+                        self.output.push_str(&format!("printf(\"{}\\n\");\n", s.replace('"', "\\\"")));
                     }
                     Expr::Number(n) => {
-                        // C++20: usar std::format si está disponible, sino cout
-                        self.output.push_str("#if __cplusplus >= 202002L\n");
-                        self.indent();
-                        self.output.push_str(&format!("cout << std::format(\"{}\\n\", {}LL);\n", "{:d}", n));
-                        self.indent();
-                        self.output.push_str("#else\n");
-                        self.indent();
-                        self.output.push_str(&format!("cout << {}LL << endl;\n", n));
-                        self.indent();
-                        self.output.push_str("#endif\n");
+                        self.output.push_str(&format!("printf(\"%lld\\n\", (long long){});\n", n));
                     }
                     Expr::Float(f) => {
-                        // C++20: usar std::format si está disponible, sino cout
-                        self.output.push_str("#if __cplusplus >= 202002L\n");
-                        self.indent();
-                        self.output.push_str(&format!("cout << std::format(\"{}\\n\", {});\n", "{:f}", f));
-                        self.indent();
-                        self.output.push_str("#else\n");
-                        self.indent();
-                        self.output.push_str(&format!("cout << {} << endl;\n", f));
-                        self.indent();
-                        self.output.push_str("#endif\n");
+                        self.output.push_str(&format!("printf(\"%f\\n\", {});\n", f));
                     }
                     Expr::Bool(b) => {
-                        // C++20: usar std::format si está disponible, sino cout
-                        self.output.push_str("#if __cplusplus >= 202002L\n");
-                        self.indent();
-                        self.output.push_str(&format!("cout << std::format(\"{}\\n\", {});\n", 
-                            "{:s}", if *b { "true" } else { "false" }));
-                        self.indent();
-                        self.output.push_str("#else\n");
-                        self.indent();
-                        self.output.push_str(&format!("cout << ({}) << endl;\n", if *b { "true" } else { "false" }));
-                        self.indent();
-                        self.output.push_str("#endif\n");
+                        self.output.push_str(&format!("printf(\"%s\\n\", \"{}\");\n", if *b { "true" } else { "false" }));
                     }
                     Expr::Ident(name) => {
                         // Detectar si es string o número
                         let is_string = self.is_string_expr(expr);
-                        let format_str = if is_string { "{:s}" } else { "{:d}" };
-                        // C++20: usar std::format si está disponible, sino cout
-                        self.output.push_str("#if __cplusplus >= 202002L\n");
-                        self.indent();
-                        self.output.push_str(&format!("cout << std::format(\"{}\\n\", {});\n", format_str, name));
-                        self.indent();
-                        self.output.push_str("#else\n");
-                        self.indent();
-                        self.output.push_str(&format!("cout << {} << endl;\n", name));
-                        self.indent();
-                        self.output.push_str("#endif\n");
+                        if is_string {
+                            self.output.push_str(&format!("printf(\"%s\\n\", {});\n", name));
+                        } else {
+                            self.output.push_str(&format!("printf(\"%lld\\n\", (long long){});\n", name));
+                        }
                     }
                     _ => {
                         let expr_code = self.generate_expr(expr);
                         // Detectar si es string o número
                         let is_string = self.is_string_expr(expr);
-                        let format_str = if is_string { "{:s}" } else { "{:d}" };
-                        // C++20: usar std::format si está disponible, sino cout
-                        self.output.push_str("#if __cplusplus >= 202002L\n");
-                        self.indent();
-                        self.output.push_str(&format!("cout << std::format(\"{}\\n\", {});\n", format_str, expr_code));
-                        self.indent();
-                        self.output.push_str("#else\n");
-                        self.indent();
-                        self.output.push_str(&format!("cout << {} << endl;\n", expr_code));
-                        self.indent();
-                        self.output.push_str("#endif\n");
+                        if is_string {
+                            self.output.push_str(&format!("printf(\"%s\\n\", {});\n", expr_code));
+                        } else {
+                            self.output.push_str(&format!("printf(\"%lld\\n\", (long long){});\n", expr_code));
+                        }
                     }
                 }
             }
@@ -363,35 +294,12 @@ impl CppGenerator {
                 self.output.push_str("}\n\n");
             }
             Stmt::Expr(expr) => {
-                // Manejar MethodCall con indentación especial para C++20 features
-                if let Expr::MethodCall { object, method, args } = expr {
-                    let arr_code = self.generate_expr(object);
-                    
-                    // Para sort y reverse, usar C++20 ranges si está disponible
-                    if method == "sort" && args.is_empty() {
+                // Manejar MethodCall - por ahora simplificado para OOP básico
+                if let Expr::MethodCall { object: _, method, args: _ } = expr {
+                    // TODO: Implementar métodos de arrays cuando sea necesario
+                    if method == "sort" || method == "reverse" {
                         self.indent();
-                        self.output.push_str("#if __cplusplus >= 202002L\n");
-                        self.indent();
-                        self.output.push_str(&format!("std::ranges::sort({});\n", arr_code));
-                        self.indent();
-                        self.output.push_str("#else\n");
-                        self.indent();
-                        self.output.push_str(&format!("std::sort({}.begin(), {}.end());\n", arr_code, arr_code));
-                        self.indent();
-                        self.output.push_str("#endif\n");
-                        return;
-                    }
-                    if method == "reverse" && args.is_empty() {
-                        self.indent();
-                        self.output.push_str("#if __cplusplus >= 202002L\n");
-                        self.indent();
-                        self.output.push_str(&format!("std::ranges::reverse({});\n", arr_code));
-                        self.indent();
-                        self.output.push_str("#else\n");
-                        self.indent();
-                        self.output.push_str(&format!("std::reverse({}.begin(), {}.end());\n", arr_code, arr_code));
-                        self.indent();
-                        self.output.push_str("#endif\n");
+                        self.output.push_str("// TODO: Método de array no implementado\n");
                         return;
                     }
                 }

@@ -1,0 +1,10 @@
+C:\Users\andre\OneDrive\Documentos\ASM-en-ADEAD-NASM\CORE\rust\target\release\deps\ar_archive_writer-0db15f8c0a524720.d: C:\Users\andre\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\ar_archive_writer-0.2.0\src\lib.rs C:\Users\andre\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\ar_archive_writer-0.2.0\src\alignment.rs C:\Users\andre\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\ar_archive_writer-0.2.0\src\archive.rs C:\Users\andre\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\ar_archive_writer-0.2.0\src\archive_writer.rs
+
+C:\Users\andre\OneDrive\Documentos\ASM-en-ADEAD-NASM\CORE\rust\target\release\deps\libar_archive_writer-0db15f8c0a524720.rlib: C:\Users\andre\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\ar_archive_writer-0.2.0\src\lib.rs C:\Users\andre\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\ar_archive_writer-0.2.0\src\alignment.rs C:\Users\andre\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\ar_archive_writer-0.2.0\src\archive.rs C:\Users\andre\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\ar_archive_writer-0.2.0\src\archive_writer.rs
+
+C:\Users\andre\OneDrive\Documentos\ASM-en-ADEAD-NASM\CORE\rust\target\release\deps\libar_archive_writer-0db15f8c0a524720.rmeta: C:\Users\andre\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\ar_archive_writer-0.2.0\src\lib.rs C:\Users\andre\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\ar_archive_writer-0.2.0\src\alignment.rs C:\Users\andre\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\ar_archive_writer-0.2.0\src\archive.rs C:\Users\andre\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\ar_archive_writer-0.2.0\src\archive_writer.rs
+
+C:\Users\andre\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\ar_archive_writer-0.2.0\src\lib.rs:
+C:\Users\andre\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\ar_archive_writer-0.2.0\src\alignment.rs:
+C:\Users\andre\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\ar_archive_writer-0.2.0\src\archive.rs:
+C:\Users\andre\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\ar_archive_writer-0.2.0\src\archive_writer.rs:

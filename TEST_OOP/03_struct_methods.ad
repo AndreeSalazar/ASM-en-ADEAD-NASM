@@ -1,0 +1,41 @@
+# Test 03: Struct con múltiples campos y operaciones
+# Verifica structs más complejos
+
+struct Rectangulo {
+    ancho
+    alto
+}
+
+# Crear instancia
+let r = Rectangulo { ancho: 5, alto: 3 }
+
+# Imprimir dimensiones originales
+print r.ancho
+print r.alto
+
+# Calcular área (ancho * alto) - manual por ahora
+let area = r.ancho * r.alto
+print area
+
+# Modificar dimensiones
+r.ancho = 10
+r.alto = 7
+
+# Imprimir nuevas dimensiones
+print r.ancho
+print r.alto
+
+# Nueva área
+let nueva_area = r.ancho * r.alto
+print nueva_area
+
+# Salida esperada:
+# 5
+# 3
+# 15
+# 10
+# 7
+# 70
+
+
+
