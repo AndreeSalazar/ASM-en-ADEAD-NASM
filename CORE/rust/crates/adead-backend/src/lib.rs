@@ -8,10 +8,8 @@ mod stdlib;
 mod register_optimizer;
 mod dependency_graph;
 mod usage_analyzer;
-use memory_pool::MemoryPool;
 use optimizer::CodeOptimizer;
 use stdlib::StdLib;
-use register_optimizer::RegisterOptimizer;
 use dependency_graph::DependencyGraph;
 use usage_analyzer::UsageAnalyzer;
 
@@ -403,11 +401,10 @@ impl CodeGenerator {
                             self.text_section.push("    mov qword [rsp+32], 0  ; lpOverlapped = NULL (quinto parámetro en shadow space)".to_string());
                             self.text_section.push("    call WriteFile".to_string());
                             
-                            // Restaurar registros del push anterior (para balance de stack en tiempo de ejecución)
-                            // NOTA: NO decrementamos stack_offset aquí porque los buffers deben permanecer
-                            // válidos para evitar sobrescritura entre diferentes prints
+                            // Restaurar stack
                             self.text_section.push("    pop rdx  ; restaurar dirección buffer".to_string());
                             self.text_section.push("    pop rbx  ; restaurar resultado".to_string());
+                            self.stack_offset -= 24; // Liberar buffer
                             
                             // Generar función helper para convertir int64 a string (runtime)
                             self.text_section.push(format!("    jmp {}_end", conv_label));
@@ -470,35 +467,38 @@ impl CodeGenerator {
                             let rev_loop = self.new_label("rev_loop_rt");
                             let rev_done = self.new_label("rev_done_rt");
                             self.text_section.push(format!("{}:", rev_start));
-                            // Guardar rbx en r9 ANTES de las comparaciones para evitar stack imbalance
-                            self.text_section.push("    mov r9, rbx  ; guardar fin del string en r9 (preservado)".to_string());
+                            // Usar r8 que tiene la dirección original del buffer (guardada al inicio, nunca modificado)
                             self.text_section.push("    mov rcx, r8  ; inicio para el loop de reverso (r8 tiene dirección original)".to_string());
                             self.text_section.push("    mov rdx, rbx  ; fin para el loop de reverso".to_string());
                             self.text_section.push("    dec rdx  ; excluir newline del reverso".to_string());
                             self.text_section.push("    cmp rcx, rdx".to_string());
                             self.text_section.push(format!("    jge {}", rev_done));
+                            // CRÍTICO: Guardar rbx (fin del string) antes del loop de reversión
+                            // porque el loop modificará rbx
+                            self.text_section.push("    push rbx  ; guardar fin del string antes de reversión".to_string());
                             
                             self.text_section.push(format!("{}:", rev_loop));
-                            // Usar r10 y r11 para el swap en lugar de al/bl para evitar corromper rbx
-                            self.text_section.push("    movzx r10, byte [rcx]  ; byte desde inicio".to_string());
-                            self.text_section.push("    movzx r11, byte [rdx]  ; byte desde fin".to_string());
-                            self.text_section.push("    mov [rcx], r11b".to_string());
-                            self.text_section.push("    mov [rdx], r10b".to_string());
+                            self.text_section.push("    mov al, [rcx]  ; byte desde inicio".to_string());
+                            self.text_section.push("    mov bl, [rdx]  ; byte desde fin (rbx temporal, se restaurará después)".to_string());
+                            self.text_section.push("    mov [rcx], bl".to_string());
+                            self.text_section.push("    mov [rdx], al".to_string());
                             self.text_section.push("    inc rcx".to_string());
                             self.text_section.push("    dec rdx".to_string());
                             self.text_section.push("    cmp rcx, rdx".to_string());
                             self.text_section.push(format!("    jl {}", rev_loop));
                             self.text_section.push(format!("{}:", rev_done));
                             
-                            // Restaurar rbx desde r9 (siempre se ejecuta, sin importar si hubo reversión)
-                            self.text_section.push("    mov rbx, r9  ; restaurar fin del string desde r9".to_string());
+                            // Restaurar rbx (fin del string) después del loop
+                            self.text_section.push("    pop rbx  ; restaurar fin del string después de reversión".to_string());
                             
                             // Calcular longitud: rbx (fin) - dirección inicial del buffer
                             self.text_section.push("    mov rax, rbx  ; fin del string (incluye newline)".to_string());
                             self.text_section.push("    sub rax, r8  ; longitud = fin - inicio (r8 tiene la dirección original)".to_string());
                             
-                            // Restaurar registros
-                            self.text_section.push("    pop rdx  ; balancear stack".to_string());
+                            // Restaurar registros (en orden inverso del push)
+                            // Stack tiene: [rbp] [rbx] [rcx] [rdx_buffer] <- top
+                            // Hacer pop rdx para balancear el stack primero
+                            self.text_section.push("    pop rdx  ; balancear stack (descartar valor del stack)".to_string());
                             self.text_section.push("    pop rcx  ; restaurar rcx original".to_string());
                             self.text_section.push("    pop rbx".to_string());
                             self.text_section.push("    pop rbp".to_string());
@@ -588,9 +588,10 @@ impl CodeGenerator {
                             self.text_section.push("    mov qword [rsp+32], 0  ; lpOverlapped = NULL (quinto parámetro en shadow space)".to_string());
                             self.text_section.push("    call WriteFile".to_string());
                             
-                            // CRÍTICO: Restaurar registros del push anterior (para balance de stack)
+                            // Restaurar stack después de WriteFile
                             self.text_section.push("    pop rdx  ; restaurar dirección buffer".to_string());
                             self.text_section.push("    pop rbx  ; restaurar resultado".to_string());
+                            self.stack_offset -= 24; // Liberar buffer
                             
                             // Generar función helper para convertir int64 a string (runtime)
                             self.text_section.push(format!("    jmp {}_end", conv_label));
@@ -653,35 +654,38 @@ impl CodeGenerator {
                             let rev_loop = self.new_label("rev_loop_rt");
                             let rev_done = self.new_label("rev_done_rt");
                             self.text_section.push(format!("{}:", rev_start));
-                            // Guardar rbx en r9 ANTES de las comparaciones para evitar stack imbalance
-                            self.text_section.push("    mov r9, rbx  ; guardar fin del string en r9 (preservado)".to_string());
+                            // Usar r8 que tiene la dirección original del buffer (guardada al inicio, nunca modificado)
                             self.text_section.push("    mov rcx, r8  ; inicio para el loop de reverso (r8 tiene dirección original)".to_string());
                             self.text_section.push("    mov rdx, rbx  ; fin para el loop de reverso".to_string());
                             self.text_section.push("    dec rdx  ; excluir newline del reverso".to_string());
                             self.text_section.push("    cmp rcx, rdx".to_string());
                             self.text_section.push(format!("    jge {}", rev_done));
+                            // CRÍTICO: Guardar rbx (fin del string) antes del loop de reversión
+                            // porque el loop modificará rbx
+                            self.text_section.push("    push rbx  ; guardar fin del string antes de reversión".to_string());
                             
                             self.text_section.push(format!("{}:", rev_loop));
-                            // Usar r10 y r11 para el swap en lugar de al/bl para evitar corromper rbx
-                            self.text_section.push("    movzx r10, byte [rcx]  ; byte desde inicio".to_string());
-                            self.text_section.push("    movzx r11, byte [rdx]  ; byte desde fin".to_string());
-                            self.text_section.push("    mov [rcx], r11b".to_string());
-                            self.text_section.push("    mov [rdx], r10b".to_string());
+                            self.text_section.push("    mov al, [rcx]  ; byte desde inicio".to_string());
+                            self.text_section.push("    mov bl, [rdx]  ; byte desde fin (rbx temporal, se restaurará después)".to_string());
+                            self.text_section.push("    mov [rcx], bl".to_string());
+                            self.text_section.push("    mov [rdx], al".to_string());
                             self.text_section.push("    inc rcx".to_string());
                             self.text_section.push("    dec rdx".to_string());
                             self.text_section.push("    cmp rcx, rdx".to_string());
                             self.text_section.push(format!("    jl {}", rev_loop));
                             self.text_section.push(format!("{}:", rev_done));
                             
-                            // Restaurar rbx desde r9 (siempre se ejecuta, sin importar si hubo reversión)
-                            self.text_section.push("    mov rbx, r9  ; restaurar fin del string desde r9".to_string());
+                            // Restaurar rbx (fin del string) después del loop
+                            self.text_section.push("    pop rbx  ; restaurar fin del string después de reversión".to_string());
                             
                             // Calcular longitud: rbx (fin) - dirección inicial del buffer
                             self.text_section.push("    mov rax, rbx  ; fin del string (incluye newline)".to_string());
                             self.text_section.push("    sub rax, r8  ; longitud = fin - inicio (r8 tiene la dirección original)".to_string());
                             
-                            // Restaurar registros
-                            self.text_section.push("    pop rdx  ; balancear stack".to_string());
+                            // Restaurar registros (en orden inverso del push)
+                            // Stack tiene: [rbp] [rbx] [rcx] [rdx_buffer] <- top
+                            // Hacer pop rdx para balancear el stack primero
+                            self.text_section.push("    pop rdx  ; balancear stack (descartar valor del stack)".to_string());
                             self.text_section.push("    pop rcx  ; restaurar rcx original".to_string());
                             self.text_section.push("    pop rbx".to_string());
                             self.text_section.push("    pop rbp".to_string());
@@ -994,7 +998,7 @@ impl CodeGenerator {
             Stmt::Struct { name, fields, init, destroy: _ } => {
                 // Registrar campos del struct para cálculo de offsets
                 let field_names: Vec<String> = fields.iter().map(|f| f.name.clone()).collect();
-                self.struct_definitions.insert(name.clone(), field_names);
+                self.struct_definitions.insert(name.clone(), field_names.clone());
                 
                 // Registrar struct y generar código para constructor si existe
                 if let Some(init_method) = init {
@@ -1004,29 +1008,37 @@ impl CodeGenerator {
                     self.text_section.push(format!("{}:", init_label));
                     self.text_section.push("    push rbp".to_string());
                     self.text_section.push("    mov rbp, rsp".to_string());
+                    self.text_section.push("    sub rsp, 64  ; espacio para variables locales".to_string());
                     
-                    // Guardar parámetros en stack (Windows x64 calling convention)
+                    // self viene en RCX (primer parámetro implícito)
+                    let self_offset = self.stack_offset;
+                    self.stack_offset += 8;
+                    self.variables.insert("self".to_string(), self_offset);
+                    self.variable_types.insert("self".to_string(), name.clone());
+                    self.text_section.push(format!("    mov [rbp - {}], rcx  ; guardar self", self_offset + 8));
+                    
+                    // Los parámetros del usuario vienen en RDX, R8, R9... (RCX tiene self)
                     for (i, param) in init_method.params.iter().enumerate() {
                         let offset = self.stack_offset;
                         self.stack_offset += 8;
                         self.variables.insert(param.name.clone(), offset);
                         
                         let reg = match i {
-                            0 => "rcx",
-                            1 => "rdx",
-                            2 => "r8",
-                            3 => "r9",
+                            0 => "rdx",   // Primer param usuario
+                            1 => "r8",    // Segundo param usuario
+                            2 => "r9",    // Tercer param usuario
                             _ => {
-                                let stack_offset = 16 + (i - 4) * 8;
-                                    self.text_section.push(format!("    mov rax, [rbp + {}]", stack_offset));
-                                    self.text_section.push(format!("    mov [rbp - {}], rax", offset + 8));
+                                let stack_offset = 48 + (i - 3) * 8;  // Stack params después de shadow space
+                                self.text_section.push(format!("    mov rax, [rbp + {}]", stack_offset));
+                                self.text_section.push(format!("    mov [rbp - {}], rax  ; param {}", offset + 8, param.name));
                                 continue;
                             }
                         };
-                            self.text_section.push(format!("    mov [rbp - {}], {}", offset + 8, reg));
+                        self.text_section.push(format!("    mov [rbp - {}], {}  ; param {}", offset + 8, reg, param.name));
                     }
                     
                     // Generar cuerpo del constructor
+                    // Los FieldAssign a self.campo se manejarán automáticamente
                     for s in &init_method.body {
                         self.generate_stmt_windows(s)?;
                     }
@@ -1034,6 +1046,12 @@ impl CodeGenerator {
                     self.text_section.push("    leave".to_string());
                     self.text_section.push("    ret".to_string());
                     self.text_section.push(format!("{}_end:", init_label));
+                    
+                    // Limpiar variables locales del constructor
+                    self.variables.remove("self");
+                    for param in &init_method.params {
+                        self.variables.remove(&param.name);
+                    }
                 }
                 // Struct definitions are type information only, no code generation needed for the struct itself
             }
@@ -1349,51 +1367,106 @@ impl CodeGenerator {
                     
                     // Retorna la longitud en RAX (ya está ahí)
                 } else {
-                    // Llamada a función normal (ABI-safe)
-                    // Windows x64 calling convention:
-                    // - First 4 params: RCX, RDX, R8, R9
-                    // - Additional params: on stack (right-to-left)
-                    // - Shadow space: 32 bytes must be reserved
-                    // - Stack must be aligned to 16 bytes before call
-                    
-                    let num_args = args.len();
-                    let stack_args_count = if num_args > 4 { num_args - 4 } else { 0 };
-                    let total_stack_space = 32 + (stack_args_count * 8); // shadow space (32) + stack args (8 cada uno)
-                    
-                    // Reservar shadow space y espacio para parámetros adicionales
-                    self.text_section.push(format!("    sub rsp, {}  ; shadow space (32) + stack args ({})", 32, stack_args_count * 8));
-                    
-                    // Push parámetros adicionales en stack (right-to-left)
-                    // Windows x64: parámetros adicionales se pasan right-to-left
-                    for arg in args.iter().skip(4).rev() {
-                        self.generate_expr_windows(arg)?;
-                        self.text_section.push("    push rax  ; parámetro adicional en stack".to_string());
-                    }
-                    
-                    // Cargar primeros 4 parámetros en registros (left-to-right)
-                    for (i, arg) in args.iter().take(4).enumerate() {
-                        self.generate_expr_windows(arg)?;
-                        let reg = match i {
-                            0 => "rcx",
-                            1 => "rdx",
-                            2 => "r8",
-                            3 => "r9",
-                            _ => unreachable!(),
-                        };
-                        self.text_section.push(format!("    mov {}, rax  ; param{}", reg, i));
-                    }
-                    
-                    // Llamar función (con namespace si existe) (Sprint 1.3)
-                    let function_name = if let Some(module_name) = module {
-                        format!("fn_{}_{}", module_name, name)
+                    // Detectar llamada a constructor PRIMERO: ClassName.new(...)
+                    if let Some(class_name) = module {
+                        if name == "new" && self.struct_definitions.contains_key(class_name) {
+                            // CONSTRUCTOR: ClassName.new(args)
+                            // 1. Reservar espacio en stack para el struct
+                            let num_fields = self.struct_definitions.get(class_name)
+                                .map(|f| f.len())
+                                .unwrap_or(0);
+                            let struct_size = num_fields * 8;
+                            let struct_offset = self.stack_offset;
+                            self.stack_offset += struct_size as i64;
+                            
+                            self.text_section.push(format!("    ; Crear instancia de {} ({} campos, {} bytes)", class_name, num_fields, struct_size));
+                            
+                            // Reservar espacio para el struct y calcular su dirección
+                            // El struct se ubicará en [rbp - struct_offset - 8] hasta [rbp - struct_offset - 8 - struct_size]
+                            let struct_base_offset = struct_offset + 8;
+                            
+                            // 2. Cargar argumentos del constructor PRIMERO (antes de modificar RCX)
+                            let mut arg_values = Vec::new();
+                            for arg in args.iter() {
+                                self.generate_expr_windows(arg)?;
+                                self.text_section.push("    push rax  ; guardar arg temporalmente".to_string());
+                                arg_values.push(());
+                            }
+                            
+                            // 3. Restaurar argumentos a registros (en orden inverso)
+                            for i in (0..args.len()).rev() {
+                                let reg = match i {
+                                    0 => "rdx",  // Primer arg del usuario
+                                    1 => "r8",
+                                    2 => "r9",
+                                    _ => continue,  // TODO: pasar en stack
+                                };
+                                self.text_section.push(format!("    pop {}  ; arg{}", reg, i));
+                            }
+                            
+                            // 4. self = dirección base del struct (usando el offset calculado)
+                            self.text_section.push(format!("    lea rcx, [rbp - {}]  ; self = puntero al struct", struct_base_offset));
+                            
+                            // 5. Llamar al constructor
+                            self.text_section.push("    sub rsp, 32  ; shadow space".to_string());
+                            self.text_section.push(format!("    call {}_init", class_name));
+                            self.text_section.push("    add rsp, 32  ; restaurar shadow space".to_string());
+                            
+                            // 6. Retornar dirección del struct en RAX
+                            self.text_section.push(format!("    lea rax, [rbp - {}]  ; retornar puntero al struct", struct_base_offset));
+                        } else {
+                            // Llamada a función con módulo (no constructor)
+                            let num_args = args.len();
+                            let stack_args_count = if num_args > 4 { num_args - 4 } else { 0 };
+                            let total_stack_space = 32 + (stack_args_count * 8);
+                            
+                            self.text_section.push(format!("    sub rsp, {}  ; shadow space", 32));
+                            
+                            for (i, arg) in args.iter().take(4).enumerate() {
+                                self.generate_expr_windows(arg)?;
+                                let reg = match i {
+                                    0 => "rcx",
+                                    1 => "rdx",
+                                    2 => "r8",
+                                    3 => "r9",
+                                    _ => unreachable!(),
+                                };
+                                self.text_section.push(format!("    mov {}, rax  ; param{}", reg, i));
+                            }
+                            
+                            let function_name = format!("fn_{}_{}", class_name, name);
+                            self.text_section.push(format!("    call {}", function_name));
+                            self.text_section.push(format!("    add rsp, {}  ; restaurar shadow space", total_stack_space));
+                        }
                     } else {
-                        format!("fn_{}", name)
-                    };
-                    
-                    self.text_section.push(format!("    call {}", function_name));
-                    
-                    // Restaurar stack (shadow space + parámetros adicionales)
-                    self.text_section.push(format!("    add rsp, {}  ; restaurar shadow space + stack args", total_stack_space));
+                        // Llamada a función normal (ABI-safe)
+                        let num_args = args.len();
+                        let stack_args_count = if num_args > 4 { num_args - 4 } else { 0 };
+                        let total_stack_space = 32 + (stack_args_count * 8);
+                        
+                        self.text_section.push(format!("    sub rsp, {}  ; shadow space", 32));
+                        
+                        for arg in args.iter().skip(4).rev() {
+                            self.generate_expr_windows(arg)?;
+                            self.text_section.push("    push rax  ; parámetro adicional en stack".to_string());
+                        }
+                        
+                        for (i, arg) in args.iter().take(4).enumerate() {
+                            self.generate_expr_windows(arg)?;
+                            let reg = match i {
+                                0 => "rcx",
+                                1 => "rdx",
+                                2 => "r8",
+                                3 => "r9",
+                                _ => unreachable!(),
+                            };
+                            self.text_section.push(format!("    mov {}, rax  ; param{}", reg, i));
+                        }
+                        
+                        let function_name = format!("fn_{}", name);
+                        self.text_section.push(format!("    call {}", function_name));
+                        self.text_section.push(format!("    add rsp, {}  ; restaurar shadow space", total_stack_space));
+                    }
                     
                     // Valor de retorno está en RAX
                 }
@@ -1543,7 +1616,8 @@ impl CodeGenerator {
                 
                 self.generate_expr_windows(object)?;
                 
-                // Calcular offset del campo (negativo porque stack crece hacia abajo)
+                // Calcular offset del campo (negativo - stack crece hacia abajo)
+                // Struct layout en stack: campo0 en [ptr], campo1 en [ptr - 8], etc.
                 let field_offset = if let Some(ref type_name) = struct_type {
                     if let Some(fields) = self.struct_definitions.get(type_name) {
                         fields.iter().position(|f| f == field).unwrap_or(0) * 8
@@ -1572,7 +1646,7 @@ impl CodeGenerator {
                 // Luego obtener la dirección del objeto
                 self.generate_expr_windows(object)?;
                 
-                // Calcular offset del campo
+                // Calcular offset del campo (negativo - stack crece hacia abajo)
                 let field_offset = if let Some(ref type_name) = struct_type {
                     if let Some(fields) = self.struct_definitions.get(type_name) {
                         fields.iter().position(|f| f == field).unwrap_or(0) * 8

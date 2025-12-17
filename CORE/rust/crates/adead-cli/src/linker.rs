@@ -1,5 +1,19 @@
-// Linker integration para ADead
-// Soporta Zig y GCC/Clang para linkear .obj → .exe
+//! Linker Integration para ADead
+//! 
+//! Integración con linkers externos para generar ejecutables desde archivos objeto.
+//! 
+//! Pipeline:
+//!   ASM Virgen → NASM → .obj → [LINKER] → .exe
+//! 
+//! Linkers soportados (en orden de preferencia):
+//!   1. Zig (Recomendado): Fácil de instalar, optimización ReleaseSmall
+//!   2. GCC: Tradicional, incluido con MinGW
+//!   3. Clang: Alternativa LLVM
+//! 
+//! El linker se detecta automáticamente o se puede especificar manualmente.
+//! 
+//! Autor: Eddi Andreé Salazar Matos
+//! Fecha: Diciembre 2025
 
 use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
@@ -354,17 +368,17 @@ pub fn compile_and_link(
             fs::write(&asm_file, nasm_code)
                 .with_context(|| format!("Error al escribir {}", asm_file.display()))?;
         }
-        _ => {
-            // Usar pipeline inteligente que detecta automáticamente
-            match adead_parser::pipeline_selector::process_adead_intelligent(&source) {
-                Ok((_pipeline, asm_code)) => {
-                    fs::write(&asm_file, asm_code)
-                        .with_context(|| format!("Error al escribir {}", asm_file.display()))?;
-                }
-                Err(e) => {
-                    anyhow::bail!("Pipeline error: {}", e);
-                }
-            }
+        "auto" | _ => {
+            // PRIORIDAD ALTA: Usar NASM directo siempre (evita conversión GAS)
+            let program = adead_parser::parse(&source)
+                .map_err(|e| anyhow::anyhow!("Parser error: {:?}", e))?;
+            
+            let mut generator = adead_backend::CodeGenerator::new();
+            let nasm_code = generator.generate(&program)
+                .map_err(|e| anyhow::anyhow!("NASM generation error: {:?}", e))?;
+            
+            fs::write(&asm_file, nasm_code)
+                .with_context(|| format!("Error al escribir {}", asm_file.display()))?;
         }
     }
     
@@ -381,14 +395,5 @@ pub fn compile_and_link(
     println!("   ✅ Ejecutable generado: {}", exe_file.display());
     
     Ok(exe_file)
-}
-
-/// Helper para detectar strings avanzados
-fn has_advanced_strings(source: &str) -> bool {
-    source.contains("\"") ||
-    (source.contains("+") && (source.contains("let") || source.contains("s"))) ||
-    (source.contains("[") && source.contains(":")) ||
-    source.contains(".upper()") || source.contains(".lower()") ||
-    source.contains("len(")
 }
 

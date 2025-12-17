@@ -1,17 +1,18 @@
 /**
- * Pipeline Selector Inteligente
+ * Pipeline Selector - ADead Compiler
  * 
- * Este módulo identifica el tipo de código ADead y selecciona
- * el mejor pipeline (D, Zig, Rust, C, Parser Manual) para procesarlo
+ * Selecciona el mejor pipeline para compilar código ADead a NASM.
  * 
- * Flujo:
- * 1. Analizar código ADead
- * 2. Identificar características (simplicidad, complejidad, tipos)
- * 3. Seleccionar pipeline óptimo
- * 4. Generar ASM puro y limpio
- * 5. Ejecutar
+ * PIPELINE PRINCIPAL (NASM Directo - PRIORIDAD MÁXIMA):
+ *   ADead → Parser (Rust) → NASM Generator (Rust) → NASM → .obj → Linker → .exe
+ *   - Genera código ASM virgen y limpio
+ *   - Sin dependencia de GCC/Clang para compilación
+ *   - Soporta: Arrays, Strings, Control Flow, Funciones, Structs, Classes
  * 
- * Arquitectura: Parser Manual (Rust) + C++ Optimizer + C Generator (Rust) + Rust Cleaner
+ * PIPELINE FALLBACK (C++):
+ *   ADead → Parser (Rust) → C++ Generator → GCC++/Clang++ → Rust Cleaner → ASM → NASM
+ *   - Solo para características avanzadas no implementadas en NASM directo
+ *   - Requiere GCC/Clang instalado
  * 
  * Autor: Eddi Andreé Salazar Matos
  * Fecha: Diciembre 2025
@@ -22,278 +23,257 @@ use std::process::Command;
 use std::fs;
 
 /// Características detectadas en el código ADead
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct CodeFeatures {
     pub has_while_loops: bool,
     pub has_if_statements: bool,
-    pub has_nested_blocks: bool,
-    pub has_variables: bool,
-    pub has_expressions: bool,
+    pub has_for_loops: bool,
+    pub has_functions: bool,
+    pub has_arrays: bool,
+    pub has_strings: bool,
+    pub has_structs: bool,
+    pub has_classes: bool,
+    pub has_imports: bool,
     pub has_floats: bool,
-    pub has_arithmetic: bool,
-    pub has_comparisons: bool,
     pub complexity_score: u32,
 }
 
 /// Tipo de pipeline recomendado
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RecommendedPipeline {
-    /// Parser Manual → C++ Generator → GCC++/Clang++ → Rust Cleaner → ASM Virgen (flujo principal)
-    ParserManualCpp,
-    /// Parser Manual → C++ Optimizer → C → GCC/Clang → Rust Cleaner → ASM Virgen (fallback)
-    ParserManualCppC,
-    /// Parser Manual → C → GCC/Clang → Rust Cleaner → ASM Virgen (fallback sin C++)
-    ParserManualC,
-    /// Rust directo (fallback completo)
-    RustDirect,
+    /// PRIORIDAD MÁXIMA: Parser Rust → Backend NASM directo
+    /// Genera ASM virgen y limpio sin dependencias externas
+    NasmDirect,
+    
+    /// Fallback: Parser → C++ Generator → GCC++/Clang++ → Rust Cleaner → ASM
+    /// Para características que requieren runtime C++
+    CppFallback,
+    
+    /// Fallback alternativo: Parser → C Generator → GCC/Clang → Rust Cleaner → ASM
+    CFallback,
+}
+
+impl Default for RecommendedPipeline {
+    fn default() -> Self {
+        // NASM directo es SIEMPRE el default - prioridad máxima
+        RecommendedPipeline::NasmDirect
+    }
+}
+
+impl std::fmt::Display for RecommendedPipeline {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            RecommendedPipeline::NasmDirect => write!(f, "NASM Directo (Prioritario)"),
+            RecommendedPipeline::CppFallback => write!(f, "C++ Fallback"),
+            RecommendedPipeline::CFallback => write!(f, "C Fallback"),
+        }
+    }
 }
 
 /// Analizar código ADead y detectar características
 pub fn analyze_code_features(source: &str) -> CodeFeatures {
-    let source_lower = source.to_lowercase();
-    
     CodeFeatures {
         has_while_loops: source.contains("while"),
         has_if_statements: {
-            // Detectar if statements (puede estar dentro de while)
-            // Buscar "if" que no sea parte de otra palabra
             let words: Vec<&str> = source.split_whitespace().collect();
-            words.iter().any(|w| *w == "if" || w.starts_with("if"))
+            words.iter().any(|w| *w == "if" || w.starts_with("if "))
         },
-        has_nested_blocks: {
-            let open_braces = source.matches('{').count();
-            let close_braces = source.matches('}').count();
-            open_braces > 1 && close_braces > 1
+        has_for_loops: source.contains("for ") && source.contains(" in "),
+        has_functions: source.contains("fn "),
+        has_arrays: source.contains('[') && source.contains(']'),
+        has_strings: source.contains('"'),
+        has_structs: source.contains("struct "),
+        has_classes: source.contains("class "),
+        has_imports: source.contains("import "),
+        has_floats: {
+            // Detectar floats: número.número (pero no rangos como 0..10)
+            let mut has_float = false;
+            for line in source.lines() {
+                if line.contains('.') && !line.contains("..") {
+                    // Verificar si hay un patrón de número.número
+                    for part in line.split_whitespace() {
+                        if part.contains('.') && !part.contains("..") {
+                            let chars: Vec<char> = part.chars().collect();
+                            for i in 0..chars.len().saturating_sub(2) {
+                                if chars[i].is_ascii_digit() 
+                                    && chars[i + 1] == '.' 
+                                    && chars.get(i + 2).map_or(false, |c| c.is_ascii_digit()) {
+                                    has_float = true;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            has_float
         },
-        has_variables: source.contains("let") || 
-                      source.contains("=") && !source.contains("==") && !source.contains("!="),
-        has_expressions: source.contains('+') || source.contains('-') || 
-                        source.contains('*') || source.contains('/') || source.contains('%'),
-        has_floats: source.contains('.') && source.chars().any(|c| c.is_ascii_digit()),
-        has_arithmetic: source.contains('+') || source.contains('-') || 
-                       source.contains('*') || source.contains('/'),
-        has_comparisons: source.contains("<=") || source.contains(">=") || 
-                        source.contains("==") || source.contains("!=") ||
-                        source.contains('<') || source.contains('>'),
-        complexity_score: calculate_complexity(&source),
+        complexity_score: calculate_complexity(source),
     }
 }
 
-/// Calcular score de complejidad
+/// Calcular score de complejidad del código
 fn calculate_complexity(source: &str) -> u32 {
-    let mut score = 0;
+    let mut score = 0u32;
     
-    // Estructuras complejas
-    if source.contains("while") { score += 10; }
-    if source.contains("if") { score += 5; }
+    // Control flow
+    score += source.matches("while").count() as u32 * 5;
+    score += source.matches("if ").count() as u32 * 3;
+    score += source.matches("for ").count() as u32 * 5;
+    score += source.matches("else").count() as u32 * 2;
     
-    // Anidamiento
-    let brace_depth = source.chars().fold((0, 0), |(depth, max), c| {
-        let new_depth = match c {
-            '{' => depth + 1,
-            '}' => depth - 1,
-            _ => depth,
-        };
-        (new_depth, max.max(new_depth))
-    }).1;
-    score += brace_depth * 3;
+    // Funciones y estructuras
+    score += source.matches("fn ").count() as u32 * 4;
+    score += source.matches("struct ").count() as u32 * 6;
+    score += source.matches("class ").count() as u32 * 8;
+    
+    // Profundidad de anidamiento (aproximada por conteo de llaves)
+    let open_braces = source.matches('{').count() as u32;
+    if open_braces > 3 {
+        score += (open_braces - 3) * 2;
+    }
     
     // Variables y expresiones
-    if source.contains("let") { score += 2; }
-    let expr_count = source.matches('+').count() + 
-                     source.matches('-').count() + 
-                     source.matches('*').count() + 
-                     source.matches('/').count();
-    score += expr_count;
+    score += source.matches("let ").count() as u32;
     
-    score as u32
+    score
 }
 
 /// Seleccionar el mejor pipeline según las características
+/// 
+/// POLÍTICA: NASM DIRECTO SIEMPRE (es el objetivo principal de ADead)
+/// 
+/// El backend NASM de Rust genera código NASM nativo sin conversiones.
+/// Solo usamos fallback C++ si hay una razón específica (actualmente ninguna).
 pub fn select_optimal_pipeline(features: &CodeFeatures) -> RecommendedPipeline {
-    // Siempre usar Parser Manual + C++ Generator como flujo principal
-    // C++ Generator usa std::vector, RAII, constexpr para código más limpio
-    RecommendedPipeline::ParserManualCpp
+    // PRIORIDAD MÁXIMA: NASM Directo para todo
+    // El backend NASM soporta todas las características del lenguaje ADead
+    
+    // Por ahora, SIEMPRE usar NASM directo
+    // El backend soporta: variables, arrays, strings, control flow, 
+    // funciones, structs, classes, imports
+    
+    // Solo consideramos fallback para características futuras no implementadas
+    // (actualmente ninguna)
+    
+    let _ = features; // Suprimir warning de unused
+    RecommendedPipeline::NasmDirect
 }
 
 /// Generar código ASM usando el pipeline seleccionado
+/// 
+/// NOTA: El pipeline NASM directo se ejecuta desde adead-cli
+/// Esta función es para pipelines fallback (C++/C)
 pub fn generate_asm_with_pipeline(
     source: &str,
     pipeline: &RecommendedPipeline,
     output_path: Option<&Path>,
 ) -> Result<String, String> {
     match pipeline {
-        RecommendedPipeline::ParserManualCpp => {
-            // ADead → Parser Principal (Chumsky) → C++ Generator → GCC++/Clang++ → Rust Cleaner → ASM
-            // Usamos el parser principal que soporta OOP (structs, clases)
-            let program = crate::parse(source)
-                .map_err(|e| format!("Parser error: {:?}", e))?;
-            
-            // Generar código C++ usando C++ Generator
-            let cpp_code = crate::cpp_generator::generate_cpp_code(&program);
-            
-            // Compilar código C++ a ASM usando GCC++/Clang++
-            let temp_path = output_path
-                .and_then(|p| p.to_str().map(|s| s.to_string()))
-                .unwrap_or_else(|| "temp.cpp".to_string());
-            
-            match compile_cpp_to_asm_for_pipeline(&cpp_code, &temp_path) {
-                Ok(asm_code) => {
-                    // Verificar que el ASM tiene contenido válido (NASM o GAS)
-                    if asm_code.contains("section") || asm_code.contains(".text") || 
-                       asm_code.contains(".globl") || asm_code.contains("main:") ||
-                       asm_code.contains(".intel_syntax") || asm_code.contains("push") ||
-                       asm_code.len() > 100 {
-                        // Limpiar ASM usando Rust Cleaner
-                        Ok(crate::clean_asm::clean_asm(&asm_code))
-                    } else {
-                        // ASM no válido - retornar error descriptivo en lugar de código C++
-                        Err(format!(
-                            "El compilador C++ generó código que no parece ser ASM válido.\n\
-                            Longitud del código generado: {} bytes\n\
-                            Contenido (primeras 200 líneas):\n{}\n\n\
-                            Posibles causas:\n\
-                            1. El compilador C++ no está funcionando correctamente\n\
-                            2. El código C++ generado tiene errores\n\
-                            3. El compilador no soporta las opciones usadas\n\n\
-                            Código C++ generado (para diagnóstico):\n{}",
-                            asm_code.len(),
-                            asm_code.lines().take(200).collect::<Vec<_>>().join("\n"),
-                            cpp_code.lines().take(50).collect::<Vec<_>>().join("\n")
-                        ))
-                    }
-                }
-                Err(e) => {
-                    // Mejorar mensaje de error con información útil
-                    let compiler_info = find_cpp_compiler_for_pipeline()
-                        .map(|c| format!("Compilador encontrado: {}", c))
-                        .unwrap_or_else(|| "No se encontró ningún compilador C++".to_string());
-                    
-                    Err(format!(
-                        "No se pudo compilar C++ a ASM.\n\n\
-                        Error: {}\n\n\
-                        {}\n\n\
-                        Verifica que:\n\
-                        1. GCC++ o Clang++ está instalado\n\
-                        2. El compilador está en PATH o en una ruta común\n\
-                        3. El código C++ generado es válido\n\n\
-                        Rutas comunes verificadas:\n\
-                        - C:\\Program Files\\LLVM\\bin\\clang++.exe\n\
-                        - C:\\msys64\\mingw64\\bin\\g++.exe\n\
-                        - C:\\msys64\\clang64\\bin\\clang++.exe\n\n\
-                        Código C++ generado (primeras 30 líneas para diagnóstico):\n{}",
-                        e,
-                        compiler_info,
-                        cpp_code.lines().take(30).collect::<Vec<_>>().join("\n")
-                    ))
-                }
-            }
+        RecommendedPipeline::NasmDirect => {
+            // NASM directo se maneja en adead-cli usando adead-backend
+            // Evita dependencias circulares entre crates
+            Err("Pipeline NASM Directo: use 'adeadc build' o 'adeadc compile'".to_string())
         }
         
-        RecommendedPipeline::ParserManualCppC => {
-            // ADead → Parser Manual → C++ Optimizer → C → GCC/Clang → ASM (fallback)
-            let program = crate::c_manual_parser::CManualParser::parse_program(source)
-                .map_err(|e| format!("Parser manual error: {:?}", e))?;
-            
-            // Optimizar AST usando C++ Optimizer (si está disponible)
-            let optimized_program = crate::cpp_optimizer::optimize_ast(&program)
-                .unwrap_or(program); // Fallback a programa sin optimizar si C++ no está disponible
-            
-            let c_code = crate::c_generator::generate_c_code(&optimized_program);
-            
-            // Compilar código C a ASM usando GCC/Clang
-            let temp_path = output_path
-                .and_then(|p| p.to_str().map(|s| s.to_string()))
-                .unwrap_or_else(|| "temp.c".to_string());
-            
-            match compile_c_to_asm_for_pipeline(&c_code, &temp_path) {
-                Ok(asm_code) => {
-                    // Verificar que el ASM tiene contenido válido (NASM o GAS)
-                    if asm_code.contains("section") || asm_code.contains(".text") || 
-                       asm_code.contains(".globl") || asm_code.contains("main:") ||
-                       asm_code.len() > 100 {
-                        // Limpiar ASM usando Rust Cleaner
-                        Ok(crate::clean_asm::clean_asm(&asm_code))
-                    } else {
-                        Ok(format!("// Código C generado\n{}", c_code))
-                    }
-                }
-                Err(e) => {
-                    eprintln!("   ⚠️  No se pudo compilar C a ASM: {}, retornando código C", e);
-                    Ok(format!("// Código C generado\n{}", c_code))
-                }
-            }
+        RecommendedPipeline::CppFallback => {
+            // ADead → Parser → C++ Generator → GCC++/Clang++ → Rust Cleaner → ASM
+            generate_via_cpp(source, output_path)
         }
         
-        RecommendedPipeline::ParserManualC => {
-            // ADead → Parser Manual → C → GCC/Clang → ASM (flujo principal actual)
-            // Usar parser manual y generador de C
-            let program = crate::c_manual_parser::CManualParser::parse_program(source)
-                .map_err(|e| format!("Parser manual error: {:?}", e))?;
-            let c_code = crate::c_generator::generate_c_code(&program);
-            
-            // Compilar código C a ASM usando GCC/Clang
-            // Usar el output_path o un path temporal
-            let temp_path = output_path
-                .and_then(|p| p.to_str().map(|s| s.to_string()))
-                .unwrap_or_else(|| "temp.c".to_string());
-            
-            match compile_c_to_asm_for_pipeline(&c_code, &temp_path) {
-                Ok(asm_code) => {
-                    // Verificar que el ASM tiene contenido válido (NASM o GAS)
-                    if asm_code.contains("section") || asm_code.contains(".text") || 
-                       asm_code.contains(".globl") || asm_code.contains("main:") ||
-                       asm_code.len() > 100 {
-                        // Limpiar ASM usando Rust Cleaner
-                        Ok(crate::clean_asm::clean_asm(&asm_code))
-                    } else {
-                        Ok(format!("// Código C generado\n{}", c_code))
-                    }
-                }
-                Err(e) => {
-                    eprintln!("   ⚠️  No se pudo compilar C a ASM: {}, retornando código C", e);
-                    Ok(format!("// Código C generado\n{}", c_code))
-                }
-            }
-        }
-        
-        RecommendedPipeline::RustDirect => {
-            // ADead → Rust → NASM (fallback completo)
-            // Usar parser Rust estándar
-            crate::parse_with_dir(source, None)
-                .map_err(|e| format!("Parser error: {:?}", e))?;
-            // Generar NASM usando el generador estándar
-            Err("NASM generation not yet implemented for this pipeline".to_string())
+        RecommendedPipeline::CFallback => {
+            // ADead → Parser → C Generator → GCC/Clang → Rust Cleaner → ASM
+            generate_via_c(source, output_path)
         }
     }
 }
 
-/// Procesar código ADead inteligentemente
-/// Analiza, selecciona pipeline óptimo, genera ASM limpio
-pub fn process_adead_intelligent(source: &str) -> Result<(RecommendedPipeline, String), String> {
-    // 1. Analizar características del código
-    let mut features = analyze_code_features(source);
+/// Generar ASM via pipeline C++
+fn generate_via_cpp(source: &str, output_path: Option<&Path>) -> Result<String, String> {
+    let program = crate::parse(source)
+        .map_err(|e| format!("Parser error: {:?}", e))?;
     
-    // Detección mejorada: verificar si hay if dentro de while
-    // Si hay "while" y también "if" en el código, probablemente hay if dentro de while
-    if features.has_while_loops && source.contains("if") {
-        features.has_if_statements = true;
-        features.has_nested_blocks = true; // while con if es anidado
+    let cpp_code = crate::cpp_generator::generate_cpp_code(&program);
+    
+    let temp_path = output_path
+        .and_then(|p| p.to_str().map(|s| s.to_string()))
+        .unwrap_or_else(|| "temp.cpp".to_string());
+    
+    match compile_cpp_to_asm(&cpp_code, &temp_path) {
+        Ok(asm_code) => {
+            if is_valid_asm(&asm_code) {
+                Ok(crate::clean_asm::clean_asm(&asm_code))
+            } else {
+                Err(format!(
+                    "El compilador C++ generó código inválido.\n\
+                    Recomendación: use --backend nasm para compilación directa."
+                ))
+            }
+        }
+        Err(e) => {
+            Err(format!(
+                "Error compilando C++ a ASM: {}\n\
+                Verifica que GCC++ o Clang++ esté instalado.\n\
+                Alternativa: use --backend nasm para compilación directa.",
+                e
+            ))
+        }
     }
+}
+
+/// Generar ASM via pipeline C
+fn generate_via_c(source: &str, output_path: Option<&Path>) -> Result<String, String> {
+    let program = crate::c_manual_parser::CManualParser::parse_program(source)
+        .map_err(|e| format!("Parser error: {:?}", e))?;
     
-    // 2. Seleccionar pipeline óptimo
+    let c_code = crate::c_generator::generate_c_code(&program);
+    
+    let temp_path = output_path
+        .and_then(|p| p.to_str().map(|s| s.to_string()))
+        .unwrap_or_else(|| "temp.c".to_string());
+    
+    match compile_c_to_asm(&c_code, &temp_path) {
+        Ok(asm_code) => {
+            if is_valid_asm(&asm_code) {
+                Ok(crate::clean_asm::clean_asm(&asm_code))
+            } else {
+                eprintln!("   ⚠️  ASM generado no es válido, retornando código C");
+                Ok(format!("// Código C generado\n{}", c_code))
+            }
+        }
+        Err(e) => {
+            eprintln!("   ⚠️  Error compilando C a ASM: {}", e);
+            Ok(format!("// Código C generado\n{}", c_code))
+        }
+    }
+}
+
+/// Procesar código ADead inteligentemente (usa NASM directo por defecto)
+pub fn process_adead_intelligent(source: &str) -> Result<(RecommendedPipeline, String), String> {
+    let features = analyze_code_features(source);
     let pipeline = select_optimal_pipeline(&features);
     
-    // 3. Generar ASM usando el pipeline seleccionado
-    // Nota: generate_asm_with_pipeline ya aplica clean_asm internamente
+    // NOTA: Esta función siempre devuelve error para NASM directo
+    // porque la generación real se hace en adead-cli
     let asm_code = generate_asm_with_pipeline(source, &pipeline, None)?;
     
     Ok((pipeline, asm_code))
 }
 
+/// Verificar si el código generado es ASM válido
+fn is_valid_asm(asm_code: &str) -> bool {
+    // Verificar indicadores de ASM válido
+    let has_section = asm_code.contains("section") || asm_code.contains(".text");
+    let has_code = asm_code.contains("mov") || asm_code.contains("push") || 
+                   asm_code.contains("call") || asm_code.contains("ret");
+    let has_label = asm_code.contains("main:") || asm_code.contains("_start:");
+    let min_length = asm_code.len() > 50;
+    
+    (has_section || has_code || has_label) && min_length
+}
+
 /// Verificar si un compilador soporta C++20
 fn check_cpp20_support(compiler: &str) -> bool {
-    // Crear un archivo temporal de prueba C++20 más completo
     let test_code = r#"
 #include <version>
 #if __cplusplus >= 202002L
@@ -311,7 +291,6 @@ int main() { return 0; }
         return false;
     }
     
-    // Intentar compilar con C++20
     let mut cmd = Command::new(compiler);
     cmd.arg("-std=c++20")
        .arg("-c")
@@ -319,68 +298,57 @@ int main() { return 0; }
        .arg("-o")
        .arg(&obj_file);
     
-    // Si el compilador es "clang" o "gcc" (sin ++), especificar lenguaje C++
     if !compiler.contains("++") && (compiler.contains("clang") || compiler.contains("gcc")) {
         cmd.arg("-x").arg("c++");
     }
     
-    // Ejecutar y verificar resultado
     let output = cmd.output();
     let result = output.is_ok() && output.as_ref().unwrap().status.success();
     
-    // Limpiar archivos temporales
     let _ = fs::remove_file(&test_file);
     let _ = fs::remove_file(&obj_file);
     
     result
 }
 
-/// Compilar código C++ a ASM usando GCC++/Clang++ (para pipeline ParserManualCpp)
-fn compile_cpp_to_asm_for_pipeline(cpp_code: &str, input_path: &str) -> Result<String, String> {
-    use std::path::PathBuf;
-    
-    // Crear archivo C++ temporal
+/// Compilar código C++ a ASM usando GCC++/Clang++
+fn compile_cpp_to_asm(cpp_code: &str, _input_path: &str) -> Result<String, String> {
     let temp_dir = std::env::temp_dir();
     let cpp_file = temp_dir.join(format!("adead_temp_{}.cpp", std::process::id()));
     
     fs::write(&cpp_file, cpp_code)
-        .map_err(|e| format!("Failed to write C++ file: {}", e))?;
+        .map_err(|e| format!("Error escribiendo archivo C++: {}", e))?;
     
-    // Buscar compilador C++
-    let compiler = find_cpp_compiler_for_pipeline()
+    let compiler = find_cpp_compiler()
         .ok_or_else(|| "No se encontró GCC++ ni Clang++".to_string())?;
     
-    // Crear archivo ASM temporal
-    let asm_file = cpp_file.with_extension("asm");
+    let asm_file = cpp_file.with_extension("s");
     
-    // Compilar C++ a ASM
     let mut cmd = Command::new(&compiler);
     cmd.arg("-S");
     
-    // Si el compilador es "clang" o "gcc" (sin ++), especificar lenguaje C++
     if !compiler.contains("++") && (compiler.contains("clang") || compiler.contains("gcc")) {
         cmd.arg("-x").arg("c++");
     }
     
-    // Detectar soporte C++20 y usar si está disponible
-    // C++20 es preferido porque tiene mejores features (ranges, concepts, format)
+    // Seleccionar estándar C++ (C++20 preferido, fallback a C++17)
     let cpp_std = if check_cpp20_support(&compiler) {
-        "-std=c++20"  // Usar C++20 si está disponible (preferido)
+        "-std=c++20"
     } else {
-        "-std=c++17"  // Fallback a C++17 si C++20 no está disponible
+        "-std=c++17"
     };
     
     cmd.arg(cpp_std)
-       .arg("-O2")
-       .arg("-fno-asynchronous-unwind-tables")
-       .arg("-fno-exceptions")
-       .arg("-fno-stack-protector")
-       .arg("-mno-red-zone")
+       .arg("-O2")                           // Optimización
+       .arg("-fno-asynchronous-unwind-tables") // Eliminar unwind tables
+       .arg("-fno-exceptions")               // Sin excepciones
+       .arg("-fno-stack-protector")          // Sin stack protector
+       .arg("-mno-red-zone")                 // Sin red zone
        .arg("-o")
        .arg(&asm_file)
        .arg(&cpp_file);
     
-    // Ajustar flags según compilador
+    // Usar sintaxis Intel para ASM
     if compiler.contains("clang") {
         cmd.arg("-mllvm").arg("--x86-asm-syntax=intel");
     } else {
@@ -388,107 +356,36 @@ fn compile_cpp_to_asm_for_pipeline(cpp_code: &str, input_path: &str) -> Result<S
     }
     
     let output = cmd.output()
-        .map_err(|e| format!("Failed to execute compiler: {}", e))?;
+        .map_err(|e| format!("Error ejecutando compilador: {}", e))?;
     
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        let stdout = String::from_utf8_lossy(&output.stdout);
         let _ = fs::remove_file(&cpp_file);
-        
-        // Mejorar mensaje de error con más contexto
-        let error_msg = if stderr.is_empty() && !stdout.is_empty() {
-            format!("Compilation failed (sin stderr, pero stdout contiene): {}", stdout)
-        } else if stderr.len() > 2000 {
-            // Truncar stderr muy largo
-            format!("Compilation failed: {}... (truncado, {} caracteres totales)", 
-                &stderr[..2000], stderr.len())
-        } else {
-            format!("Compilation failed: {}", stderr)
-        };
-        
-        return Err(format!(
-            "{}\n\n\
-            Compilador usado: {}\n\
-            Archivo C++ temporal: {}\n\
-            Comando ejecutado: {} -S {} -O2 ... -o {} {}\n\n\
-            Sugerencias:\n\
-            1. Verifica que el código C++ generado es válido\n\
-            2. Verifica que el compilador soporta C++20/C++17\n\
-            3. Intenta compilar manualmente el archivo temporal para más detalles",
-            error_msg,
-            compiler,
-            cpp_file.display(),
-            compiler,
-            cpp_std,
-            asm_file.display(),
-            cpp_file.display()
-        ));
+        return Err(format!("Compilación fallida: {}", stderr));
     }
     
-    // Leer ASM generado
     let asm = fs::read_to_string(&asm_file)
-        .map_err(|e| format!("Failed to read ASM file: {} (archivo: {})", e, asm_file.display()))?;
+        .map_err(|e| format!("Error leyendo archivo ASM: {}", e))?;
     
-    // Verificar que el ASM tiene contenido válido antes de retornar
-    if asm.is_empty() {
-        let _ = fs::remove_file(&cpp_file);
-        let _ = fs::remove_file(&asm_file);
-        return Err(format!(
-            "El compilador generó un archivo ASM vacío.\n\
-            Compilador: {}\n\
-            Archivo ASM: {}\n\
-            Esto puede indicar un problema con el compilador o las opciones usadas.",
-            compiler,
-            asm_file.display()
-        ));
-    }
-    
-    // Verificar que contiene al menos algunas instrucciones ASM básicas
-    let has_asm_content = asm.contains("section") || asm.contains(".text") || 
-                         asm.contains(".globl") || asm.contains("main:") ||
-                         asm.contains(".intel_syntax") || asm.contains("push") ||
-                         asm.contains("mov") || asm.contains("call") ||
-                         asm.contains("ret");
-    
-    if !has_asm_content && asm.len() < 100 {
-        let _ = fs::remove_file(&cpp_file);
-        let _ = fs::remove_file(&asm_file);
-        return Err(format!(
-            "El archivo ASM generado no parece contener código ASM válido.\n\
-            Longitud: {} bytes\n\
-            Contenido (primeras 500 caracteres):\n{}\n\n\
-            Esto puede indicar que el compilador no generó ASM correctamente.",
-            asm.len(),
-            &asm.chars().take(500).collect::<String>()
-        ));
-    }
-    
-    // Limpiar archivos temporales
     let _ = fs::remove_file(&cpp_file);
     let _ = fs::remove_file(&asm_file);
     
     Ok(asm)
 }
 
-/// Compilar código C a ASM usando GCC/Clang (para pipeline ParserManualC)
-fn compile_c_to_asm_for_pipeline(c_code: &str, input_path: &str) -> Result<String, String> {
-    use std::path::PathBuf;
-    
-    // Crear archivo C temporal
+/// Compilar código C a ASM usando GCC/Clang
+fn compile_c_to_asm(c_code: &str, _input_path: &str) -> Result<String, String> {
     let temp_dir = std::env::temp_dir();
     let c_file = temp_dir.join(format!("adead_temp_{}.c", std::process::id()));
     
     fs::write(&c_file, c_code)
-        .map_err(|e| format!("Failed to write C file: {}", e))?;
+        .map_err(|e| format!("Error escribiendo archivo C: {}", e))?;
     
-    // Buscar compilador C
-    let compiler = find_c_compiler_for_pipeline()
+    let compiler = find_c_compiler()
         .ok_or_else(|| "No se encontró GCC ni Clang".to_string())?;
     
-    // Crear archivo ASM temporal
-    let asm_file = c_file.with_extension("asm");
+    let asm_file = c_file.with_extension("s");
     
-    // Compilar C a ASM
     let mut cmd = Command::new(&compiler);
     cmd.arg("-S")
        .arg("-O2")
@@ -500,7 +397,7 @@ fn compile_c_to_asm_for_pipeline(c_code: &str, input_path: &str) -> Result<Strin
        .arg(&asm_file)
        .arg(&c_file);
     
-    // Ajustar flags según compilador
+    // Usar sintaxis Intel para ASM
     if compiler.contains("clang") {
         cmd.arg("-mllvm").arg("--x86-asm-syntax=intel");
     } else {
@@ -508,112 +405,99 @@ fn compile_c_to_asm_for_pipeline(c_code: &str, input_path: &str) -> Result<Strin
     }
     
     let output = cmd.output()
-        .map_err(|e| format!("Failed to execute compiler: {}", e))?;
+        .map_err(|e| format!("Error ejecutando compilador: {}", e))?;
     
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         let _ = fs::remove_file(&c_file);
-        return Err(format!("Compilation failed: {}", stderr));
+        return Err(format!("Compilación fallida: {}", stderr));
     }
     
-    // Leer ASM generado
     let asm = fs::read_to_string(&asm_file)
-        .map_err(|e| format!("Failed to read ASM file: {}", e))?;
+        .map_err(|e| format!("Error leyendo archivo ASM: {}", e))?;
     
-    // Limpiar archivos temporales
     let _ = fs::remove_file(&c_file);
     let _ = fs::remove_file(&asm_file);
     
     Ok(asm)
 }
 
-/// Buscar compilador C++ para el pipeline (con detección de C++20)
-fn find_cpp_compiler_for_pipeline() -> Option<String> {
-    // Lista de compiladores a probar (en orden de preferencia)
-    let mut compilers_to_try = Vec::new();
+/// Buscar compilador C++ disponible (preferencia: C++20)
+fn find_cpp_compiler() -> Option<String> {
+    let compilers = vec![
+        "clang++",
+        "g++",
+        "clang",
+        "gcc",
+        #[cfg(target_os = "windows")]
+        "C:\\msys64\\mingw64\\bin\\g++.exe",
+        #[cfg(target_os = "windows")]
+        "C:\\msys64\\clang64\\bin\\clang++.exe",
+        #[cfg(target_os = "windows")]
+        "C:\\Program Files\\LLVM\\bin\\clang++.exe",
+    ];
     
-    // Primero probar compiladores en PATH
-    compilers_to_try.push("clang++".to_string());
-    compilers_to_try.push("g++".to_string());
-    compilers_to_try.push("clang".to_string());
-    compilers_to_try.push("gcc".to_string());
-    
-    // Luego probar rutas comunes de Windows
-    #[cfg(target_os = "windows")]
-    {
-        compilers_to_try.extend(vec![
-            "C:\\msys64\\mingw64\\bin\\g++.exe".to_string(),
-            "C:\\msys64\\clang64\\bin\\clang++.exe".to_string(),
-            "C:\\Program Files\\LLVM\\bin\\clang++.exe".to_string(),
-            "C:\\msys64\\mingw64\\bin\\gcc.exe".to_string(),
-            "C:\\msys64\\clang64\\bin\\clang.exe".to_string(),
-        ]);
-    }
-    
-    // Buscar compilador que funcione (preferir C++20)
     let mut cpp20_compiler: Option<String> = None;
-    let mut cpp17_compiler: Option<String> = None;
+    let mut any_compiler: Option<String> = None;
     
-    for compiler in compilers_to_try {
-        // Verificar si existe (para rutas absolutas) o está en PATH
-        let compiler_exists = if Path::new(&compiler).exists() {
+    for compiler in compilers {
+        let exists = if Path::new(compiler).exists() {
             true
-        } else if compiler.contains("++") || compiler.contains("clang") || compiler.contains("gcc") {
-            // Para compiladores en PATH, verificar que respondan a --version
-            Command::new(&compiler).arg("--version").output().is_ok()
         } else {
-            false
+            Command::new(compiler)
+                .arg("--version")
+                .output()
+                .map_or(false, |o| o.status.success())
         };
         
-        if compiler_exists {
-            // Verificar soporte C++20 primero (preferido)
-            if check_cpp20_support(&compiler) {
-                cpp20_compiler = Some(compiler.clone());
-                // Continuar buscando por si hay uno mejor, pero guardar este
-            } else if cpp17_compiler.is_none() {
-                // Guardar como fallback C++17 solo si no tenemos C++20
-                cpp17_compiler = Some(compiler);
+        if exists {
+            if any_compiler.is_none() {
+                any_compiler = Some(compiler.to_string());
+            }
+            if check_cpp20_support(compiler) {
+                cpp20_compiler = Some(compiler.to_string());
+                break; // Encontramos C++20, no buscar más
             }
         }
     }
     
-    // Retornar C++20 si está disponible (preferido), sino C++17
-    cpp20_compiler.or(cpp17_compiler)
+    cpp20_compiler.or(any_compiler)
 }
 
-/// Buscar compilador C para el pipeline
-fn find_c_compiler_for_pipeline() -> Option<String> {
-    // Priorizar Clang sobre GCC
-    if Command::new("clang").arg("--version").output().is_ok() {
-        return Some("clang".to_string());
-    }
-    if Command::new("gcc").arg("--version").output().is_ok() {
-        return Some("gcc".to_string());
-    }
+/// Buscar compilador C disponible
+fn find_c_compiler() -> Option<String> {
+    let compilers = vec![
+        "clang",
+        "gcc",
+        #[cfg(target_os = "windows")]
+        "C:\\msys64\\mingw64\\bin\\gcc.exe",
+        #[cfg(target_os = "windows")]
+        "C:\\msys64\\clang64\\bin\\clang.exe",
+        #[cfg(target_os = "windows")]
+        "C:\\Program Files\\LLVM\\bin\\clang.exe",
+    ];
     
-    // Buscar en ubicaciones comunes (Windows)
-    #[cfg(target_os = "windows")]
-    {
-        let common_paths = vec![
-            "C:\\msys64\\mingw64\\bin\\gcc.exe",
-            "C:\\msys64\\clang64\\bin\\clang.exe",
-            "C:\\Program Files\\LLVM\\bin\\clang.exe",
-        ];
+    for compiler in compilers {
+        let exists = if Path::new(compiler).exists() {
+            true
+        } else {
+            Command::new(compiler)
+                .arg("--version")
+                .output()
+                .map_or(false, |o| o.status.success())
+        };
         
-        for path in common_paths {
-            if Path::new(path).exists() {
-                if Command::new(path).arg("--version").output().is_ok() {
-                    return Some(path.to_string());
-                }
-            }
+        if exists {
+            return Some(compiler.to_string());
         }
     }
     
     None
 }
 
-// Nota: La optimización de ASM se hace en clean_asm::clean_asm()
-// Esta función ya no es necesaria porque clean_asm se aplica en generate_asm_with_pipeline
+// ============================================================================
+// TESTS
+// ============================================================================
 
 #[cfg(test)]
 mod tests {
@@ -623,8 +507,8 @@ mod tests {
     fn test_analyze_simple_code() {
         let source = "print 42";
         let features = analyze_code_features(source);
-        assert_eq!(features.complexity_score, 0);
         assert!(!features.has_while_loops);
+        assert!(!features.has_functions);
     }
     
     #[test]
@@ -632,41 +516,90 @@ mod tests {
         let source = "while i < 10 { print i }";
         let features = analyze_code_features(source);
         assert!(features.has_while_loops);
-        assert!(features.has_comparisons);
         assert!(features.complexity_score > 0);
     }
     
     #[test]
-    fn test_select_pipeline_simple() {
-        let features = CodeFeatures {
-            complexity_score: 0,
-            has_while_loops: false,
-            has_if_statements: false,
-            has_nested_blocks: false,
-            has_variables: false,
-            has_expressions: false,
-            has_floats: false,
-            has_arithmetic: false,
-            has_comparisons: false,
-        };
-        assert_eq!(select_optimal_pipeline(&features), RecommendedPipeline::ParserManualCpp);
+    fn test_analyze_arrays() {
+        let source = "let arr = [1, 2, 3]";
+        let features = analyze_code_features(source);
+        assert!(features.has_arrays);
     }
     
     #[test]
-    fn test_select_pipeline_complex() {
+    fn test_analyze_strings() {
+        let source = r#"let s = "hello""#;
+        let features = analyze_code_features(source);
+        assert!(features.has_strings);
+    }
+    
+    #[test]
+    fn test_analyze_functions() {
+        let source = "fn test() { return 42 }";
+        let features = analyze_code_features(source);
+        assert!(features.has_functions);
+    }
+    
+    #[test]
+    fn test_analyze_structs() {
+        let source = "struct Point { x y }";
+        let features = analyze_code_features(source);
+        assert!(features.has_structs);
+    }
+    
+    #[test]
+    fn test_analyze_classes() {
+        let source = "class Rect { fn new() { } }";
+        let features = analyze_code_features(source);
+        assert!(features.has_classes);
+    }
+    
+    #[test]
+    fn test_select_pipeline_always_nasm() {
+        // Pipeline debe ser SIEMPRE NASM directo
+        let features = CodeFeatures::default();
+        assert_eq!(select_optimal_pipeline(&features), RecommendedPipeline::NasmDirect);
+    }
+    
+    #[test]
+    fn test_select_pipeline_complex_still_nasm() {
         let features = CodeFeatures {
-            complexity_score: 25,
+            complexity_score: 100,
             has_while_loops: true,
             has_if_statements: true,
-            has_nested_blocks: true,
-            has_variables: true,
-            has_expressions: true,
+            has_for_loops: true,
+            has_functions: true,
+            has_arrays: true,
+            has_strings: true,
+            has_structs: true,
+            has_classes: true,
+            has_imports: true,
             has_floats: false,
-            has_arithmetic: true,
-            has_comparisons: true,
         };
-        let pipeline = select_optimal_pipeline(&features);
-        assert_eq!(pipeline, RecommendedPipeline::ParserManualCpp);
+        // Siempre debe seleccionar NASM directo
+        assert_eq!(select_optimal_pipeline(&features), RecommendedPipeline::NasmDirect);
+    }
+    
+    #[test]
+    fn test_is_valid_asm() {
+        let valid_asm = r#"
+section .text
+global main
+main:
+    mov rax, 42
+    ret
+"#;
+        assert!(is_valid_asm(valid_asm));
+        
+        let invalid_asm = "hello world";
+        assert!(!is_valid_asm(invalid_asm));
+    }
+    
+    #[test]
+    fn test_pipeline_display() {
+        assert_eq!(
+            format!("{}", RecommendedPipeline::NasmDirect),
+            "NASM Directo (Prioritario)"
+        );
     }
 }
-

@@ -4,140 +4,189 @@
 
 **ASM is dead (but powerful)**
 
-Simple sintaxis estilo Python • Rendimiento nativo
+Simple sintaxis estilo Python • Rendimiento nativo x86_64
 
 🎨 **Icono personalizado para archivos `.ad`** - Identidad visual única en Windows
 
 **Desarrollado por:** Eddi Andreé Salazar Matos  
-**Fecha:** 11 de Diciembre de 2025
+**Fecha:** Diciembre 2025 (Última actualización: 17 de Diciembre de 2025)
 
 </div>
 
-## 🔄 Arquitectura Completa: Stack Dual (C++ Pipeline + NASM Directo)
+---
 
-**ADead utiliza un stack completo y optimizado que genera código ASM virgen y puro:**
+## 🔄 Arquitectura del Compilador: NASM Prioritario
 
-```
-╔═══════════════════════════════════════════════════════════════════════╗
-║              ARQUITECTURA COMPLETA - DUAL PIPELINE                     ║
-║                                                                         ║
-║  Pipeline 1: C++ (General)                                            ║
-║  Parser Manual (Rust) → C++20 Generator (Rust) → GCC++/Clang++ +      ║
-║  Rust Cleaner → ASM → NASM/GAS → .obj → Zig/GCC/Clang (linker) → .exe ║
-║                                                                         ║
-║  Pipeline 2: NASM Directo (Arrays/Strings) ✅ IMPLEMENTADO           ║
-║  Parser Manual (Rust) → NASM Generator (Rust) → NASM → .obj →          ║
-║  Zig/GCC/Clang (linker) → .exe                                        ║
-║                                                                         ║
-║  C++20 Features: ranges, concepts, format, consteval                 ║
-║  Fallback: C++17 si C++20 no está disponible                          ║
-║  Linker: GCC/Clang (requerido) o Zig (opcional)                       ║
-║  NASM Directo: Arrays y Strings completos (100%)                      ║
-╚═══════════════════════════════════════════════════════════════════════╝
-```
-
-### 🎯 Flujos Disponibles (100% Funcionales)
-
-**Pipeline 1: C++ (General)**
-**ADead → Parser Manual (Rust) → C++ Generator (Rust) → GCC++/Clang++ (C++20/C++17) → Rust Cleaner → ASM → NASM/GAS → .obj → Zig/GCC/Clang (linker) → .exe**
-
-**Pipeline 2: NASM Directo (Arrays/Strings) ✅ NUEVO**
-**ADead → Parser Manual (Rust) → NASM Generator (Rust) → NASM → .obj → Zig/GCC/Clang (linker) → .exe**
+**ADead genera código ASM virgen, limpio y ejecutable directamente en CPU:**
 
 ```
-┌─────────────────────────────────────────┐
-│  ADead Source (.ad)                    │
-│  • Sintaxis estilo Python              │
-│  • while/if/print/let/arrays           │
-└──────────────┬──────────────────────────┘
-               │
-               ▼
-┌─────────────────────────────────────────┐
-│  📝 PARSER MANUAL (Rust)               │
-│  • Regex + Recursión                   │
-│  • Extrae while/if directamente        │
-│  • Control total del parsing           │
-│  • Genera AST interno                  │
-└──────────────┬──────────────────────────┘
-               │
-               ▼
-┌─────────────────────────────────────────┐
-│  🚀 C++ GENERATOR (Rust)               │
-│  • AST → Código C++20/C++17 válido    │
-│  • std::vector para arrays             │
-│  • RAII para memoria automática        │
-│  • constexpr/consteval para optimizaciones │
-│  • std::ranges para operaciones expresivas (C++20) │
-│  • std::format para mejor formateo (C++20) │
-│  • Código limpio y expresivo           │
-│  • Detección automática C++20/C++17    │
-└──────────────┬──────────────────────────┘
-               │
-               ▼
-┌─────────────────────────────────────────┐
-│  ⚙️ GCC++/CLANG++ (Compilador C++)    │
-│  • C++20/C++17 → ASM optimizado        │
-│  • Optimización -O2, -O3               │
-│  • constexpr/consteval evaluado en compile-time │
-│  • Templates optimizados                │
-│  • Detección automática C++20/C++17    │
-│  • ⚠️ REQUERIDO para compilar C++ → ASM │
-└──────────────┬──────────────────────────┘
-               │
-               ▼
-┌─────────────────────────────────────────┐
-│  🔒 RUST CLEANER (clean_asm.rs)        │
-│  • Elimina SEH metadata                 │
-│  • Elimina frame pointers innecesarios │
-│  • Optimizaciones finales               │
-│  • Limpia código muerto                │
-└──────────────┬──────────────────────────┘
-               │
-               ▼
-┌─────────────────────────────────────────┐
-│  ✨ ASM VIRGEN Y PURO ✨               │
-│  • Código assembly x86_64 limpio       │
-│  • Sin overhead                        │
-│  • Sin basura                          │
-│  • Solo instrucciones necesarias        │
-└──────────────┬──────────────────────────┘
-               │
-               ▼
-┌─────────────────────────────────────────┐
-│  🔧 NASM/GAS (Ensamblador)             │
-│  • Ensamblar ASM → .obj                │
-│  • NASM: sintaxis Intel                 │
-│  • GAS: sintaxis AT&T                   │
-│  • Genera archivos objeto (.obj/.o)     │
-└──────────────┬──────────────────────────┘
-               │
-               ▼
-┌─────────────────────────────────────────┐
-│  🔗 LINKER (GCC/Clang o Zig)           │
-│  • Linkear .obj → .exe                 │
-│  • ✅ GCC/Clang: Linker tradicional     │
-│  • ✅ Zig: Linker alternativo (opcional)│
-│  • Ambos funcionan igual de bien       │
-│  • ⚠️ GCC/Clang sigue siendo necesario  │
-│    para compilar C++ → ASM             │
-└──────────────┬──────────────────────────┘
-               │
-               ▼
-         ⚡ CPU Directo ⚡
+╔══════════════════════════════════════════════════════════════════════════════╗
+║                   PIPELINE PRINCIPAL - NASM PRIORITARIO                       ║
+╠══════════════════════════════════════════════════════════════════════════════╣
+║                                                                               ║
+║  ADead (.ad) → Parser Manual (Rust) → NASM Generator (Rust) →                ║
+║  ASM Virgen → NASM → .obj → Zig/GCC/Clang (linker) → .exe                   ║
+║                                                                               ║
+║  ✅ PRIORIDAD: Generación directa de NASM x86_64                             ║
+║  ✅ ASM virgen y simple para ejecución directa en CPU                        ║
+║  ✅ Sin dependencias de GCC/Clang para código ADead estándar                 ║
+║                                                                               ║
+╠══════════════════════════════════════════════════════════════════════════════╣
+║                   PIPELINE FALLBACK - C++ (Solo si necesario)                ║
+╠══════════════════════════════════════════════════════════════════════════════╣
+║                                                                               ║
+║  ADead (.ad) → Parser (Rust) → C++ Generator (Rust) →                        ║
+║  GCC++/Clang++ (C++20/C++17) → Rust Cleaner → ASM →                         ║
+║  NASM/GAS → .obj → Zig/GCC/Clang (linker) → .exe                            ║
+║                                                                               ║
+║  ⚡ Fallback para características avanzadas que requieren C++ runtime         ║
+║  ⚡ C++20 con fallback automático a C++17                                     ║
+║                                                                               ║
+╚══════════════════════════════════════════════════════════════════════════════╝
 ```
+
+---
+
+## 🎯 Pipeline Principal: NASM Directo (Recomendado)
+
+**ADead → Parser Manual (Rust) → NASM Generator (Rust) → ASM Virgen → NASM → .obj → Linker → .exe**
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                      ADead Source (.ad)                                  │
+│  • Sintaxis estilo Python (indentación opcional con {})                 │
+│  • Variables: let x = 42, let mut y = 0                                  │
+│  • Control: while, for, if/else, break, continue                        │
+│  • Funciones: fn nombre(params) { }                                      │
+│  • Arrays: [1, 2, 3], .append(), .pop(), .sort(), len()                 │
+│  • Strings: "hello", concatenación, slicing, .upper(), .lower()         │
+│  • Structs/Classes: struct Punto { x y }, class Rect { fn new() { } }   │
+│  • Ownership: &ref, &mut ref, borrowing                                  │
+│  • Módulos: import modulo, pub fn                                        │
+└─────────────────────────────────┬───────────────────────────────────────┘
+                                  │
+                                  ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│                      📝 PARSER MANUAL (Rust)                            │
+│  • Parser combinador (Chumsky) para sintaxis completa                   │
+│  • AST tipado con soporte de ownership                                   │
+│  • Resolución de imports y módulos                                       │
+│  • Dead code analysis y optimización temprana                            │
+│  • Ubicación: CORE/rust/crates/adead-parser/                            │
+└─────────────────────────────────┬───────────────────────────────────────┘
+                                  │
+                                  ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│                      🚀 NASM GENERATOR (Rust)                           │
+│  • Generación directa de NASM x86_64 desde AST                          │
+│  • Windows x64 ABI compliant                                             │
+│  • Optimizador de registros integrado                                    │
+│  • Dead code elimination                                                 │
+│  • Librería estándar embebida (print, arrays, strings)                  │
+│  • RAII tracking para destructores automáticos                          │
+│  • Ubicación: CORE/rust/crates/adead-backend/                           │
+└─────────────────────────────────┬───────────────────────────────────────┘
+                                  │
+                                  ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│                      ✨ ASM VIRGEN Y PURO (x86_64)                      │
+│  • Código assembly limpio sin overhead                                   │
+│  • Solo instrucciones necesarias                                         │
+│  • Sintaxis Intel (NASM nativo)                                          │
+│  • Comentarios de debug opcionales                                       │
+│  • Archivo: programa.asm                                                 │
+└─────────────────────────────────┬───────────────────────────────────────┘
+                                  │
+                                  ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│                      🔧 NASM (Ensamblador)                              │
+│  • Ensambla ASM → .obj (Windows) o .o (Linux)                           │
+│  • Formato: win64 (Windows) o elf64 (Linux)                             │
+│  • Comando: nasm -f win64 programa.asm -o programa.obj                  │
+└─────────────────────────────────┬───────────────────────────────────────┘
+                                  │
+                                  ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│                      🔗 LINKER (Zig/GCC/Clang)                          │
+│  • Zig (Recomendado): Más fácil, binario único, ReleaseSmall            │
+│  • GCC: Tradicional, incluido con MinGW                                  │
+│  • Clang: Alternativa LLVM                                               │
+│  • Linkea con kernel32 (Windows) o libc (Linux)                         │
+│  • Optimizaciones de tamaño: -fstrip, -fsingle-threaded                 │
+└─────────────────────────────────┬───────────────────────────────────────┘
+                                  │
+                                  ▼
+                         ⚡ EJECUTABLE NATIVO ⚡
+                           programa.exe / programa
+                      (Ejecución directa en CPU)
+```
+
+---
+
+## 🔧 Pipeline Fallback: C++ (Características Avanzadas)
+
+**ADead → Parser (Rust) → C++ Generator → GCC++/Clang++ → Rust Cleaner → ASM → NASM → .obj → Linker → .exe**
+
+Este pipeline se usa automáticamente cuando se necesitan características que requieren runtime C++.
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                      🚀 C++ GENERATOR (Rust)                            │
+│  • AST → Código C++20/C++17 válido                                      │
+│  • std::vector para arrays complejos                                     │
+│  • RAII automático                                                       │
+│  • constexpr/consteval para optimizaciones compile-time                 │
+│  • Ubicación: CORE/rust/crates/adead-parser/src/cpp_generator.rs        │
+└─────────────────────────────────┬───────────────────────────────────────┘
+                                  │
+                                  ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│                      ⚙️ GCC++/CLANG++ (C++20/C++17)                     │
+│  • Compila C++ → ASM (formato GAS/Intel)                                │
+│  • Optimizaciones: -O2, -fno-exceptions, -fno-rtti                      │
+│  • Detección automática de versión C++                                   │
+└─────────────────────────────────┬───────────────────────────────────────┘
+                                  │
+                                  ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│                      🔒 RUST CLEANER (clean_asm.rs)                     │
+│  • Convierte GAS → NASM si es necesario                                 │
+│  • Elimina SEH metadata (Windows)                                        │
+│  • Elimina frame pointers innecesarios                                   │
+│  • Elimina código muerto y movimientos redundantes                      │
+│  • Optimiza saltos y elimina NOPs                                        │
+│  • Ubicación: CORE/rust/crates/adead-parser/src/clean_asm.rs            │
+└─────────────────────────────────┬───────────────────────────────────────┘
+                                  │
+                                  ▼
+                    (Continúa con NASM → Linker → .exe)
+```
+
+---
+
+## 📊 Resumen del Stack
+
+| Componente | Pipeline NASM | Pipeline C++ | Descripción |
+|------------|---------------|--------------|-------------|
+| **Parser** | ✅ Chumsky | ✅ Chumsky | Parser combinador en Rust |
+| **Generator** | ✅ NASM directo | ✅ C++ Generator | Genera código objetivo |
+| **Compilador** | ❌ No necesario | ⚠️ GCC++/Clang++ | Solo para C++ |
+| **Cleaner** | ❌ No necesario | ✅ Rust Cleaner | Limpia ASM de GCC |
+| **Ensamblador** | ✅ NASM | ✅ NASM/GAS | Genera .obj |
+| **Linker** | ✅ Zig/GCC/Clang | ✅ Zig/GCC/Clang | Genera .exe |
 
 **Estado:** ✅ **LENGUAJE COMPLETO** - Verificado con ejemplos reales
 
-**Resumen del Stack:**
-- ✅ **Pipeline C++ (General)** - Para código general, funciones, control flow
-- ✅ **Pipeline NASM Directo (Arrays/Strings)** - Generación directa sin C++ intermedio
-- ✅ **GCC/Clang para compilación** - Requerido para pipeline C++ → ASM
-- ✅ **Zig opcional para linking** - Alternativa ligera y fácil de instalar
-- ✅ **NASM/GAS para ensamblar** - Convierte ASM → .obj
-- ✅ **Pipeline selector inteligente** - Selecciona automáticamente el mejor pipeline
-- ✅ **ABI compliance total** - Windows x64 ABI oficialmente especificado
-- ✅ **Ownership explícito** - `array_free()` y `string_free()` disponibles
-- ✅ **Contrato de errores** - Sin `ExitProcess`, códigos de error retornables
+### Características Implementadas:
+- ✅ **NASM Prioritario** - Generación directa sin dependencias externas
+- ✅ **ASM Virgen y Puro** - Código limpio ejecutable en CPU
+- ✅ **Windows x64 ABI** - Cumplimiento total de calling conventions
+- ✅ **Dead Code Elimination** - Solo se genera código usado
+- ✅ **Ownership System** - &ref, &mut ref, borrowing
+- ✅ **Arrays Completos** - append, pop, sort, reverse, len, index, count
+- ✅ **Strings Completos** - concat, slice, upper, lower, len
+- ✅ **Structs/Classes** - Constructores, destructores, métodos
+- ✅ **Módulos** - import, pub fn, visibilidad
 
 ---
 

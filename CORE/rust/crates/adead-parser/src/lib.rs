@@ -2,34 +2,41 @@
 use chumsky::prelude::*;
 
 // ═══════════════════════════════════════════════════════════════════════════
-// FLUJO ESTABLECIDO: ADead → Parser Manual → C++ Optimizer → C → GCC/Clang → Rust Cleaner → ASM Virgen
+// ADead Parser - Compilador de ADead a NASM (x86_64)
 // ═══════════════════════════════════════════════════════════════════════════
-// ARQUITECTURA TRÍO: Parser Manual (Rust) + C++ Optimizer + C Generator (Rust) + Rust Cleaner
-// Parser manual especializado para C → Rust → ASM (reemplaza Tree-sitter)
+//
+// PIPELINE PRINCIPAL (NASM Directo):
+//   ADead → Parser (Chumsky) → NASM Generator (adead-backend) → NASM → .obj → .exe
+//
+// PIPELINE FALLBACK (C++):
+//   ADead → Parser → C++ Generator → GCC++/Clang++ → ASM Cleaner → NASM
+//
+// Autor: Eddi Andreé Salazar Matos
+// ═══════════════════════════════════════════════════════════════════════════
+
+// Parser manual para estructuras C (usado en pipeline fallback)
 pub mod c_manual_parser;
 pub mod c_while_if_parser;
 
-// Resolución de módulos (Sprint 1.3 - Import básico)
+// Resolución de módulos (import básico)
 pub mod module_resolver;
 
-// Selector inteligente de pipeline
+// Selector de pipeline (prioriza NASM directo)
 pub mod pipeline_selector;
 
 // Pipeline paralelo: Compilación paralela con caching
 pub mod parallel_pipeline;
 
-// Limpieza y optimización de ASM generado
+// Limpieza y optimización de ASM (incluye conversión GAS→NASM)
 pub mod clean_asm;
 
-// C++ Optimizer Module (FFI para optimizaciones compile-time)
+// C++ Optimizer (placeholder para futuras optimizaciones)
 pub mod cpp_optimizer;
 
-// Generador de código C (backend opcional)
-pub mod c_generator;
-pub mod c_to_nasm;
-
-// Generador de código C++ (backend principal)
-pub mod cpp_generator;
+// Generadores de código (pipelines fallback)
+pub mod c_generator;      // Genera código C desde AST
+pub mod c_to_nasm;        // Convierte C AST directamente a NASM
+pub mod cpp_generator;    // Genera código C++ desde AST
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Expr {
@@ -849,16 +856,18 @@ fn stmt_parser() -> impl Parser<char, Stmt, Error = Simple<char>> + Clone {
                     if method_name == "new" {
                         // Extraer campos del constructor (self.campo = ...)
                         for stmt in &body {
-                            if let Stmt::Expr(Expr::Assign { name, .. }) = stmt {
-                                // Si es self.campo = ..., extraer el nombre del campo
-                                if name.starts_with("self.") {
-                                    let field_name = name.strip_prefix("self.").unwrap().to_string();
-                                    fields.push(StructField {
-                                        visibility: Visibility::Public,
-                                        mutable: true,
-                                        name: field_name,
-                                        ty: None,
-                                    });
+                            // Buscar FieldAssign: self.campo = valor
+                            if let Stmt::Expr(Expr::FieldAssign { object, field, .. }) = stmt {
+                                // Verificar que el objeto es "self"
+                                if let Expr::Ident(obj_name) = object.as_ref() {
+                                    if obj_name == "self" {
+                                        fields.push(StructField {
+                                            visibility: Visibility::Public,
+                                            mutable: true,
+                                            name: field.clone(),
+                                            ty: None,
+                                        });
+                                    }
                                 }
                             }
                         }
@@ -1044,6 +1053,7 @@ fn expr_parser() -> impl Parser<char, Expr, Error = Simple<char>> + Clone {
             .labelled("array literal");
 
         // Identificador - filtrar keywords para evitar que "while", "if", etc. se parseen como identificadores
+        // NOTA: "self" NO está filtrado para permitir self.campo = valor en clases
         let ident = text::ident()
             .try_map(|s: String, span| {
                 // Keywords que NO deben parsearse como identificadores
@@ -1051,7 +1061,7 @@ fn expr_parser() -> impl Parser<char, Expr, Error = Simple<char>> + Clone {
                     "while", "if", "else", "let", "print", "fn", "struct", "return",
                     "true", "false", "Some", "None", "Ok", "Err", "match", "end",
                     "for", "in", "break", "continue",  // For loops y control de flujo
-                    "import", "pub", "mut",  // Otros keywords
+                    "import", "pub", "mut", "class",  // Otros keywords (self NO está aquí)
                 ];
                 if keywords.contains(&s.as_str()) {
                     Err(Simple::custom(span, format!("'{}' is a keyword and cannot be used as an identifier", s)))

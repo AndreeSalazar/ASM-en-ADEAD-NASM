@@ -18,7 +18,7 @@
 //! - constinit (para inicialización compile-time)
 //! - std::format (para mejor formateo de strings)
 
-use crate::{Program, Stmt, Expr, BinOp, StructField, StructMethod, FnParam};
+use crate::{Program, Stmt, Expr, BinOp, StructField, StructMethod};
 use std::collections::HashMap;
 
 /// Información de una clase/struct para generación de código

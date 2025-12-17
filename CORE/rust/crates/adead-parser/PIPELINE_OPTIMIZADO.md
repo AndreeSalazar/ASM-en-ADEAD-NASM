@@ -1,86 +1,104 @@
-# 🚀 Pipeline Optimizado: D → Zig → Rust → ASM Virgen
+# 🚀 ADead Pipeline - Compilación a NASM
 
 ## Descripción
 
-Este pipeline implementa la arquitectura mejorada propuesta en `datos.md`:
+ADead compila código con sintaxis estilo Python directamente a NASM (x86_64).
 
 ```
-ADead → Parser → D (CTFE) → Zig (ASM Directo) → Rust (Limpieza) → ASM Virgen
+┌─────────────────────────────────────────────────────────────────┐
+│  ADead (.ad) → Parser (Rust) → NASM Generator → NASM → .exe    │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+## Pipelines Disponibles
+
+### 1. NASM Directo (Prioridad Alta) ✅
+
+**Ruta:** `ADead → Parser (Chumsky) → NASM Generator (Rust) → NASM → .obj → Linker → .exe`
+
+- Genera código NASM puro directamente
+- Sin dependencia de GCC/Clang para compilación
+- Soporta: Variables, Arrays, Strings, Control Flow, Funciones
+
+```bash
+adeadc build programa.ad --backend nasm
+```
+
+### 2. C++ Pipeline (Fallback)
+
+**Ruta:** `ADead → Parser → C++ Generator → GCC++/Clang++ → ASM Cleaner → NASM`
+
+- Usado para características no implementadas en NASM directo
+- Requiere GCC++ o Clang++ instalado
+- ASM Cleaner convierte GAS a NASM automáticamente
+
+```bash
+adeadc compile programa.ad --backend cpp -o programa.asm
 ```
 
 ## Componentes
 
-### 1. D Language (CTFE)
-- **Función**: Optimización compile-time
-- **Qué hace**: 
-  - Evalúa constantes en compile-time (ej: `5 + 3` → `8`)
-  - Elimina código muerto antes de generar código
-  - Simplifica expresiones complejas
+### 1. Parser (Rust - Chumsky)
+- **Archivo:** `lib.rs`
+- **Función:** Parsea código ADead a AST
+- Soporta: let, print, if, while, for, funciones, arrays, strings, structs
 
-### 2. Zig (ASM Directo)
-- **Función**: Generación de ASM sin pasar por C
-- **Qué hace**:
-  - Genera ASM directamente desde el código optimizado
-  - Evita overhead de frame pointers innecesarios
-  - Mejor control sobre registros CPU
+### 2. NASM Generator (Rust - adead-backend)
+- **Archivo:** `adead-backend/src/lib.rs`
+- **Función:** Genera código NASM x86_64 desde AST
+- ABI Windows x64 compliant
+- Optimizaciones: dead code elimination, register allocation
 
-### 3. Rust (Limpieza)
-- **Función**: Post-procesamiento y limpieza de ASM
-- **Qué hace**:
-  - Elimina metadatos SEH (Windows)
-  - Elimina frame pointers innecesarios
-  - Optimiza movimientos redundantes
-  - Elimina código muerto
-  - Limpia saltos innecesarios
+### 3. ASM Cleaner (Rust)
+- **Archivo:** `clean_asm.rs`
+- **Función:** Limpia y optimiza código ASM
+- Convierte GAS a NASM automáticamente
+- Elimina: SEH metadata, frame pointers innecesarios, código muerto
 
 ## Uso
 
-### Desde CLI
+### Compilar a NASM
 
 ```bash
-# Usar pipeline optimizado
-adeadc compile programa.ad --backend optimized -o programa.asm
+# Pipeline NASM directo (recomendado)
+adeadc compile programa.ad --backend nasm -o programa.asm
 
-# O usar alias corto
-adeadc compile programa.ad --backend opt -o programa.asm
+# Pipeline C++ (fallback)
+adeadc compile programa.ad --backend cpp -o programa.asm
 ```
 
-### Desde Código Rust
+### Compilar a Ejecutable
 
-```rust
-use adead_parser::optimized_pipeline::OptimizedPipeline;
+```bash
+# Build completo (compile + assemble + link)
+adeadc build programa.ad -o programa.exe
 
-let source = "let x = 5 + 3\nprint x";
-let asm = OptimizedPipeline::process_complete(source, "programa.ad")?;
+# Con linker específico
+adeadc build programa.ad --linker zig -o programa.exe
 ```
 
-## Fallback
+### Ensamblar y Linkear
 
-Si algún componente no está disponible, el pipeline hace fallback automático:
+```bash
+# Solo ensamblar
+adeadc assemble programa.asm -o programa.obj
 
-1. Si D no está disponible → Continúa sin optimización CTFE
-2. Si Zig no está disponible → Usa C → GCC/Clang como fallback
-3. Si Rust falla → Retorna error (no debería pasar)
-
-## Beneficios Esperados
-
-- ✅ ASM 30-50% más limpio
-- ✅ Menos instrucciones innecesarias
-- ✅ Mejor performance
-- ✅ Código más pequeño
+# Solo linkear
+adeadc link programa.obj -o programa.exe
+```
 
 ## Estado Actual
 
-- ✅ Módulo de limpieza ASM implementado
-- ✅ Pipeline optimizado implementado
-- ✅ Integración en CLI completada
-- ⚠️ D Language CTFE: Implementación básica (mejoras pendientes)
-- ⚠️ Zig ASM Directo: Usa generador existente (mejoras pendientes)
+- ✅ **NASM Generator:** Completo (arrays, strings, control flow, funciones)
+- ✅ **Parser:** Completo (todas las características del lenguaje)
+- ✅ **ASM Cleaner:** Completo (optimizaciones + conversión GAS→NASM)
+- ✅ **C++ Pipeline:** Completo (fallback funcional)
+- ✅ **CLI:** Completo (compile, build, assemble, link)
 
-## Próximos Pasos
+## Beneficios
 
-1. Mejorar integración D Language para CTFE más agresivo
-2. Mejorar generación ASM directa en Zig
-3. Optimizaciones adicionales en limpieza Rust
-4. Tests exhaustivos del pipeline completo
-
+- ✅ Código NASM limpio y legible
+- ✅ Sin runtime (ejecutables pequeños)
+- ✅ Sin garbage collector
+- ✅ ABI Windows x64 compliant
+- ✅ Ejecutables independientes

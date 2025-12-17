@@ -13,7 +13,7 @@ version = "0.9.0"
 edition = "2021"
 authors = ["Eddi Andreé Salazar Matos <eddi.andre.salazar.matos@gmail.com>"]
 license = "MIT"
-description = "ADead: Python-like language that compiles to NASM (x86_64 Linux)"
+description = "ADead: Python-like syntax that compiles directly to NASM (x86_64 Windows/Linux)"
 repository = "https://github.com/eddiandre/adead"
 
 [workspace.dependencies]

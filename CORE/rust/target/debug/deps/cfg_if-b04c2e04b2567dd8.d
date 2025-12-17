@@ -1,0 +1,5 @@
+C:\Users\andre\OneDrive\Documentos\ASM-en-ADEAD-NASM\CORE\rust\target\debug\deps\cfg_if-b04c2e04b2567dd8.d: C:\Users\andre\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\cfg-if-1.0.4\src\lib.rs
+
+C:\Users\andre\OneDrive\Documentos\ASM-en-ADEAD-NASM\CORE\rust\target\debug\deps\libcfg_if-b04c2e04b2567dd8.rmeta: C:\Users\andre\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\cfg-if-1.0.4\src\lib.rs
+
+C:\Users\andre\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\cfg-if-1.0.4\src\lib.rs:

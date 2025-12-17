@@ -1,0 +1,49 @@
+# Test 06: Clase Rectángulo
+# Ejemplo práctico con cálculos
+
+class Rectangulo {
+    fn new(ancho, alto) {
+        self.ancho = ancho
+        self.alto = alto
+    }
+    
+    fn area(self) {
+        return self.ancho * self.alto
+    }
+    
+    fn perimetro(self) {
+        return 2 * (self.ancho + self.alto)
+    }
+    
+    fn es_cuadrado(self) {
+        if self.ancho == self.alto {
+            return 1
+        }
+        return 0
+    }
+}
+
+# Crear rectángulos
+let r1 = Rectangulo.new(10, 5)
+let r2 = Rectangulo.new(7, 7)
+
+# Calcular áreas
+print r1.area()
+print r2.area()
+
+# Calcular perímetros
+print r1.perimetro()
+print r2.perimetro()
+
+# Verificar si es cuadrado
+print r1.es_cuadrado()
+print r2.es_cuadrado()
+
+# Salida esperada:
+# 50
+# 49
+# 30
+# 28
+# 0
+# 1
+

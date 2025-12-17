@@ -1,16 +1,28 @@
 /**
  * ASM Cleaner Module - Rust
  * 
- * Este módulo limpia y optimiza código ASM generado por GCC/Clang/Zig
- * para producir ASM virgen y limpio, eliminando overhead innecesario.
+ * Módulo de limpieza y optimización de código ASM para el pipeline C++ fallback.
+ * Produce ASM VIRGEN y LIMPIO, eliminando todo overhead innecesario.
+ * 
+ * NOTA: Este módulo es parte del PIPELINE FALLBACK (C++).
+ * El pipeline principal (NASM Directo) genera código limpio directamente
+ * y no necesita este módulo.
+ * 
+ * Pipeline Fallback:
+ *   ADead → Parser → C++ Generator → GCC++/Clang++ → [RUST CLEANER] → ASM Virgen
  * 
  * Funcionalidades:
+ * - Convierte GAS (GNU Assembler) a NASM
+ * - Elimina metadatos SEH (Windows Structured Exception Handling)
  * - Elimina frame pointers innecesarios
- * - Elimina código muerto
- * - Optimiza movimientos redundantes
- * - Limpia metadatos SEH (Windows)
- * - Optimiza saltos
- * - Elimina instrucciones NOP innecesarias
+ * - Elimina código muerto (dead code elimination)
+ * - Optimiza movimientos redundantes (mov rax, rax → eliminar)
+ * - Optimiza secuencias push/pop redundantes
+ * - Optimiza saltos innecesarios
+ * - Elimina NOPs no necesarios para alineamiento
+ * - Normaliza formato del código
+ * 
+ * Resultado: ASM x86_64 virgen, limpio y listo para NASM
  * 
  * Autor: Eddi Andreé Salazar Matos
  * Fecha: Diciembre 2025
