@@ -1,4 +1,0 @@
-print "Test de import parser"
-import math
-print "Import parseado correctamente"
-

@@ -164,6 +164,20 @@ impl BorrowChecker {
                 self.pop_scope();
                 Ok(())
             }
+            Stmt::For { start, end, body, .. } => {
+                self.check_expr(start)?;
+                self.check_expr(end)?;
+                self.push_scope();
+                for s in body {
+                    self.check_stmt(s)?;
+                }
+                self.pop_scope();
+                Ok(())
+            }
+            Stmt::Break | Stmt::Continue => {
+                // Break y Continue no necesitan verificación especial de borrowing
+                Ok(())
+            }
             Stmt::Struct { name: _, fields: _, init: _, destroy: _ } => {
                 // Structs se registran pero no necesitan verificación especial aquí
                 // Los campos se verifican cuando se usan

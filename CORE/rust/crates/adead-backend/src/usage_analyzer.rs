@@ -48,6 +48,16 @@ impl UsageAnalyzer {
                     Self::analyze_stmt(stmt, deps);
                 }
             }
+            Stmt::For { start, end, body, .. } => {
+                Self::analyze_expr(start, deps);
+                Self::analyze_expr(end, deps);
+                for stmt in body {
+                    Self::analyze_stmt(stmt, deps);
+                }
+            }
+            Stmt::Break | Stmt::Continue => {
+                // No necesitan funciones del runtime
+            }
             Stmt::Expr(expr) => {
                 Self::analyze_expr(expr, deps);
             }

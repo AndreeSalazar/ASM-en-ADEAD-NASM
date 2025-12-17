@@ -194,6 +194,16 @@ pub enum Stmt {
         condition: Expr,
         body: Vec<Stmt>,
     },
+    // For loops (NASM-Universal.md - Patrones para Futuras Implementaciones)
+    For {
+        var: String,        // Variable de iteración
+        start: Expr,        // Inicio del rango
+        end: Expr,          // Fin del rango (exclusivo)
+        body: Vec<Stmt>,
+    },
+    // Control de flujo en loops (NASM-Universal.md)
+    Break,      // Salir del loop más cercano
+    Continue,   // Saltar a la siguiente iteración
     Fn {
         visibility: Visibility,  // Sprint 1.3 - Import básico: pub fn o fn (privada)
         name: String,

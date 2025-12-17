@@ -1,9 +1,0 @@
-pub fn saludar() {
-    print "Hola desde utils!"
-}
-
-pub fn sumar(a: int64, b: int64) {
-    let resultado = a + b
-    print "Suma completada"
-}
-

@@ -1,5 +1,0 @@
-print "Test de Arrays"
-let numeros = [10, 20, 30]
-let primero = numeros[0]
-let segundo = numeros[1]
-print "Arrays funcionan"

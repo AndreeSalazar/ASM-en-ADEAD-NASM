@@ -1,7 +1,0 @@
-; Test concatenación múltiple: s1 + s2 + s3
-let s1 = "uno"
-let s2 = "dos"
-let s3 = "tres"
-let resultado = s1 + "-" + s2 + "-" + s3
-print resultado
-

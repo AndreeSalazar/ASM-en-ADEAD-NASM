@@ -1,8 +1,0 @@
-; Test comparación: strings con arrays (ambos tienen len())
-let arr = [1, 2, 3]
-let s = "abc"
-let len_arr = len(arr)
-let len_s = len(s)
-print len_arr
-print len_s
-

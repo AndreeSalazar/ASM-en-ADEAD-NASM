@@ -1,6 +1,0 @@
-; Test método upper(): s.upper()
-let s = "hola mundo"
-let upper = s.upper()
-print s
-print upper
-

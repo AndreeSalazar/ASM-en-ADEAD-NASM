@@ -2,7 +2,23 @@
 
 **Propósito:** Documento base para mantener consistencia en la generación de código NASM  
 **Última actualización:** Diciembre 2025  
-**Estado:** ✅ Base establecida para futuras implementaciones
+**Estado:** ✅ Base establecida + Mejoras implementadas
+
+---
+
+## 📊 Estado de Implementación Actual
+
+| Componente | Estado | Notas |
+|------------|--------|-------|
+| Arrays (10 métodos) | ✅ 100% | Optimizado con `rep movsq` |
+| Strings (6 métodos) | ✅ 100% | ASCII-only |
+| Funciones ABI-safe | ✅ 100% | Windows x64 compliant |
+| For Loops | ✅ Backend | Falta parser sintáctico |
+| Break/Continue | ✅ Backend | Falta parser sintáctico |
+| LoopContext | ✅ 100% | Loops anidados soportados |
+| Stdlib (11 funciones) | ✅ 100% | min, max, abs, pow, clamp, sign, gcd, lcm, factorial, is_even, is_odd |
+| Debug Symbols | ✅ 100% | En todos los statements |
+| Dead Code Elimination | ✅ 100% | DependencyGraph + UsageAnalyzer |
 
 ---
 
@@ -19,6 +35,7 @@
 9. [Error Handling](#error-handling)
 10. [Estructuras de Datos](#estructuras-de-datos)
 11. [Guía para Nuevas Funcionalidades](#guía-para-nuevas-funcionalidades)
+12. [Checklist de Próximos Pasos](#checklist-de-próximos-pasos)
 
 ---
 
@@ -1064,6 +1081,52 @@ Antes de implementar cualquier nueva funcionalidad, verificar:
 
 ---
 
+## 📋 Checklist de Próximos Pasos
+
+### **Prioridad 1: Parser Sintáctico** 🔥
+- [ ] Parser para `for VAR in START..END { BODY }`
+- [ ] Parser para keyword `break`
+- [ ] Parser para keyword `continue`
+- [ ] Parser para `for item in arr { }`
+
+### **Prioridad 2: Operadores Lógicos** 🔥
+- [ ] Agregar `BinOp::And` (&&)
+- [ ] Agregar `BinOp::Or` (||)
+- [ ] Agregar `Expr::Not` (!)
+- [ ] Short-circuit evaluation en NASM
+- [ ] Tests de operadores lógicos
+
+### **Prioridad 3: Módulos** ⚡
+- [ ] Generación NASM por módulo separado
+- [ ] Namespaces: `math.sqrt()` → `math_sqrt`
+- [ ] Generar `extern` para funciones importadas
+- [ ] Generar `global` para funciones exportadas
+- [ ] Integrar con Zig linker para múltiples .obj
+- [ ] Resolución de dependencias circulares
+
+### **Prioridad 4: Matemáticas FPU/SSE** ⚡
+- [ ] `sqrt(x)` usando FPU/SSE
+- [ ] `sin(x)`, `cos(x)`, `tan(x)`
+- [ ] `log(x)`, `exp(x)`
+- [ ] `floor(x)`, `ceil(x)`, `round(x)`
+- [ ] Constantes: PI, E, TAU
+
+### **Prioridad 5: OOP Básico** 📘
+- [ ] Clases con campos en NASM
+- [ ] Métodos de instancia
+- [ ] vtable para polimorfismo
+- [ ] Herencia simple
+
+### **Prioridad 6: Operaciones Avanzadas** 📘
+- [ ] `s.split(delim)`
+- [ ] `s.join(arr)`
+- [ ] `s.replace(old, new)`
+- [ ] `arr.map(fn)`
+- [ ] `arr.filter(fn)`
+- [ ] `arr.reduce(fn, init)`
+
+---
+
 ## 🎯 Resumen Ejecutivo
 
 Este documento establece la base para:
@@ -1073,6 +1136,25 @@ Este documento establece la base para:
 3. **Mantenibilidad:** Código claro, documentado, trazable
 4. **Escalabilidad:** Fácil agregar nuevas funcionalidades siguiendo los patrones
 5. **Optimización:** Dead code elimination, register optimization, memory pooling
+
+---
+
+## 🚀 Logros Recientes (Diciembre 2025)
+
+### **Implementado Esta Sesión:**
+- ✅ `Stmt::For`, `Stmt::Break`, `Stmt::Continue` en AST
+- ✅ Generación NASM completa para for/break/continue
+- ✅ `LoopContext` para manejo de loops anidados
+- ✅ Funciones stdlib: `clamp`, `sign`, `gcd`, `lcm`, `factorial`, `is_even`, `is_odd`
+- ✅ Optimización `rep movsq` para copia rápida de arrays
+- ✅ Debug symbols consistentes (`add_debug_comment()`)
+- ✅ Actualización del borrow checker
+- ✅ Actualización del usage analyzer
+
+### **Próximo Objetivo Inmediato:**
+Parser sintáctico para `for i in 0..10 { }`, `break`, `continue`
+
+---
 
 **Última actualización:** Diciembre 2025  
 **Mantener actualizado:** Cada vez que se agregue nueva funcionalidad, actualizar este documento

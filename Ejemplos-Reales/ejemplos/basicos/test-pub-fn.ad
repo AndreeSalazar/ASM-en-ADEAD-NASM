@@ -1,6 +1,0 @@
-import math
-
-print "Test de pub fn"
-let resultado = math.factorial(5)
-print "Funciona"
-

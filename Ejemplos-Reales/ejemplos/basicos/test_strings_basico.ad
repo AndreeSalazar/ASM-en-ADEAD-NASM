@@ -1,4 +1,0 @@
-; Test básico: Crear string y imprimir
-let s = "hola"
-print s
-

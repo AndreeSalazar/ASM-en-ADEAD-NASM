@@ -15,6 +15,13 @@ use register_optimizer::RegisterOptimizer;
 use dependency_graph::DependencyGraph;
 use usage_analyzer::UsageAnalyzer;
 
+/// Contexto para loops (NASM-Universal.md - Break/Continue)
+/// Permite manejar break y continue dentro de loops anidados
+struct LoopContext {
+    break_label: String,    // Label para saltar cuando se ejecuta break
+    continue_label: String, // Label para saltar cuando se ejecuta continue
+}
+
 pub struct CodeGenerator {
     data_section: Vec<String>,
     text_section: Vec<String>,
@@ -26,6 +33,7 @@ pub struct CodeGenerator {
     variables_to_destroy: Vec<(String, String)>, // (variable_name, struct_name) - RAII tracking
     source_lines: Vec<(usize, String)>, // (line_number, source_line) para debug symbols
     current_line: usize, // Línea actual del código fuente
+    loop_stack: Vec<LoopContext>, // Stack de contextos de loop para break/continue
 }
 
 impl CodeGenerator {
@@ -41,6 +49,7 @@ impl CodeGenerator {
             variables_to_destroy: Vec::new(),
             source_lines: Vec::new(),
             current_line: 0,
+            loop_stack: Vec::new(),
         }
     }
     
@@ -263,6 +272,7 @@ impl CodeGenerator {
     fn generate_stmt_windows(&mut self, stmt: &Stmt) -> Result<()> {
         match stmt {
             Stmt::Print(expr) => {
+                self.add_debug_comment("print statement");
                 self.text_section.push("    ; print".to_string());
                 match expr {
                     Expr::Bool(b) => {
@@ -685,6 +695,7 @@ impl CodeGenerator {
                 }
             },
             Stmt::Let { mutable, name, value } => {
+                self.add_debug_comment(&format!("let {} = ...", if *mutable { format!("mut {}", name) } else { name.clone() }));
                 // Si el valor es un StructLiteral, registrar para destrucción RAII si tiene destroy
                 let struct_name = if let Expr::StructLiteral { name: struct_name, .. } = value {
                     if self.structs_with_destroy.contains_key(struct_name) {
@@ -728,6 +739,7 @@ impl CodeGenerator {
                 then_body,
                 else_body,
             } => {
+                self.add_debug_comment("if statement");
                 self.generate_expr_windows(condition)?;
                 let else_label = self.new_label("else");
                 let end_label = self.new_label("endif");
@@ -756,10 +768,18 @@ impl CodeGenerator {
                 self.text_section.push(format!("{}:", end_label));
             }
             Stmt::While { condition, body } => {
-                let loop_start = self.new_label("loop_start");
-                let loop_end = self.new_label("loop_end");
+                self.add_debug_comment("while loop");
+                let loop_start = self.new_label("while_start");
+                let loop_end = self.new_label("while_end");
+                let loop_continue = loop_start.clone(); // continue salta al inicio
                 
-                    self.text_section.push(format!("{}:", loop_start));
+                // Push loop context para break/continue
+                self.loop_stack.push(LoopContext {
+                    break_label: loop_end.clone(),
+                    continue_label: loop_continue,
+                });
+                
+                self.text_section.push(format!("{}:", loop_start));
                 self.generate_expr_windows(condition)?;
                 self.text_section.push("    cmp rax, 0".to_string());
                 self.text_section.push(format!("    je {}", loop_end));
@@ -769,8 +789,83 @@ impl CodeGenerator {
                 }
                 self.text_section.push(format!("    jmp {}", loop_start));
                 self.text_section.push(format!("{}:", loop_end));
+                
+                // Pop loop context
+                self.loop_stack.pop();
+            }
+            Stmt::For { var, start, end, body } => {
+                self.add_debug_comment(&format!("for {} in range", var));
+                let loop_start = self.new_label("for_start");
+                let loop_end = self.new_label("for_end");
+                let loop_continue = self.new_label("for_continue");
+                
+                // Push loop context para break/continue
+                self.loop_stack.push(LoopContext {
+                    break_label: loop_end.clone(),
+                    continue_label: loop_continue.clone(),
+                });
+                
+                // Evaluar start y guardar en variable
+                self.generate_expr_windows(start)?;
+                let var_offset = self.stack_offset;
+                self.stack_offset += 8;
+                self.variables.insert(var.clone(), var_offset);
+                self.text_section.push(format!("    mov [rbp - {}], rax  ; {} (loop counter)", var_offset + 8, var));
+                
+                // Evaluar end y guardar en registro temporal (r13 preservado)
+                self.generate_expr_windows(end)?;
+                self.text_section.push("    mov r13, rax  ; end value (preserved)".to_string());
+                
+                // Loop start
+                self.text_section.push(format!("{}:", loop_start));
+                
+                // Comparar variable con end
+                self.text_section.push(format!("    mov rax, [rbp - {}]  ; cargar {}", var_offset + 8, var));
+                self.text_section.push("    cmp rax, r13  ; comparar con end".to_string());
+                self.text_section.push(format!("    jge {}  ; si >= end, salir", loop_end));
+                
+                // Body del loop
+                for s in body {
+                    self.generate_stmt_windows(s)?;
+                }
+                
+                // Continue label (para incrementar contador)
+                self.text_section.push(format!("{}:", loop_continue));
+                
+                // Incrementar contador
+                self.text_section.push(format!("    mov rax, [rbp - {}]  ; cargar {}", var_offset + 8, var));
+                self.text_section.push("    inc rax  ; incrementar".to_string());
+                self.text_section.push(format!("    mov [rbp - {}], rax  ; guardar", var_offset + 8));
+                
+                // Saltar al inicio
+                self.text_section.push(format!("    jmp {}", loop_start));
+                self.text_section.push(format!("{}:", loop_end));
+                
+                // Pop loop context
+                self.loop_stack.pop();
+            }
+            Stmt::Break => {
+                self.add_debug_comment("break");
+                if let Some(ctx) = self.loop_stack.last() {
+                    let break_label = ctx.break_label.clone();
+                    self.text_section.push(format!("    jmp {}  ; break", break_label));
+                } else {
+                    // Error: break fuera de loop (debería detectarse en análisis semántico)
+                    self.text_section.push("    ; ERROR: break fuera de loop".to_string());
+                }
+            }
+            Stmt::Continue => {
+                self.add_debug_comment("continue");
+                if let Some(ctx) = self.loop_stack.last() {
+                    let continue_label = ctx.continue_label.clone();
+                    self.text_section.push(format!("    jmp {}  ; continue", continue_label));
+                } else {
+                    // Error: continue fuera de loop (debería detectarse en análisis semántico)
+                    self.text_section.push("    ; ERROR: continue fuera de loop".to_string());
+                }
             }
             Stmt::Fn { visibility: _, name, params, body } => {
+                self.add_debug_comment(&format!("fn {} ({})", name, params.len()));
                 // Generate function with Windows x64 calling convention (ABI-safe)
                 // Visibility no afecta la generación de código (Sprint 1.3)
                 let func_label = format!("fn_{}", name);
@@ -878,6 +973,7 @@ impl CodeGenerator {
                 self.text_section.push(format!("{}_end:", func_label));
             }
             Stmt::Return(expr) => {
+                self.add_debug_comment("return statement");
                 // Return statement: evaluar expresión y poner resultado en RAX
                 // El epilogue se manejará en la función (no aquí)
                 if let Some(expr) = expr {
@@ -1934,10 +2030,16 @@ impl CodeGenerator {
                 self.text_section.push(format!("{}:", end_label));
             }
             Stmt::While { condition, body } => {
-                let loop_start = self.new_label("loop_start");
-                let loop_end = self.new_label("loop_end");
+                let loop_start = self.new_label("while_start");
+                let loop_end = self.new_label("while_end");
+                let loop_continue = loop_start.clone();
                 
-                    self.text_section.push(format!("{}:", loop_start));
+                self.loop_stack.push(LoopContext {
+                    break_label: loop_end.clone(),
+                    continue_label: loop_continue,
+                });
+                
+                self.text_section.push(format!("{}:", loop_start));
                 self.generate_expr(condition)?;
                 self.text_section.push("    cmp rax, 0".to_string());
                 self.text_section.push(format!("    je {}", loop_end));
@@ -1947,6 +2049,60 @@ impl CodeGenerator {
                 }
                 self.text_section.push(format!("    jmp {}", loop_start));
                 self.text_section.push(format!("{}:", loop_end));
+                
+                self.loop_stack.pop();
+            }
+            Stmt::For { var, start, end, body } => {
+                let loop_start = self.new_label("for_start");
+                let loop_end = self.new_label("for_end");
+                let loop_continue = self.new_label("for_continue");
+                
+                self.loop_stack.push(LoopContext {
+                    break_label: loop_end.clone(),
+                    continue_label: loop_continue.clone(),
+                });
+                
+                // Evaluar start y guardar en variable
+                self.generate_expr(start)?;
+                let var_offset = self.stack_offset;
+                self.stack_offset += 8;
+                self.variables.insert(var.clone(), var_offset);
+                self.text_section.push(format!("    mov [rbp - {}], rax  ; {} (loop counter)", var_offset + 8, var));
+                
+                // Evaluar end y guardar en r13
+                self.generate_expr(end)?;
+                self.text_section.push("    mov r13, rax  ; end value".to_string());
+                
+                // Loop start
+                self.text_section.push(format!("{}:", loop_start));
+                self.text_section.push(format!("    mov rax, [rbp - {}]", var_offset + 8));
+                self.text_section.push("    cmp rax, r13".to_string());
+                self.text_section.push(format!("    jge {}", loop_end));
+                
+                for s in body {
+                    self.generate_stmt(s)?;
+                }
+                
+                self.text_section.push(format!("{}:", loop_continue));
+                self.text_section.push(format!("    mov rax, [rbp - {}]", var_offset + 8));
+                self.text_section.push("    inc rax".to_string());
+                self.text_section.push(format!("    mov [rbp - {}], rax", var_offset + 8));
+                self.text_section.push(format!("    jmp {}", loop_start));
+                self.text_section.push(format!("{}:", loop_end));
+                
+                self.loop_stack.pop();
+            }
+            Stmt::Break => {
+                if let Some(ctx) = self.loop_stack.last() {
+                    let label = ctx.break_label.clone();
+                    self.text_section.push(format!("    jmp {}", label));
+                }
+            }
+            Stmt::Continue => {
+                if let Some(ctx) = self.loop_stack.last() {
+                    let label = ctx.continue_label.clone();
+                    self.text_section.push(format!("    jmp {}", label));
+                }
             }
             Stmt::Fn { visibility: _, name, params, body } => {
                 // Generate function
@@ -2743,19 +2899,16 @@ impl CodeGenerator {
         self.text_section.push("    mov [r15 + 8], r12  ; length = count".to_string());
         self.text_section.push("    mov [r15 + 16], r14  ; capacity".to_string());
         
-        // Loop para copiar valores
-        self.text_section.push("    ; Loop para copiar valores".to_string());
-        self.text_section.push("    mov rcx, r12  ; count".to_string());
-        self.text_section.push("    mov rsi, r13  ; puntero a valores fuente (preservado)".to_string());
-        self.text_section.push("    test rcx, rcx".to_string());
+        // Copiar valores usando rep movsq (OPTIMIZACIÓN: mucho más rápido que loop manual)
+        // rep movsq copia RCX qwords desde [RSI] hacia [RDI]
+        self.text_section.push("    ; Copiar valores con rep movsq (optimizado)".to_string());
+        self.text_section.push("    mov rcx, r12  ; count (número de qwords a copiar)".to_string());
+        self.text_section.push("    mov rsi, r13  ; fuente (puntero a valores)".to_string());
+        self.text_section.push("    ; rdi ya tiene el destino (data buffer)".to_string());
+        self.text_section.push("    test rcx, rcx  ; si count == 0, saltar".to_string());
         self.text_section.push("    jz .copy_done".to_string());
-        self.text_section.push(".copy_loop:".to_string());
-        self.text_section.push("    mov rax, [rsi]  ; cargar valor fuente".to_string());
-        self.text_section.push("    mov [rdi], rax  ; guardar en destino".to_string());
-        self.text_section.push("    add rsi, 8  ; siguiente elemento fuente".to_string());
-        self.text_section.push("    add rdi, 8  ; siguiente elemento destino".to_string());
-        self.text_section.push("    dec rcx".to_string());
-        self.text_section.push("    jnz .copy_loop".to_string());
+        self.text_section.push("    cld  ; clear direction flag (copiar hacia adelante)".to_string());
+        self.text_section.push("    rep movsq  ; copiar RCX qwords de [RSI] a [RDI]".to_string());
         self.text_section.push(".copy_done:".to_string());
         self.text_section.push("    mov rax, r15  ; retornar puntero al Array".to_string());
         
