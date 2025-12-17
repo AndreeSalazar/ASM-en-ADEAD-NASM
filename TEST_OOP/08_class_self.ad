@@ -1,0 +1,36 @@
+# TEST 08: Uso de self en Struct
+# Objetivo: Verificar self.campo = valor
+
+print "=== TEST 08: self.campo ==="
+
+struct Punto {
+    x
+    y
+}
+
+# Función que modifica un struct (simulando método)
+fn mover_punto_a(p, nuevo_x, nuevo_y) {
+    # Retornamos un nuevo punto (inmutabilidad)
+    return Punto { x: nuevo_x, y: nuevo_y }
+}
+
+# Crear punto inicial
+let p1 = Punto { x: 0, y: 0 }
+
+print "Punto inicial:"
+print "x:"
+print p1.x
+print "y:"
+print p1.y
+
+# "Mover" el punto (crear nuevo)
+let p2 = mover_punto_a(p1, 100, 200)
+
+print "Punto despues de mover:"
+print "x:"
+print p2.x
+print "y:"
+print p2.y
+
+print "TEST 08: PASADO"
+

@@ -1,0 +1,23 @@
+# TEST 06: Clase con Constructor Simple
+# Objetivo: Verificar fn new() sin parámetros
+
+print "=== TEST 06: Constructor Simple ==="
+
+struct Contador {
+    valor
+}
+
+# Función constructora separada (patrón factory)
+fn crear_contador() {
+    return Contador { valor: 0 }
+}
+
+# Crear usando factory
+let c = crear_contador()
+
+print "Contador creado via factory"
+print "Valor inicial:"
+print c.valor
+
+print "TEST 06: PASADO"
+

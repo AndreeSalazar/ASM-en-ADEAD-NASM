@@ -1,7 +1,0 @@
-// Test 1: Función simple con return
-fn suma(a, b):
-    return a + b
-
-let resultado = suma(5, 3)
-print resultado
-

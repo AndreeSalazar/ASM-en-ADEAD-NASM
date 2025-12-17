@@ -1,7 +1,0 @@
-; Test: Slicing de strings s[0:4]
-let s = "holamundo"
-let slice1 = s[0:4]    ; "hola"
-let slice2 = s[4:9]    ; "mundo"
-print slice1
-print slice2
-

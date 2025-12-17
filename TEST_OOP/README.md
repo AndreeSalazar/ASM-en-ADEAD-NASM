@@ -1,60 +1,93 @@
-# 🧪 TEST_OOP - Tests de Programación Orientada a Objetos
+# 🏗️ TEST_OOP: Pruebas de Programación Orientada a Objetos
 
-## 📊 Estado de Implementación
+**Guía completa de OOP en ADead: De Básico a Avanzado**
+
+---
+
+## 📊 Estado de Implementación OOP
 
 ```
-Progreso OOP: ░░░░░░░░░░ 0% → Meta: 100%
-
-⏳ PENDIENTE PARSER     🔄 EN PROGRESO     ✅ IMPLEMENTADO
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-struct keyword          -                   -
-class keyword           -                   -
-self reference          -                   -
-constructores (new)     -                   -
-métodos                 -                   -
-acceso a campos (.)     -                   -
+╔════════════════════════════════════════════════════════════════════════╗
+║                    OOP EN ADEAD - ESTADO ACTUAL                        ║
+╠════════════════════════════════════════════════════════════════════════╣
+║                                                                         ║
+║  OOP BÁSICO                           OOP AVANZADO                     ║
+║  ✅ Structs simples                   🔄 Herencia (parcial)            ║
+║  ✅ Campos de structs                 ⏳ Interfaces/Traits              ║
+║  ✅ Acceso a campos (struct.campo)    ⏳ Métodos estáticos              ║
+║  ✅ Classes con constructor           ⏳ Polimorfismo                   ║
+║  ✅ fn new() - Constructor            ⏳ Super/extends                  ║
+║  ✅ self.campo = valor                ⏳ Métodos privados               ║
+║  ✅ RAII básico (init/destroy)        ⏳ Getters/Setters                ║
+║  ✅ Struct literals                   ⏳ Operadores sobrecargados       ║
+║                                                                         ║
+╚════════════════════════════════════════════════════════════════════════╝
 ```
 
-## 📁 Archivos de Test
+---
+
+## 📋 Orden de Tests (Progresivo)
 
 ### Nivel 1: Structs Básicos
-| Archivo | Descripción | Parser | Backend |
-|---------|-------------|--------|---------|
-| `01_struct_simple.ad` | Struct con 2 campos | ⏳ | ⏳ |
-| `02_struct_multiple.ad` | Varios structs | ⏳ | ⏳ |
-| `03_struct_operaciones.ad` | Operaciones con campos | ⏳ | ⏳ |
+1. `01_struct_simple.ad` - Struct con un campo
+2. `02_struct_multi_campos.ad` - Struct con múltiples campos
+3. `03_struct_acceso_campos.ad` - Acceso a campos `.campo`
 
-### Nivel 2: Clases con Constructor
-| Archivo | Descripción | Parser | Backend |
-|---------|-------------|--------|---------|
-| `04_class_basica.ad` | Clase con new() | ⏳ | ⏳ |
-| `05_class_metodos.ad` | Métodos con self | ⏳ | ⏳ |
-| `06_class_rectangulo.ad` | Área y perímetro | ⏳ | ⏳ |
+### Nivel 2: Struct Literals
+4. `04_struct_literal.ad` - Crear struct con `Nombre { campo: valor }`
+5. `05_struct_multiple_instancias.ad` - Múltiples instancias
 
-### Nivel 3: Clases Avanzadas
-| Archivo | Descripción | Parser | Backend |
-|---------|-------------|--------|---------|
-| `07_class_pila.ad` | Stack con array interno | ⏳ | ⏳ |
-| `08_class_persona.ad` | Strings en clases | ⏳ | ⏳ |
-| `09_class_vector2d.ad` | Matemáticas vectoriales | ⏳ | ⏳ |
-| `10_class_banco.ad` | Métodos que usan otros métodos | ⏳ | ⏳ |
+### Nivel 3: Clases con Constructor
+6. `06_class_new_simple.ad` - `fn new()` básico
+7. `07_class_new_params.ad` - `fn new(param1, param2)`
+8. `08_class_self.ad` - Uso de `self.campo = valor`
 
-## 🎯 Sintaxis Objetivo
+### Nivel 4: Métodos
+9. `09_class_metodo_simple.ad` - Método sin parámetros
+10. `10_class_metodo_params.ad` - Método con parámetros
+11. `11_class_metodo_return.ad` - Método que retorna valor
 
-### Structs (Datos sin métodos)
-```python
+### Nivel 5: RAII (Avanzado)
+12. `12_raii_init_destroy.ad` - Constructor y destructor
+
+---
+
+## 🚀 Ejecutar Tests
+
+```powershell
+# Ejecutar todos los tests OOP
+.\ejecutar_tests.ps1
+
+# Ejecutar test específico
+..\CORE\rust\target\release\adeadc.exe build 01_struct_simple.ad -o 01_struct_simple.exe
+.\01_struct_simple.exe
+```
+
+---
+
+## 📖 Sintaxis OOP en ADead
+
+### Structs (Datos sin Comportamiento)
+
+```ad
+# Struct simple con campos
 struct Punto {
     x
     y
 }
 
+# Crear instancia
 let p = Punto { x: 10, y: 20 }
-print p.x
-p.y = 30
+
+# Acceder a campos
+print p.x    # 10
+print p.y    # 20
 ```
 
-### Clases (Datos + Métodos)
-```python
+### Classes (Datos + Comportamiento)
+
+```ad
+# Clase con constructor
 class Rectangulo {
     fn new(ancho, alto) {
         self.ancho = ancho
@@ -64,145 +97,115 @@ class Rectangulo {
     fn area(self) {
         return self.ancho * self.alto
     }
+    
+    fn perimetro(self) {
+        return 2 * (self.ancho + self.alto)
+    }
 }
 
-let r = Rectangulo.new(10, 5)
-print r.area()
+# Crear instancia usando constructor
+let rect = Rectangulo.new(5, 3)
+
+# Llamar métodos
+print rect.area()       # 15
+print rect.perimetro()  # 16
 ```
 
-## 🔧 Implementación Requerida
+### RAII (Resource Acquisition Is Initialization)
 
-### 1. Parser (`adead-parser/src/lib.rs`)
-
-```rust
-// Nuevos tokens
-#[derive(Debug, Clone, PartialEq)]
-pub enum Token {
-    // ... existentes ...
-    Struct,      // "struct"
-    Class,       // "class"
-    Self_,       // "self"
-    Dot,         // "."
+```ad
+class Recurso {
+    fn new(valor) {
+        self.valor = valor
+        print "Recurso creado"
+    }
+    
+    fn destroy(self) {
+        print "Recurso destruido"
+    }
 }
 
-// Nuevas expresiones
-#[derive(Debug, Clone)]
-pub enum Expr {
-    // ... existentes ...
-    FieldAccess { object: Box<Expr>, field: String },
-    MethodCall { object: Box<Expr>, method: String, args: Vec<Expr> },
-    StructLiteral { name: String, fields: Vec<(String, Expr)> },
-    SelfRef,
-}
-
-// Nuevos statements
-#[derive(Debug, Clone)]
-pub enum Stmt {
-    // ... existentes ...
-    StructDef { name: String, fields: Vec<String> },
-    ClassDef { name: String, methods: Vec<FnDef> },
-}
-```
-
-### 2. Backend (`adead-backend/src/lib.rs`)
-
-```rust
-// Generar estructura en memoria
-fn generate_struct_def(&mut self, name: &str, fields: &[String]) {
-    // Calcular offsets
-    // Generar constructor implícito
-}
-
-// Generar clase con vtable
-fn generate_class_def(&mut self, name: &str, methods: &[FnDef]) {
-    // Generar vtable
-    // Generar métodos
-    // Generar constructor
-}
-```
-
-### 3. Memoria NASM
-
-```asm
-; Estructura Punto (16 bytes)
-; [+0]  x (qword)
-; [+8]  y (qword)
-
-; Clase Rectangulo (24 bytes)  
-; [+0]  vtable_ptr (puntero a métodos)
-; [+8]  ancho (qword)
-; [+16] alto (qword)
-
-; Vtable Rectangulo
-Rectangulo_vtable:
-    dq Rectangulo_area
-    dq Rectangulo_perimetro
-```
-
-## 📋 Plan de Implementación
-
-### Fase 1: Structs Simples (1-2 días)
-1. [ ] Agregar token `struct` al lexer
-2. [ ] Parser para `struct Name { fields }`
-3. [ ] Parser para `Struct { field: value }`
-4. [ ] Parser para `obj.field`
-5. [ ] Generar layout en memoria
-6. [ ] Generar acceso a campos
-7. [ ] Tests 01-03
-
-### Fase 2: Clases Básicas (2-3 días)
-1. [ ] Agregar token `class` al lexer
-2. [ ] Parser para `class Name { methods }`
-3. [ ] Parser para `self.field`
-4. [ ] Parser para `Class.new(args)`
-5. [ ] Generar vtable
-6. [ ] Generar métodos con self
-7. [ ] Tests 04-06
-
-### Fase 3: Clases Avanzadas (2-3 días)
-1. [ ] Clases con arrays internos
-2. [ ] Métodos que llaman otros métodos
-3. [ ] Métodos con múltiples parámetros
-4. [ ] Optimizaciones
-5. [ ] Tests 07-10
-
-## 🚀 Cómo Ejecutar
-
-```powershell
-# Cuando esté implementado:
-cd TEST_OOP
-..\CORE\rust\target\release\adeadc.exe build 01_struct_simple.ad -o test.exe
-.\test.exe
-```
-
-## 📊 Salidas Esperadas
-
-### 01_struct_simple.ad
-```
-10
-20
-30
-```
-
-### 05_class_metodos.ad
-```
-0
-3
-2
-```
-
-### 10_class_banco.ad
-```
-1000
-500
-1200
-900
-500
-900
+# El destructor se llama automáticamente al salir del scope
+let r = Recurso.new(42)
+# ... código ...
+# destroy() se llama aquí automáticamente
 ```
 
 ---
 
-**Última actualización:** Diciembre 2025
-**Estado:** ⏳ Pendiente implementación de parser y backend
+## 🎯 Objetivo de Cada Test
+
+| Test | Objetivo | Verifica |
+|------|----------|----------|
+| 01 | Struct mínimo | Parser reconoce `struct` |
+| 02 | Múltiples campos | Manejo de varios campos |
+| 03 | Acceso `.campo` | Generación de offsets |
+| 04 | Struct literal | Sintaxis `{ campo: valor }` |
+| 05 | Múltiples instancias | Independencia de datos |
+| 06 | Constructor simple | `fn new()` sin params |
+| 07 | Constructor params | `fn new(a, b)` con params |
+| 08 | self | `self.campo = valor` |
+| 09 | Método simple | Método que usa `self` |
+| 10 | Método params | Método con parámetros |
+| 11 | Método return | Retornar valor calculado |
+| 12 | RAII | `destroy()` automático |
+
+---
+
+## 📁 Estructura de Archivos
+
+```
+TEST_OOP/
+├── README.md                    # Esta guía
+├── ejecutar_tests.ps1           # Script para ejecutar todos
+│
+├── # Nivel 1: Structs Básicos
+├── 01_struct_simple.ad
+├── 02_struct_multi_campos.ad
+├── 03_struct_acceso_campos.ad
+│
+├── # Nivel 2: Struct Literals
+├── 04_struct_literal.ad
+├── 05_struct_multiple_instancias.ad
+│
+├── # Nivel 3: Classes
+├── 06_class_new_simple.ad
+├── 07_class_new_params.ad
+├── 08_class_self.ad
+│
+├── # Nivel 4: Métodos
+├── 09_class_metodo_simple.ad
+├── 10_class_metodo_params.ad
+├── 11_class_metodo_return.ad
+│
+└── # Nivel 5: RAII
+    └── 12_raii_init_destroy.ad
+```
+
+---
+
+## ⚠️ Limitaciones Actuales
+
+1. **Sin herencia**: `class Hijo extends Padre` no implementado
+2. **Sin interfaces**: `implements` no implementado
+3. **Sin métodos estáticos**: `static fn` no implementado
+4. **Sin visibilidad**: `pub`/privado parcialmente implementado
+5. **Sin polimorfismo**: No hay vtables dinámicas
+
+---
+
+## 🔮 Roadmap OOP
+
+### Próximas Implementaciones:
+1. [ ] Herencia simple (`extends`)
+2. [ ] Llamada a `super.metodo()`
+3. [ ] Métodos estáticos (`static fn`)
+4. [ ] Visibilidad (`_privado`)
+5. [ ] Interfaces/Traits
+6. [ ] Polimorfismo con vtables
+
+---
+
+**Autor:** Eddi Andreé Salazar Matos  
+**Fecha:** Diciembre 2025
 

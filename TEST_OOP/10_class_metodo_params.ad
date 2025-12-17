@@ -1,0 +1,46 @@
+# TEST 10: Método con Parámetros
+# Objetivo: Función que recibe struct + parámetros adicionales
+
+print "=== TEST 10: Metodo con Params ==="
+
+struct Rectangulo {
+    ancho
+    alto
+}
+
+# Método que escala un rectángulo
+fn rectangulo_escalar(rect, factor) {
+    let nuevo_ancho = rect.ancho * factor
+    let nuevo_alto = rect.alto * factor
+    return Rectangulo { ancho: nuevo_ancho, alto: nuevo_alto }
+}
+
+# Método que compara áreas (retorna true si rect1 > rect2)
+fn rectangulo_area(rect) {
+    return rect.ancho * rect.alto
+}
+
+# Crear rectángulo
+let r = Rectangulo { ancho: 5, alto: 3 }
+
+print "Rectangulo original:"
+print "Ancho:"
+print r.ancho
+print "Alto:"
+print r.alto
+print "Area:"
+print rectangulo_area(r)
+
+# Escalar por 2
+let r_escalado = rectangulo_escalar(r, 2)
+
+print "Rectangulo escalado x2:"
+print "Ancho:"
+print r_escalado.ancho
+print "Alto:"
+print r_escalado.alto
+print "Area:"
+print rectangulo_area(r_escalado)
+
+print "TEST 10: PASADO"
+

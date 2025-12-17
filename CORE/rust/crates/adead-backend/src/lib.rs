@@ -3937,10 +3937,12 @@ impl CodeGenerator {
         // Epilogue ABI-safe
         self.generate_abi_epilogue(true);
         self.text_section.push("".to_string());
+        }
         
         // string_from_literal: Crear string desde literal
         // Parámetros: RCX = puntero a literal (char*, null-terminated), RDX = longitud
         // Retorna: RAX = puntero al String (en heap)
+        if deps.should_generate("string_from_literal") {
         self.text_section.push("string_from_literal:".to_string());
         self.generate_abi_prologue(true);  // Necesita shadow space para VirtualAlloc
         self.text_section.push("    mov r12, rcx  ; preservar puntero a literal".to_string());

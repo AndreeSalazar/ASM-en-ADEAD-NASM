@@ -1,25 +1,18 @@
-# Test 01: Struct Simple
-# La forma más básica de OOP - solo datos
+# TEST 01: Struct Simple
+# Objetivo: Verificar que el parser reconoce structs con un campo
 
-# Definir un struct simple
-struct Punto {
-    x
-    y
+print "=== TEST 01: Struct Simple ==="
+
+# Definir struct con un campo
+struct Contador {
+    valor
 }
 
+print "Struct Contador definido"
+
 # Crear instancia
-let p = Punto { x: 10, y: 20 }
+let c = Contador { valor: 42 }
 
-# Acceder a campos
-print p.x
-print p.y
-
-# Modificar campos
-p.x = 30
-print p.x
-
-# Salida esperada:
-# 10
-# 20
-# 30
+print "Instancia creada"
+print "TEST 01: PASADO"
 

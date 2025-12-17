@@ -1,8 +1,0 @@
-# Este es un comentario
-struct Punto {
-    x
-    y
-}
-let p = Punto { x: 10, y: 20 }
-print p.x
-

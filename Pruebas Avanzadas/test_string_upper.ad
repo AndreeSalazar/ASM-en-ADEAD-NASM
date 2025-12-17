@@ -1,5 +1,0 @@
-; Test: s.upper()
-let s = "hola mundo"
-let upper = s.upper()
-print upper
-

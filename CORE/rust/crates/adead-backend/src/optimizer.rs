@@ -47,37 +47,38 @@ impl CodeOptimizer {
     }
 
     /// Eliminar código muerto (funciones no usadas)
+    /// NOTA: Solo elimina funciones stdlib_ no usadas, NUNCA funciones de usuario (fn_)
     pub fn remove_dead_code(&self, code: &str) -> String {
         let mut result = Vec::new();
-        let mut in_unused_function = false;
+        let mut in_unused_stdlib = false;
         let mut function_name = String::new();
-        let mut brace_count = 0;
 
         for line in code.lines() {
-            // Detectar inicio de función
-            if line.trim().starts_with("fn_") && line.trim().ends_with(":") {
+            // Solo eliminar funciones stdlib_ no usadas (NUNCA funciones fn_ de usuario)
+            if line.trim().starts_with("stdlib_") && line.trim().ends_with(":") {
                 function_name = line.trim().trim_end_matches(":").to_string();
-                in_unused_function = !self.used_functions.contains(&function_name);
-                brace_count = 0;
+                // Solo eliminar si es stdlib Y no está usada
+                in_unused_stdlib = !self.used_functions.contains(&function_name);
                 
-                if !in_unused_function {
+                if !in_unused_stdlib {
                     result.push(line.to_string());
                 }
                 continue;
             }
-
-            if in_unused_function {
-                // Contar niveles de anidación (simplificado)
-                if line.contains("{") {
-                    brace_count += 1;
+            
+            // Detectar fin de función stdlib (next label o ret simple)
+            if in_unused_stdlib {
+                // Detectar inicio de otra función (termina la stdlib)
+                if (line.trim().starts_with("stdlib_") || 
+                    line.trim().starts_with("fn_") ||
+                    line.trim().starts_with("main:") ||
+                    line.trim().starts_with("; DEBUG") ||
+                    line.trim().starts_with("; ADead")) && 
+                   (line.trim().ends_with(":") || !line.trim().is_empty()) {
+                    in_unused_stdlib = false;
+                } else {
+                    continue; // Saltar líneas de stdlib no usada
                 }
-                if line.contains("}") {
-                    brace_count -= 1;
-                    if brace_count < 0 {
-                        in_unused_function = false;
-                    }
-                }
-                continue;
             }
 
             result.push(line.to_string());

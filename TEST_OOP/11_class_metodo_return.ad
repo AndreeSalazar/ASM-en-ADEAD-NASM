@@ -1,0 +1,53 @@
+# TEST 11: Método que Retorna Valor Calculado
+# Objetivo: Verificar cálculos complejos con datos de struct
+
+print "=== TEST 11: Metodo Return ==="
+
+struct Vector2D {
+    x
+    y
+}
+
+# Método: calcular magnitud al cuadrado (evitamos sqrt)
+fn vector_magnitud_cuadrado(v) {
+    return v.x * v.x + v.y * v.y
+}
+
+# Método: sumar dos vectores
+fn vector_suma(v1, v2) {
+    let nx = v1.x + v2.x
+    let ny = v1.y + v2.y
+    return Vector2D { x: nx, y: ny }
+}
+
+# Método: producto punto
+fn vector_dot(v1, v2) {
+    return v1.x * v2.x + v1.y * v2.y
+}
+
+# Crear vectores
+let a = Vector2D { x: 3, y: 4 }
+let b = Vector2D { x: 1, y: 2 }
+
+print "Vector A (3, 4):"
+print "Magnitud^2:"
+print vector_magnitud_cuadrado(a)
+
+print "Vector B (1, 2):"
+print "Magnitud^2:"
+print vector_magnitud_cuadrado(b)
+
+# Suma
+let c = vector_suma(a, b)
+print "A + B:"
+print "x:"
+print c.x
+print "y:"
+print c.y
+
+# Producto punto
+print "A dot B:"
+print vector_dot(a, b)
+
+print "TEST 11: PASADO"
+

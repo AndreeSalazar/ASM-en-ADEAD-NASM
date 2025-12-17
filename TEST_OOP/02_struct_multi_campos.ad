@@ -1,0 +1,29 @@
+# TEST 02: Struct con Múltiples Campos
+# Objetivo: Verificar manejo de múltiples campos
+
+print "=== TEST 02: Struct Multi-Campos ==="
+
+# Struct con 2 campos
+struct Punto {
+    x
+    y
+}
+
+print "Struct Punto definido (2 campos)"
+
+# Struct con 3 campos
+struct Vector3D {
+    x
+    y
+    z
+}
+
+print "Struct Vector3D definido (3 campos)"
+
+# Crear instancias
+let p = Punto { x: 10, y: 20 }
+let v = Vector3D { x: 1, y: 2, z: 3 }
+
+print "Instancias creadas"
+print "TEST 02: PASADO"
+

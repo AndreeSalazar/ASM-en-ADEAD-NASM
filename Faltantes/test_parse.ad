@@ -1,6 +1,0 @@
-struct Punto {
-    x
-    y
-}
-print 42
-
