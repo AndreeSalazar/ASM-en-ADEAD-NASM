@@ -124,9 +124,10 @@ pub fn generate_asm_with_pipeline(
 ) -> Result<String, String> {
     match pipeline {
         RecommendedPipeline::ParserManualCpp => {
-            // ADead → Parser Manual → C++ Generator → GCC++/Clang++ → Rust Cleaner → ASM (flujo principal)
-            let program = crate::c_manual_parser::CManualParser::parse_program(source)
-                .map_err(|e| format!("Parser manual error: {:?}", e))?;
+            // ADead → Parser Principal (Chumsky) → C++ Generator → GCC++/Clang++ → Rust Cleaner → ASM
+            // Usamos el parser principal que soporta OOP (structs, clases)
+            let program = crate::parse(source)
+                .map_err(|e| format!("Parser error: {:?}", e))?;
             
             // Generar código C++ usando C++ Generator
             let cpp_code = crate::cpp_generator::generate_cpp_code(&program);

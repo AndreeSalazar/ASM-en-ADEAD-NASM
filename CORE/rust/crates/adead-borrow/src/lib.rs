@@ -318,6 +318,11 @@ impl BorrowChecker {
                 // TODO: Verificar que realmente es una referencia
                 Ok(())
             }
+            Expr::Not(expr) => {
+                // Negación lógica: verificar la expresión interna
+                self.check_expr(expr)?;
+                Ok(())
+            }
             // Option/Result constructors (O0.4)
             Expr::Some(expr) | Expr::Ok(expr) | Expr::Err(expr) => {
                 self.check_expr(expr)?;
@@ -529,6 +534,10 @@ impl BorrowChecker {
                 Ok(())
             }
             Expr::Deref(expr) => {
+                self.check_expr_borrowing(expr)?;
+                Ok(())
+            }
+            Expr::Not(expr) => {
                 self.check_expr_borrowing(expr)?;
                 Ok(())
             }

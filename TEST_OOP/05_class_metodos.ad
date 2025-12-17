@@ -1,0 +1,40 @@
+# Test 05: Clase con Métodos
+# Métodos que operan sobre self
+
+class Contador {
+    fn new(inicial) {
+        self.valor = inicial
+    }
+    
+    fn incrementar(self) {
+        self.valor = self.valor + 1
+    }
+    
+    fn decrementar(self) {
+        self.valor = self.valor - 1
+    }
+    
+    fn obtener(self) {
+        return self.valor
+    }
+}
+
+# Crear contador
+let c = Contador.new(0)
+print c.obtener()
+
+# Incrementar 3 veces
+c.incrementar()
+c.incrementar()
+c.incrementar()
+print c.obtener()
+
+# Decrementar 1 vez
+c.decrementar()
+print c.obtener()
+
+# Salida esperada:
+# 0
+# 3
+# 2
+

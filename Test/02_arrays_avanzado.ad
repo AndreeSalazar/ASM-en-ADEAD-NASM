@@ -1,0 +1,26 @@
+# Test 02: Arrays Avanzados
+# Métodos de array estilo Python
+
+let arr = [5, 2, 8, 1, 9, 3]
+
+# Ordenar
+arr.sort()
+print arr[0]
+print arr[5]
+
+# Invertir
+arr.reverse()
+print arr[0]
+
+# Insertar en posición
+arr.insert(0, 100)
+print arr[0]
+
+# Buscar
+print arr.index(9)
+print arr.count(5)
+
+# Pop (remover último)
+arr.pop()
+print len(arr)
+

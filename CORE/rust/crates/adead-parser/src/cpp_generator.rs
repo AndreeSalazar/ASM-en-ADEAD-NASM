@@ -18,13 +18,25 @@
 //! - constinit (para inicialización compile-time)
 //! - std::format (para mejor formateo de strings)
 
-use crate::{Program, Stmt, Expr, BinOp};
+use crate::{Program, Stmt, Expr, BinOp, StructField, StructMethod, FnParam};
+use std::collections::HashMap;
+
+/// Información de una clase/struct para generación de código
+#[derive(Debug, Clone)]
+struct ClassInfo {
+    name: String,
+    fields: Vec<String>,
+    has_constructor: bool,
+    constructor_params: Vec<String>,
+    methods: Vec<(String, Vec<String>, Vec<Stmt>)>,  // (nombre, params, body)
+}
 
 /// Generador de código C++
 pub struct CppGenerator {
     output: String,
     indent_level: usize,
     variable_counter: u32,
+    classes: HashMap<String, ClassInfo>,  // Clases definidas
 }
 
 impl CppGenerator {
@@ -33,6 +45,7 @@ impl CppGenerator {
             output: String::new(),
             indent_level: 0,
             variable_counter: 0,
+            classes: HashMap::new(),
         }
     }
 
@@ -69,12 +82,16 @@ impl CppGenerator {
         
         self.output.push_str("\n");
 
-        // Separar funciones y código principal
+        // Separar structs/classes, funciones y código principal
+        let mut structs = Vec::new();
         let mut functions = Vec::new();
         let mut main_statements = Vec::new();
 
         for stmt in &program.statements {
             match stmt {
+                Stmt::Struct { .. } => {
+                    structs.push(stmt);
+                }
                 Stmt::Fn { .. } => {
                     functions.push(stmt);
                 }
@@ -88,7 +105,12 @@ impl CppGenerator {
             }
         }
 
-        // Generar funciones primero (fuera de main)
+        // Generar structs/clases primero (definiciones de tipo)
+        for stmt in &structs {
+            self.generate_stmt(stmt);
+        }
+
+        // Generar funciones (fuera de main)
         for stmt in &functions {
             self.generate_stmt(stmt);
         }
@@ -225,6 +247,22 @@ impl CppGenerator {
                     Expr::String(_) => {
                         let value_code = self.generate_expr(value);
                         self.output.push_str(&format!("string {} = {};\n", name, value_code));
+                    }
+                    Expr::StructLiteral { name: struct_name, fields } => {
+                        // Struct literal: let p = Punto { x: 10, y: 20 }
+                        // En C++: Punto p{10, 20};
+                        let args: Vec<String> = fields.iter()
+                            .map(|(_, v)| self.generate_expr(v))
+                            .collect();
+                        self.output.push_str(&format!("{} {}{{{}}};\n", struct_name, name, args.join(", ")));
+                    }
+                    Expr::Call { module: Some(class_name), name: method_name, args } if method_name == "new" => {
+                        // Class.new() call: let p = Punto.new(10, 20)
+                        // En C++: Punto p{10, 20};
+                        let args_code: Vec<String> = args.iter()
+                            .map(|a| self.generate_expr(a))
+                            .collect();
+                        self.output.push_str(&format!("{} {}{{{}}};\n", class_name, name, args_code.join(", ")));
                     }
                     _ => {
                         // Verificar si es una expresión de string (concatenación, etc.)
@@ -375,10 +413,119 @@ impl CppGenerator {
                 self.indent();
                 self.output.push_str("return;\n");
             }
+            Stmt::Struct { name, fields, init, destroy } => {
+                // Generar clase C++ desde struct ADead
+                self.generate_class(name, fields, init, destroy);
+            }
+            Stmt::For { var, start, end, body } => {
+                // For loop: for (int64_t var = start; var < end; var++)
+                self.indent();
+                let start_code = self.generate_expr(start);
+                let end_code = self.generate_expr(end);
+                self.output.push_str(&format!("for (int64_t {} = {}; {} < {}; {}++) {{\n", 
+                    var, start_code, var, end_code, var));
+                self.indent_level += 1;
+                for stmt in body {
+                    self.generate_stmt(stmt);
+                }
+                self.indent_level -= 1;
+                self.indent();
+                self.output.push_str("}\n");
+            }
+            Stmt::Break => {
+                self.indent();
+                self.output.push_str("break;\n");
+            }
+            Stmt::Continue => {
+                self.indent();
+                self.output.push_str("continue;\n");
+            }
             _ => {
                 // Otros statements aún no implementados
                 self.indent();
                 self.output.push_str("// TODO: Statement no implementado\n");
+            }
+        }
+    }
+
+    /// Generar clase/struct C++ desde struct/class ADead
+    fn generate_class(&mut self, name: &str, fields: &[StructField], init: &Option<StructMethod>, _destroy: &Option<StructMethod>) {
+        if init.is_some() {
+            // Si tiene constructor, generar como clase
+            self.output.push_str(&format!("class {} {{\n", name));
+            self.output.push_str("public:\n");
+            self.indent_level = 1;
+            
+            // Generar campos
+            for field in fields {
+                self.indent();
+                self.output.push_str(&format!("int64_t {};\n", field.name));
+            }
+            self.output.push_str("\n");
+            
+            // Generar constructor
+            if let Some(init_method) = init {
+                self.indent();
+                let params: Vec<String> = init_method.params.iter()
+                    .map(|p| format!("int64_t {}", p.name))
+                    .collect();
+                self.output.push_str(&format!("{}({}) {{\n", name, params.join(", ")));
+                self.indent_level += 1;
+                
+                // Generar cuerpo del constructor
+                for stmt in &init_method.body {
+                    self.generate_constructor_stmt(stmt);
+                }
+                
+                self.indent_level -= 1;
+                self.indent();
+                self.output.push_str("}\n");
+            }
+            
+            self.indent_level = 0;
+            self.output.push_str("};\n\n");
+        } else {
+            // Si no tiene constructor, generar como struct simple (aggregate)
+            // Esto permite inicialización con llaves: Punto p{10, 20};
+            self.output.push_str(&format!("struct {} {{\n", name));
+            
+            // Generar campos
+            for field in fields {
+                self.output.push_str(&format!("    int64_t {};\n", field.name));
+            }
+            
+            self.output.push_str("};\n\n");
+        }
+        
+        // Registrar la clase para uso posterior
+        let class_info = ClassInfo {
+            name: name.to_string(),
+            fields: fields.iter().map(|f| f.name.clone()).collect(),
+            has_constructor: init.is_some(),
+            constructor_params: init.as_ref()
+                .map(|m| m.params.iter().map(|p| p.name.clone()).collect())
+                .unwrap_or_default(),
+            methods: Vec::new(),
+        };
+        self.classes.insert(name.to_string(), class_info);
+    }
+
+    /// Generar statement dentro de un constructor (maneja self.campo = valor)
+    fn generate_constructor_stmt(&mut self, stmt: &Stmt) {
+        match stmt {
+            Stmt::Expr(Expr::Assign { name, value }) => {
+                self.indent();
+                // Convertir self.campo a this->campo (o simplemente campo en C++)
+                let cpp_name = if name.starts_with("self.") {
+                    name.strip_prefix("self.").unwrap().to_string()
+                } else {
+                    name.clone()
+                };
+                let value_code = self.generate_expr(value);
+                self.output.push_str(&format!("{} = {};\n", cpp_name, value_code));
+            }
+            _ => {
+                self.generate_stmt(stmt);
             }
         }
     }
@@ -405,15 +552,37 @@ impl CppGenerator {
                     BinOp::Le => "<=",
                     BinOp::Gt => ">",
                     BinOp::Ge => ">=",
+                    BinOp::And => "&&",
+                    BinOp::Or => "||",
                 };
                 format!("({} {} {})", left_code, op_str, right_code)
             }
-            Expr::Call { name, args, .. } => {
+            Expr::Call { module, name, args } => {
                 // Manejar funciones especiales como len()
                 if name == "len" && args.len() == 1 {
                     // len(arr) -> arr.size() (C++ STL)
                     let arg_code = self.generate_expr(&args[0]);
                     return format!("{}.size()", arg_code);
+                }
+                
+                // Manejar Class.new() -> Class::new_()
+                if name == "new" {
+                    if let Some(class_name) = module {
+                        let args_code = args.iter()
+                            .map(|arg| self.generate_expr(arg))
+                            .collect::<Vec<_>>()
+                            .join(", ");
+                        return format!("{}::new_({})", class_name, args_code);
+                    }
+                }
+                
+                // Llamada con módulo: modulo.funcion()
+                if let Some(mod_name) = module {
+                    let args_code = args.iter()
+                        .map(|arg| self.generate_expr(arg))
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    return format!("{}::{}({})", mod_name, name, args_code);
                 }
                 
                 let args_code = args.iter()
@@ -510,6 +679,25 @@ impl CppGenerator {
             Expr::Assign { name, value } => {
                 let value_code = self.generate_expr(value);
                 format!("{} = {}", name, value_code)
+            }
+            Expr::Not(inner) => {
+                // Negación lógica: !expr
+                let inner_code = self.generate_expr(inner);
+                format!("(!({}))", inner_code)
+            }
+            Expr::StructLiteral { name, fields } => {
+                // StructLiteral: Nombre { campo1: valor1, campo2: valor2 }
+                // En C++: Nombre{valor1, valor2} (inicialización agregada)
+                let args: Vec<String> = fields.iter()
+                    .map(|(_, value)| self.generate_expr(value))
+                    .collect();
+                // Usar inicialización agregada C++: Nombre{val1, val2}
+                format!("{}{{{}}}", name, args.join(", "))
+            }
+            Expr::FieldAccess { object, field } => {
+                // FieldAccess: objeto.campo
+                let obj_code = self.generate_expr(object);
+                format!("{}.{}", obj_code, field)
             }
             _ => {
                 format!("/* TODO: Expresión no implementada */")

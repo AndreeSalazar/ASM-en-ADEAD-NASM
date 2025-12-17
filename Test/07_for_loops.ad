@@ -1,0 +1,13 @@
+# Test 07: For Loops
+# Prueba de for con rangos
+
+# For básico
+for i in 0..5 {
+    print i
+}
+
+# For con variable de inicio diferente
+for j in 10..15 {
+    print j
+}
+

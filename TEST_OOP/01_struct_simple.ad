@@ -1,0 +1,25 @@
+# Test 01: Struct Simple
+# La forma más básica de OOP - solo datos
+
+# Definir un struct simple
+struct Punto {
+    x
+    y
+}
+
+# Crear instancia
+let p = Punto { x: 10, y: 20 }
+
+# Acceder a campos
+print p.x
+print p.y
+
+# Modificar campos
+p.x = 30
+print p.x
+
+# Salida esperada:
+# 10
+# 20
+# 30
+

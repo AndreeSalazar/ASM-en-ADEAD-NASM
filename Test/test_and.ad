@@ -1,0 +1,6 @@
+let x = 5
+let y = 10
+if x > 3 && y > 5 {
+    print 1
+}
+

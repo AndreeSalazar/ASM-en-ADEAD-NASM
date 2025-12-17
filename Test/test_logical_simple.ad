@@ -1,0 +1,8 @@
+let x = 5
+let y = 10
+print x
+print y
+if x > 3 {
+    print 1
+}
+

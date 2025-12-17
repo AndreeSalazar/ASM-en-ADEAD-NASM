@@ -1,0 +1,56 @@
+# Test 09: Clase Vector2D
+# Operaciones matemáticas con vectores
+
+class Vector2D {
+    fn new(x, y) {
+        self.x = x
+        self.y = y
+    }
+    
+    fn magnitud_cuadrada(self) {
+        return self.x * self.x + self.y * self.y
+    }
+    
+    fn sumar(self, otro) {
+        self.x = self.x + otro.x
+        self.y = self.y + otro.y
+    }
+    
+    fn escalar(self, factor) {
+        self.x = self.x * factor
+        self.y = self.y * factor
+    }
+    
+    fn dot(self, otro) {
+        return self.x * otro.x + self.y * otro.y
+    }
+}
+
+# Crear vectores
+let v1 = Vector2D.new(3, 4)
+let v2 = Vector2D.new(1, 2)
+
+# Magnitud al cuadrado (3² + 4² = 25)
+print v1.magnitud_cuadrada()
+
+# Producto punto (3*1 + 4*2 = 11)
+print v1.dot(v2)
+
+# Escalar v2 por 3
+v2.escalar(3)
+print v2.x
+print v2.y
+
+# Sumar v2 a v1
+v1.sumar(v2)
+print v1.x
+print v1.y
+
+# Salida esperada:
+# 25
+# 11
+# 3
+# 6
+# 6
+# 10
+

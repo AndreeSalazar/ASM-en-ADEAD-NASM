@@ -95,6 +95,8 @@ pub enum Expr {
         start: Box<Expr>,
         end: Box<Expr>,
     },
+    // Operadores lógicos (Prioridad 2)
+    Not(Box<Expr>),             // !expr - Negación lógica
 }
 
 /// Par├ímetro de funci├│n con informaci├│n de borrowing
@@ -175,6 +177,9 @@ pub enum BinOp {
     Le,
     Gt,
     Ge,
+    // Operadores lógicos (Prioridad 2)
+    And,  // && - AND lógico con short-circuit
+    Or,   // || - OR lógico con short-circuit
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -234,19 +239,12 @@ pub fn parse(source: &str) -> Result<Program> {
 
 /// Parsear con directorio base para resolución de imports
 pub fn parse_with_dir(source: &str, current_dir: Option<&std::path::Path>) -> Result<Program> {
-    // PRE-PROCESADOR: Extraer structs del input antes del parsing principal
-    // Esto evita problemas con take_until que no funciona correctamente dentro del parser
-    
-    let (preprocessed_source, extracted_structs) = preprocess_extract_structs(source)?;
+    // NOTA: El preprocesador de structs con sintaxis 'end' está deshabilitado
+    // Ahora usamos sintaxis con llaves {} que el parser maneja directamente
     
     let parser = program_parser();
-    match parser.parse(preprocessed_source.as_str()) {
+    match parser.parse(source) {
         Ok(mut program) => {
-            // Insertar los structs extraídos al inicio del programa
-            for stmt in extracted_structs {
-                program.statements.insert(0, stmt);
-            }
-            
             // POST-PROCESADOR: Resolver imports (Sprint 1.3)
             resolve_imports(&mut program, current_dir)?;
             
@@ -510,10 +508,32 @@ fn extract_struct(source: &str, start_byte_pos: usize) -> Result<(Stmt, String, 
     })
 }
 
-fn program_parser() -> impl Parser<char, Program, Error = Simple<char>> {
-    stmt_parser()
-        .padded()  // Permitir whitespace/newlines entre statements
+// Parser para comentarios (# hasta el final de línea)
+fn comment() -> impl Parser<char, (), Error = Simple<char>> + Clone {
+    just('#')
+        .then(none_of("\n\r").repeated())
+        .then(text::newline().or_not())
+        .ignored()
+}
+
+// Parser para whitespace y comentarios
+fn ws_and_comments() -> impl Parser<char, (), Error = Simple<char>> + Clone {
+    filter(|c: &char| c.is_whitespace())
         .repeated()
+        .ignored()
+        .then(comment().padded().repeated().ignored())
+        .ignored()
+}
+
+fn program_parser() -> impl Parser<char, Program, Error = Simple<char>> {
+    // Ignorar comentarios al inicio y entre statements
+    ws_and_comments()
+        .ignore_then(
+            stmt_parser()
+                .padded()
+                .then_ignore(ws_and_comments())
+                .repeated()
+        )
         .then_ignore(end().or_not())  // Permitir trailing whitespace/newlines
         .map(|stmts| Program {
             statements: stmts,
@@ -642,6 +662,46 @@ fn stmt_parser() -> impl Parser<char, Stmt, Error = Simple<char>> + Clone {
             })
             .labelled("while statement");
 
+        // For loop: for VAR in START..END { BODY }
+        // El backend YA soporta generación NASM para for loops
+        let for_stmt = just("for")
+            .padded()
+            .ignore_then(ident.clone())
+            .then_ignore(just("in").padded())
+            .then(expr.clone())  // start expression
+            .then_ignore(just("..").padded())
+            .then(expr.clone())  // end expression
+            .then(
+                just("{")
+                    .padded()
+                    .ignore_then(
+                        stmt.clone()
+                            .padded()
+                            .repeated()
+                            .collect::<Vec<_>>()
+                    )
+                    .then_ignore(just("}").padded())
+            )
+            .map(|(((var, start), end), body)| Stmt::For {
+                var,
+                start,
+                end,
+                body,
+            })
+            .labelled("for statement");
+
+        // Break statement: sale del loop más cercano
+        let break_stmt = just("break")
+            .padded()
+            .map(|_| Stmt::Break)
+            .labelled("break statement");
+
+        // Continue statement: salta a la siguiente iteración
+        let continue_stmt = just("continue")
+            .padded()
+            .map(|_| Stmt::Continue)
+            .labelled("continue statement");
+
         // Parser para par├ímetros de funci├│n (soporta borrowing)
         let fn_param = just("&")
             .padded()
@@ -694,133 +754,132 @@ fn stmt_parser() -> impl Parser<char, Stmt, Error = Simple<char>> + Clone {
                 body,
             });
 
-        // Struct definition (Fase 1.2 - O1, O5 - Encapsulaci├│n)
-        let struct_field = just("pub")
+        // ═══════════════════════════════════════════════════════════════════════════
+        // OOP: STRUCTS Y CLASES (Sintaxis con llaves {})
+        // ═══════════════════════════════════════════════════════════════════════════
+        
+        // Campo de struct: nombre (sin tipo explícito por ahora)
+        // Sintaxis: x, y, nombre, etc.
+        let struct_field_simple = text::ident()
             .padded()
-            .or_not()
-            .then(just("mut").padded().or_not())
-            .then(ident.clone())
-            .then(
-                just(":")
-                    .padded()
-                    .ignore_then(text::ident())
-                    .or_not(),
-            )
-            .map(|(((visibility, mutable), name), ty)| StructField {
-                visibility: if visibility.is_some() { Visibility::Public } else { Visibility::Private },
-                mutable: mutable.is_some(),
+            .map(|name: String| StructField {
+                visibility: Visibility::Public,  // Público por defecto para structs simples
+                mutable: true,  // Mutable por defecto
                 name,
-                ty,
+                ty: None,
             });
 
-        // Parser para m├®todos de struct (init, destroy) - O5: soporta pub
-        let struct_method = just("pub")
+        // Struct definition: struct Nombre { campo1 campo2 ... }
+        // Los campos pueden estar separados por comas, espacios o newlines
+        let struct_stmt = just("struct")
             .padded()
-            .or_not()
-            .then(just("init")
-                .padded()
-                .map(|_| "init".to_string())
-                .or(just("destroy")
+            .ignore_then(text::ident())
+            .then(
+                just("{")
                     .padded()
-                    .map(|_| "destroy".to_string())))
+                    .ignore_then(
+                        struct_field_simple
+                            .padded()  // Permite whitespace (incluyendo newlines) alrededor de cada campo
+                            .repeated()
+                            .at_least(1)  // Al menos un campo
+                    )
+                    .then_ignore(just("}").padded())
+            )
+            .map(|(name, fields)| Stmt::Struct {
+                name,
+                fields,
+                init: None,
+                destroy: None,
+            })
+            .labelled("struct statement");
+
+        // ═══════════════════════════════════════════════════════════════════════════
+        // CLASS: Clases con constructor y métodos
+        // Sintaxis: class Nombre { fn new(...) { } fn metodo(self) { } }
+        // ═══════════════════════════════════════════════════════════════════════════
+        
+        // Método de clase (incluyendo constructor 'new')
+        let class_method = just("fn")
+            .padded()
+            .ignore_then(ident.clone())
             .then(
                 just("(")
                     .padded()
                     .ignore_then(
                         fn_param
                             .separated_by(just(",").padded())
-                            .allow_trailing(),
+                            .allow_trailing()
                     )
-                    .then_ignore(just(")").padded()),
+                    .then_ignore(just(")").padded())
             )
             .then(
                 just("{")
                     .padded()
                     .ignore_then(stmt.clone().repeated())
-                    .then_ignore(just("}").padded()),
+                    .then_ignore(just("}").padded())
             )
-            .map(|(((visibility, method_name), params), body)| {
-                let vis = if visibility.is_some() { Visibility::Public } else { Visibility::Private };
-                (method_name, StructMethod { visibility: vis, params, body })
-            });
+            .map(|((name, params), body)| (name, params, body));
 
-        // Parser de structs: Capturar caracteres con take_until hasta "end\n"
-        // y luego procesar el string manualmente para encontrar el "end" correcto
-        
-        let struct_stmt = just("struct")
+        // Class definition: class Nombre { fn new(...) { } fn metodo(self) { } }
+        let class_stmt = just("class")
             .padded()
             .ignore_then(ident.clone())
             .then(
-                // ESTRATEGIA: Capturar caracteres hasta encontrar "end\n" (cualquier end)
-                // Luego procesar manualmente el string para encontrar el "end" FINAL
-                // que está seguido de un keyword (print, let, etc.)
+                just("{")
+                    .padded()
+                    .ignore_then(
+                        class_method
+                            .padded()
+                            .repeated()
+                    )
+                    .then_ignore(just("}").padded())
+            )
+            .map(|(class_name, methods)| {
+                // Extraer constructor (new) y otros métodos
+                let mut init_method = None;
+                let mut destroy_method = None;
+                let mut fields = Vec::new();
                 
-                take_until(
-                    just("end")
-                        .then(just("\n").or(just("\r\n")))
-                )
-                .map(|(chars, _)| {
-                    chars.into_iter().collect::<String>()
-                })
-                .try_map(|content: String, span| {
-                    // Procesar manualmente el string para encontrar el "end" FINAL
-                    // que está seguido de "\n" + keyword (print, let, etc.)
-                    let keywords = ["print", "let", "if", "while", "fn", "struct", "return"];
-                    
-                    // Buscar todas las ocurrencias de "end" y verificar cuál es el final
-                    let mut search_pos = 0;
-                    let mut last_valid_end_pos = None;
-                    
-                    while let Some(pos) = content[search_pos..].find("end") {
-                        let abs_pos = search_pos + pos;
-                        let after_end = abs_pos + 3;
-                        
-                        if after_end < content.len() {
-                            let rest = &content[after_end..];
-                            // Eliminar whitespace después de "end"
-                            let trimmed = rest.trim_start_matches([' ', '\t']);
-                            
-                            // Verificar si viene nueva línea seguida de keyword
-                            if trimmed.starts_with('\n') || trimmed.starts_with("\r\n") {
-                                let after_nl = trimmed.trim_start_matches(['\n', '\r']);
-                                let after_nl_trimmed = after_nl.trim_start();
-                                
-                                // Verificar si viene un keyword
-                                for keyword in &keywords {
-                                    if after_nl_trimmed.starts_with(keyword) {
-                                        last_valid_end_pos = Some(abs_pos);
-                                        break;
-                                    }
+                for (method_name, params, body) in methods {
+                    if method_name == "new" {
+                        // Extraer campos del constructor (self.campo = ...)
+                        for stmt in &body {
+                            if let Stmt::Expr(Expr::Assign { name, .. }) = stmt {
+                                // Si es self.campo = ..., extraer el nombre del campo
+                                if name.starts_with("self.") {
+                                    let field_name = name.strip_prefix("self.").unwrap().to_string();
+                                    fields.push(StructField {
+                                        visibility: Visibility::Public,
+                                        mutable: true,
+                                        name: field_name,
+                                        ty: None,
+                                    });
                                 }
                             }
                         }
-                        
-                        search_pos = abs_pos + 3;
-                        if search_pos >= content.len() {
-                            break;
-                        }
+                        init_method = Some(StructMethod {
+                            visibility: Visibility::Public,
+                            params: params.clone(),
+                            body: body.clone(),
+                        });
+                    } else if method_name == "destroy" {
+                        destroy_method = Some(StructMethod {
+                            visibility: Visibility::Public,
+                            params,
+                            body,
+                        });
                     }
-                    
-                    // Si encontramos un "end" válido, usar solo hasta ese punto
-                    if let Some(end_pos) = last_valid_end_pos {
-                        Ok(content[..end_pos].to_string())
-                    } else {
-                        // No encontramos patrón, buscar el último "end" (final del archivo)
-                        if let Some(last_end) = content.rfind("end") {
-                            Ok(content[..last_end].to_string())
-                        } else {
-                            Err(Simple::custom(span, "No se encontró 'end' para cerrar el struct"))
-                        }
-                    }
-                })
-            )
-            .then_ignore(just("end").padded())
-            .try_map(|(name, content), span| {
-                // TODO: Implementar parser completo de structs en Rust
-                // Por ahora, crear struct básico sin campos
-                Err(Simple::custom(span, format!("Struct parsing not yet fully implemented for struct: {}", name)))
+                    // TODO: Guardar otros métodos en el struct
+                }
+                
+                Stmt::Struct {
+                    name: class_name,
+                    fields,
+                    init: init_method,
+                    destroy: destroy_method,
+                }
             })
-            .labelled("struct statement");
+            .labelled("class statement");
 
         // Assignment: ident = expr (as statement)
         let assign_stmt = ident
@@ -842,15 +901,19 @@ fn stmt_parser() -> impl Parser<char, Stmt, Error = Simple<char>> + Clone {
             .labelled("import statement");
 
         // IMPORTANTE: Orden de precedencia crítico para parsing correcto
-        // struct_stmt debe estar ANTES de expr_stmt para tener precedencia
+        // struct_stmt y class_stmt deben estar ANTES de expr_stmt para tener precedencia
         // Import debe estar antes de expr_stmt también para evitar conflictos
         // CRÍTICO: while_stmt e if_stmt deben estar ANTES de assign_stmt y expr_stmt
         // para evitar que se parseen mal las condiciones y bloques
         // El orden correcto es: keywords primero, luego expresiones simples
         // CRÍTICO: while_stmt debe estar PRIMERO para tener máxima precedencia
         while_stmt  // PRIMERO: máxima precedencia para while
-            .or(if_stmt)      // SEGUNDO: if también tiene alta precedencia
-            .or(struct_stmt)
+            .or(for_stmt)     // For loops con rango
+            .or(break_stmt)   // Break para salir de loops
+            .or(continue_stmt) // Continue para saltar iteración
+            .or(if_stmt)      // If tiene alta precedencia
+            .or(class_stmt)   // OOP: Clases con métodos
+            .or(struct_stmt)  // OOP: Structs simples
             .or(import_stmt)
             .or(print)
             .or(let_stmt)
@@ -880,9 +943,15 @@ fn expr_parser() -> impl Parser<char, Expr, Error = Simple<char>> + Clone {
         // SOLUCIÓN DEFINITIVA: Usar text::int() que lee dígitos y luego verificar punto
         // text::int() consume dígitos pero se detiene antes de consumir el siguiente carácter
         // Luego verificamos si ese carácter es un punto
+        // Float parser: NO debe consumir "0.." como float (eso es rango para for)
+        // Solo consume "0.5", "3.14", "5." cuando NO viene seguido de otro punto
         let float_with_int_part = text::int(10)
-            .then(just('.').then(text::digits(10).or_not()))  // Punto seguido de dígitos opcionales
-            .try_map(|(int_part, (_, dec_opt)), span| {
+            .then(
+                just('.')
+                    .then(just('.').not())  // Rechazar ".." (rango)
+                    .then(text::digits(10).or_not())  // Dígitos opcionales después del punto
+            )
+            .try_map(|(int_part, ((_, _), dec_opt)), span| {
                 let dec = dec_opt.unwrap_or_default();
                 let float_str = if dec.is_empty() {
                     format!("{}.0", int_part)  // 5. -> 5.0
@@ -929,15 +998,11 @@ fn expr_parser() -> impl Parser<char, Expr, Error = Simple<char>> + Clone {
         let float_literal = float_with_int_part
             .or(float_without_int_part);
 
-        // Parser para números enteros (solo enteros puros, sin punto)
-        // Nota: Como float_literal viene primero en atom, los floats ya se parsean como floats
-        // Solo llegamos aquí si NO es un float
-        // Parser para números enteros (solo enteros puros, sin punto)
-        // CRÍTICO: Este parser solo se ejecuta si float_literal falló
-        // Verificamos explícitamente que NO viene un punto después
-        let number = text::digits(10)
-            .then(just('.').not())  // Asegurar que NO viene un punto después
-            .map(|(s, _): (String, _)| s.parse::<i64>().unwrap())
+        // Parser para números enteros (solo enteros puros, sin punto decimal)
+        // SOLUCIÓN SIMPLE: Parsear dígitos y verificar que NO viene ".D" (float)
+        // Permitimos ".." (rango) porque eso no es un float
+        let number = text::int(10)
+            .map(|s: String| s.parse::<i64>().unwrap())
             .map(Expr::Number)
             .labelled("number");
 
@@ -964,7 +1029,12 @@ fn expr_parser() -> impl Parser<char, Expr, Error = Simple<char>> + Clone {
         let ident = text::ident()
             .try_map(|s: String, span| {
                 // Keywords que NO deben parsearse como identificadores
-                let keywords = ["while", "if", "let", "print", "fn", "struct", "return", "true", "false", "Some", "None", "Ok", "Err", "match", "end"];
+                let keywords = [
+                    "while", "if", "else", "let", "print", "fn", "struct", "return",
+                    "true", "false", "Some", "None", "Ok", "Err", "match", "end",
+                    "for", "in", "break", "continue",  // For loops y control de flujo
+                    "import", "pub", "mut",  // Otros keywords
+                ];
                 if keywords.contains(&s.as_str()) {
                     Err(Simple::custom(span, format!("'{}' is a keyword and cannot be used as an identifier", s)))
                 } else {
@@ -990,6 +1060,13 @@ fn expr_parser() -> impl Parser<char, Expr, Error = Simple<char>> + Clone {
             .ignore_then(expr.clone())
             .map(|e| Expr::Deref(Box::new(e)))
             .labelled("deref");
+
+        // Negación lógica: !expr (Prioridad 2)
+        let not_expr = just("!")
+            .padded()
+            .ignore_then(expr.clone())
+            .map(|e| Expr::Not(Box::new(e)))
+            .labelled("not");
 
         // Option/Result constructors (O0.4)
         let some = just("Some")
@@ -1027,19 +1104,18 @@ fn expr_parser() -> impl Parser<char, Expr, Error = Simple<char>> + Clone {
         // Struct literal (Fase 1.2 - O1)
         // StructName { field1: value1, field2: value2 }
         let struct_literal = text::ident()
+            .padded()  // Permite whitespace después del nombre del struct
+            .then_ignore(just("{").padded())  // Consume la llave de apertura
             .then(
-                just("{")
+                text::ident()
                     .padded()
-                    .ignore_then(
-                        text::ident()
-                            .then_ignore(just(":").padded())
-                            .then(expr.clone())
-                            .map(|(field_name, value)| (field_name, value))
-                            .separated_by(just(",").padded())
-                            .allow_trailing(),
-                    )
-                    .then_ignore(just("}").padded()),
+                    .then_ignore(just(":").padded())
+                    .then(expr.clone())
+                    .map(|(field_name, value)| (field_name, value))
+                    .separated_by(just(",").padded())
+                    .allow_trailing()
             )
+            .then_ignore(just("}").padded())  // Consume la llave de cierre
             .map(|(struct_name, fields)| {
                 Expr::StructLiteral {
                     name: struct_name,
@@ -1070,6 +1146,7 @@ fn expr_parser() -> impl Parser<char, Expr, Error = Simple<char>> + Clone {
             .or(array_literal)  // Array literal antes de borrow
             .or(borrow)  // Borrow debe ir ANTES de ident para que &x se parse como Borrow, no como Call
             .or(deref)
+            .or(not_expr)  // Negación lógica: !expr
             .or(some.clone())
             .or(none.clone())
             .or(ok.clone())
@@ -1310,10 +1387,41 @@ fn expr_parser() -> impl Parser<char, Expr, Error = Simple<char>> + Clone {
                 right: Box::new(r),
             });
 
-        // Parser de expresiones usando parser Rust estándar
-        // IMPORTANTE: sum debe estar antes de comparison para evitar loops
-        sum.clone()
-            .or(comparison) // Comparaciones después de sum
+        // Operadores lógicos (Prioridad 2)
+        // AND lógico: a && b (mayor precedencia que OR)
+        let logical_and = comparison
+            .clone()
+            .then(
+                just("&&")
+                    .padded()
+                    .to(BinOp::And)
+                    .then(comparison.clone())
+                    .repeated(),
+            )
+            .foldl(|l, (op, r)| Expr::BinaryOp {
+                op,
+                left: Box::new(l),
+                right: Box::new(r),
+            });
+
+        // OR lógico: a || b (menor precedencia que AND)
+        let logical_or = logical_and
+            .clone()
+            .then(
+                just("||")
+                    .padded()
+                    .to(BinOp::Or)
+                    .then(logical_and.clone())
+                    .repeated(),
+            )
+            .foldl(|l, (op, r)| Expr::BinaryOp {
+                op,
+                left: Box::new(l),
+                right: Box::new(r),
+            });
+
+        // Parser de expresiones final con todos los operadores
+        logical_or
     })
 }
 

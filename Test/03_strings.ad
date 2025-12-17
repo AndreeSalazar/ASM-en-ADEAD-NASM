@@ -1,0 +1,20 @@
+# Test 03: Strings
+# Operaciones con strings estilo Python
+
+let s1 = "hola"
+let s2 = "mundo"
+
+# Concatenación
+let s3 = s1 + " " + s2
+print s3
+
+# Longitud
+print len(s3)
+
+# Mayúsculas/Minúsculas
+print s3.upper()
+print s3.lower()
+
+# Slicing
+print s3[0:4]
+

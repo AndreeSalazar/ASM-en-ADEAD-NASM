@@ -1,0 +1,1 @@
+Or<impl chumsky::Parser<char, (), Error = _> + Copy + Clone + '_, To<chumsky::primitive::End<_>, (), char>>

@@ -419,6 +419,8 @@ impl CGenerator {
                     BinOp::Le => "<=",
                     BinOp::Gt => ">",
                     BinOp::Ge => ">=",
+                    BinOp::And => "&&",
+                    BinOp::Or => "||",
                 };
                 format!("({} {} {})", left_code, op_str, right_code)
             }
@@ -511,6 +513,11 @@ impl CGenerator {
                 // Necesitamos detectar esto de manera especial
                 let value_code = self.generate_expr(value);
                 format!("{} = {}", name, value_code)
+            }
+            Expr::Not(inner) => {
+                // Negación lógica: !expr
+                let inner_code = self.generate_expr(inner);
+                format!("(!({}))", inner_code)
             }
             _ => {
                 format!("/* TODO: Expresión no implementada */")

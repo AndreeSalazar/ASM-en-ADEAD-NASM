@@ -779,7 +779,7 @@ impl CodeGenerator {
                     continue_label: loop_continue,
                 });
                 
-                self.text_section.push(format!("{}:", loop_start));
+                    self.text_section.push(format!("{}:", loop_start));
                 self.generate_expr_windows(condition)?;
                 self.text_section.push("    cmp rax, 0".to_string());
                 self.text_section.push(format!("    je {}", loop_end));
@@ -1280,9 +1280,39 @@ impl CodeGenerator {
                             self.text_section.push("    setge al".to_string());
                             self.text_section.push("    movzx rax, al".to_string());
                         }
+                        BinOp::And => {
+                            // AND lógico con short-circuit evaluation
+                            // RAX = left, RBX = right
+                            // Resultado: 1 si ambos son != 0, 0 si alguno es 0
+                            self.text_section.push("    test rax, rax".to_string());
+                            self.text_section.push("    setnz al".to_string());
+                            self.text_section.push("    test rbx, rbx".to_string());
+                            self.text_section.push("    setnz bl".to_string());
+                            self.text_section.push("    and al, bl".to_string());
+                            self.text_section.push("    movzx rax, al".to_string());
+                        }
+                        BinOp::Or => {
+                            // OR lógico con short-circuit evaluation
+                            // RAX = left, RBX = right
+                            // Resultado: 1 si alguno es != 0, 0 si ambos son 0
+                            self.text_section.push("    test rax, rax".to_string());
+                            self.text_section.push("    setnz al".to_string());
+                            self.text_section.push("    test rbx, rbx".to_string());
+                            self.text_section.push("    setnz bl".to_string());
+                            self.text_section.push("    or al, bl".to_string());
+                            self.text_section.push("    movzx rax, al".to_string());
+                        }
                     }
                 }
                 }
+            }
+            Expr::Not(inner) => {
+                // Negación lógica: !expr
+                // Resultado: 1 si expr == 0, 0 si expr != 0
+                self.generate_expr_windows(inner)?;
+                self.text_section.push("    test rax, rax".to_string());
+                self.text_section.push("    setz al".to_string());
+                self.text_section.push("    movzx rax, al".to_string());
             }
             Expr::Call { module, name, args } => {
                 // Detectar built-ins como len(arr) o len(s)
@@ -2039,7 +2069,7 @@ impl CodeGenerator {
                     continue_label: loop_continue,
                 });
                 
-                self.text_section.push(format!("{}:", loop_start));
+                    self.text_section.push(format!("{}:", loop_start));
                 self.generate_expr(condition)?;
                 self.text_section.push("    cmp rax, 0".to_string());
                 self.text_section.push(format!("    je {}", loop_end));
@@ -2448,7 +2478,32 @@ impl CodeGenerator {
                         self.text_section.push("    setge al".to_string());
                         self.text_section.push("    movzx rax, al".to_string());
                     }
+                    BinOp::And => {
+                        // AND lógico
+                        self.text_section.push("    test rax, rax".to_string());
+                        self.text_section.push("    setnz al".to_string());
+                        self.text_section.push("    test rbx, rbx".to_string());
+                        self.text_section.push("    setnz bl".to_string());
+                        self.text_section.push("    and al, bl".to_string());
+                        self.text_section.push("    movzx rax, al".to_string());
+                    }
+                    BinOp::Or => {
+                        // OR lógico
+                        self.text_section.push("    test rax, rax".to_string());
+                        self.text_section.push("    setnz al".to_string());
+                        self.text_section.push("    test rbx, rbx".to_string());
+                        self.text_section.push("    setnz bl".to_string());
+                        self.text_section.push("    or al, bl".to_string());
+                        self.text_section.push("    movzx rax, al".to_string());
+                    }
                 }
+            }
+            Expr::Not(inner) => {
+                // Negación lógica: !expr
+                self.generate_expr(inner)?;
+                self.text_section.push("    test rax, rax".to_string());
+                self.text_section.push("    setz al".to_string());
+                self.text_section.push("    movzx rax, al".to_string());
             }
             Expr::Call { module, name, args } => {
                 // Generate args in reverse order (for System V: rdi, rsi, rdx, ...)

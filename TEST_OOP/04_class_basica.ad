@@ -1,0 +1,26 @@
+# Test 04: Clase Básica con Constructor
+# Clase con fn new() para inicialización
+
+class Punto {
+    fn new(x, y) {
+        self.x = x
+        self.y = y
+    }
+}
+
+# Crear instancia usando constructor
+let p = Punto.new(10, 20)
+
+# Acceder a campos
+print p.x
+print p.y
+
+# Modificar
+p.x = 100
+print p.x
+
+# Salida esperada:
+# 10
+# 20
+# 100
+
