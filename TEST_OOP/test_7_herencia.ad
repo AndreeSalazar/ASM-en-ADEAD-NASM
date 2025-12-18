@@ -1,0 +1,25 @@
+# Test 7: Herencia Básica
+# Objetivo: Verificar que struct Hijo extends Padre funciona correctamente
+
+struct Animal {
+    nombre
+}
+
+fn Animal_new(self, nombre) {
+    self.nombre = nombre
+}
+
+struct Perro extends Animal {
+    raza
+}
+
+fn Perro_new(self, nombre, raza) {
+    # Llamar constructor del padre (implícito)
+    self.nombre = nombre
+    self.raza = raza
+}
+
+let p = Perro.new("Max", "Labrador")
+print p.nombre
+print p.raza
+

@@ -1,0 +1,49 @@
+# Test 9: Polimorfismo Dinámico con Vtables
+# Objetivo: Verificar que el dispatch dinámico funciona correctamente
+
+struct Animal {
+    nombre
+}
+
+fn Animal_new(self, nombre) {
+    self.nombre = nombre
+}
+
+fn Animal_saludar(self) {
+    print "Soy un animal"
+}
+
+struct Perro extends Animal {
+    raza
+}
+
+fn Perro_new(self, nombre, raza) {
+    super.new(nombre)
+    self.raza = raza
+}
+
+fn Perro_saludar(self) {
+    print "Guau! Soy un perro"
+}
+
+struct Gato extends Animal {
+    color
+}
+
+fn Gato_new(self, nombre, color) {
+    super.new(nombre)
+    self.color = color
+}
+
+fn Gato_saludar(self) {
+    print "Miau! Soy un gato"
+}
+
+# Crear instancias
+let p = Perro.new("Max", "Labrador")
+let g = Gato.new("Whiskers", "Negro")
+
+# Polimorfismo: llamar al método correcto según el tipo real
+p.saludar()  # Debe llamar a Perro_saludar (dispatch dinámico)
+g.saludar()  # Debe llamar a Gato_saludar (dispatch dinámico)
+

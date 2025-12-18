@@ -1,0 +1,17 @@
+# Test 3: Constructor Real
+# Objetivo: Verificar que Persona.new() funciona correctamente
+
+struct Persona {
+    nombre
+    edad
+}
+
+fn Persona_new(self, nombre, edad) {
+    self.nombre = nombre
+    self.edad = edad
+}
+
+let p = Persona.new("Juan", 25)
+print p.nombre
+print p.edad
+

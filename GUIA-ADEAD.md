@@ -9,24 +9,24 @@
 ## 📊 ESTADO GENERAL
 
 ```
-Progreso Total: ████████░░ 80% → Meta: 100% Producción
+Progreso Total: ████████░░ 82% → Meta: 100% Producción
 
-✅ COMPLETADO (80%)          🔄 EN PROGRESO           ⏳ PENDIENTE (20%)
+✅ COMPLETADO (82%)          🔄 EN PROGRESO           ⏳ PENDIENTE (18%)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Tipos: int, string, array    For con iterables        Floats (FPU)
-Variables let/mut                                     Bool nativo
-Arrays (10 métodos)                                   Diccionarios
+Tipos: int, string, array    Métodos de instancia    Floats (FPU)
+Variables let/mut            RAII/Destructores       Bool nativo
+Arrays (10 métodos)          OOP Mejoras             Diccionarios
 Strings (6 métodos)                                   Tuples
-Funciones ABI-safe                                    Sets
+Funciones ABI-safe            For con iterables       Sets
 Stdlib (11 funciones)                                        
-Control flow completo                                 OOP/Clases
+Control flow completo                                 OOP/Clases Avanzado
 For loops (range)                                     Herencia
 Break/Continue                                        Interfaces/Traits
-Operadores lógicos                                    
+Operadores lógicos            Métodos estáticos       Polimorfismo
 Comentarios (#)                                       Match/Switch
 Dead Code Elimination                                 Try/Catch
 Debug Symbols                                         Módulos/Import
-                                                      Lambdas
+Structs/OOP Básico                                    Lambdas
                                                       Generics
                                                       Async/Await
                                                       File I/O
@@ -432,15 +432,46 @@ shl rax, cl
 
 | Característica | Estado | Tiempo Est. | Descripción |
 |----------------|--------|-------------|-------------|
-| **Structs** | ⏳ | 2 días | Estructuras de datos |
-| **Clases** | ⏳ | 3 días | class con constructor |
-| **Métodos** | ⏳ | 2 días | Funciones en clases |
-| **self/this** | ⏳ | 1 día | Referencia a instancia |
-| **Propiedades** | ⏳ | 1 día | Acceso a campos |
+| **Structs** | ✅ | - | Estructuras de datos con campos |
+| **Struct Literals** | ✅ | - | `Punto { x: 10, y: 20 }` |
+| **Acceso a Campos** | ✅ | - | `obj.campo` lectura y escritura |
+| **Constructores (init)** | ✅ | - | `fn new()` con parámetros |
+| **self/this** | ✅ | - | `self.campo = valor` en constructores |
+| **Clases** | 🔄 | 1 día | Mejorar generación de métodos |
+| **Métodos de Instancia** | 🔄 | 2 días | `obj.metodo()` funcionando |
+| **RAII/Destructores** | 🔄 | 1 día | `destroy()` automático |
 
-#### Implementación Clases
+#### Estado Actual de OOP (Diciembre 2025)
+
+**✅ IMPLEMENTADO Y FUNCIONANDO:**
+- Structs con campos múltiples
+- Struct literals: `Punto { x: 10, y: 20 }`
+- Acceso a campos: `obj.campo` (lectura y escritura)
+- Constructores: `fn new(params)` con `self.campo = valor`
+- Múltiples instancias independientes
+
+**🔄 EN MEJORA:**
+- Métodos de instancia: Sintaxis existe, generación mejorando
+- RAII/Destructores: `destroy()` definido, llamada automática mejorando
+
+**⏳ PLANIFICADO:**
+- Herencia (`extends`)
+- Interfaces/Traits (`implements`)
+- Métodos estáticos (`static fn`)
+- Visibilidad completa (`_privado`)
+- Polimorfismo con vtables
+
+**📋 Ver:** `PLAN-MEJORAS-OOP.md` para plan detallado de mejoras
+
+#### Implementación Clases (Actual)
 ```asm
-; Estructura en memoria:
+; Estructura en memoria (stack-based):
+; [rbp - N]    campo1    (offset 0)
+; [rbp - N-8]  campo2    (offset 8)
+; [rbp - N-16] campo3    (offset 16)
+; ...
+
+; Futuro (con heap allocation):
 ; [+0]  vtable_ptr  (puntero a tabla de métodos)
 ; [+8]  campo1
 ; [+16] campo2
@@ -477,11 +508,11 @@ Persona_new:
 
 | Característica | Estado | Tiempo Est. | Descripción |
 |----------------|--------|-------------|-------------|
-| **Herencia** | ⏳ | 3 días | `extends` padre |
+| **Métodos estáticos** | ⏳ | 1 día | `static fn`, `StructName.metodo()` |
+| **Visibilidad** | ⏳ | 1 día | `_privado`, público (en AST, falta implementar) |
+| **Herencia** | ⏳ | 3 días | `extends` padre, `super.metodo()` |
 | **Interfaces/Traits** | ⏳ | 4 días | Contratos de comportamiento |
-| **Métodos estáticos** | ⏳ | 1 día | `static fn` |
-| **Visibilidad** | ⏳ | 1 día | `_privado`, público |
-| **Polimorfismo** | ⏳ | 2 días | Dispatch dinámico |
+| **Polimorfismo** | ⏳ | 2 días | Vtables, dispatch dinámico |
 
 ---
 

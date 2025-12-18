@@ -1,0 +1,23 @@
+# Test 4: Método con Parámetros
+# Objetivo: Verificar que obj.metodo(arg) funciona
+
+struct Contador {
+    valor
+}
+
+fn Contador_incrementar(self, cantidad) {
+    self.valor = self.valor + cantidad
+}
+
+fn Contador_obtener(self) {
+    return self.valor
+}
+
+let c = Contador { valor: 0 }
+c.incrementar(5)
+c.incrementar(3)
+let total = c.obtener()
+print total
+
+# Debería imprimir 8
+

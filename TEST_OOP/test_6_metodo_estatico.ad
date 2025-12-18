@@ -1,0 +1,19 @@
+# Test 6: Método Estático
+# Objetivo: Verificar que StructName.metodo_estatico() funciona correctamente
+
+struct Calculadora {
+}
+
+# Método estático (sin self)
+fn Calculadora_sumar(a, b) {
+    return a + b
+}
+
+# Método de instancia (con self)
+fn Calculadora_new() {
+    # Constructor vacío
+}
+
+let resultado = Calculadora.sumar(10, 20)
+print resultado
+

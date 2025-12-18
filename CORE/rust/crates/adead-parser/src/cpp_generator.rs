@@ -321,7 +321,7 @@ impl CppGenerator {
                 self.indent();
                 self.output.push_str("return;\n");
             }
-            Stmt::Struct { name, fields, init, destroy } => {
+            Stmt::Struct { name, fields, init, destroy, .. } => {
                 // Generar clase C++ desde struct ADead
                 self.generate_class(name, fields, init, destroy);
             }

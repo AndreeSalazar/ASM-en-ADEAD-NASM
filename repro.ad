@@ -1,0 +1,6 @@
+struct A {
+    x: int
+    fn foo() {
+        self.x = 1
+    }
+}

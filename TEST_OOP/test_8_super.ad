@@ -1,0 +1,32 @@
+# Test 8: super.metodo()
+# Objetivo: Verificar que super.metodo() funciona correctamente
+
+struct Animal {
+    nombre
+}
+
+fn Animal_new(self, nombre) {
+    self.nombre = nombre
+}
+
+fn Animal_saludar(self) {
+    print "Hola, soy un animal"
+}
+
+struct Perro extends Animal {
+    raza
+}
+
+fn Perro_new(self, nombre, raza) {
+    super.new(nombre)  # Llamar constructor del padre
+    self.raza = raza
+}
+
+fn Perro_saludar(self) {
+    super.saludar()  # Llamar método del padre
+    print "Y soy un perro"
+}
+
+let p = Perro.new("Max", "Labrador")
+p.saludar()
+

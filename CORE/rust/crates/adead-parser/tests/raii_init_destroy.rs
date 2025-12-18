@@ -11,7 +11,7 @@ fn test_parse_struct_with_init() {
         }
     "#;
     let program = parse(src).unwrap();
-    if let adead_parser::Stmt::Struct { name, fields, init, destroy } = &program.statements[0] {
+    if let adead_parser::Stmt::Struct { name, fields, init, destroy, .. } = &program.statements[0] {
         assert_eq!(name, "Recurso");
         assert_eq!(fields.len(), 1);
         assert!(init.is_some(), "Debe tener constructor init");
@@ -38,7 +38,7 @@ fn test_parse_struct_with_destroy() {
         }
     "#;
     let program = parse(src).unwrap();
-    if let adead_parser::Stmt::Struct { name, fields, init, destroy } = &program.statements[0] {
+    if let adead_parser::Stmt::Struct { name, fields, init, destroy, .. } = &program.statements[0] {
         assert_eq!(name, "Recurso");
         assert_eq!(fields.len(), 1);
         assert!(init.is_none(), "No debe tener constructor");
@@ -67,7 +67,7 @@ fn test_parse_struct_with_init_and_destroy() {
         }
     "#;
     let program = parse(src).unwrap();
-    if let adead_parser::Stmt::Struct { name, fields, init, destroy } = &program.statements[0] {
+    if let adead_parser::Stmt::Struct { name, fields, init, destroy, .. } = &program.statements[0] {
         assert_eq!(name, "Recurso");
         assert_eq!(fields.len(), 1);
         assert!(init.is_some(), "Debe tener constructor init");

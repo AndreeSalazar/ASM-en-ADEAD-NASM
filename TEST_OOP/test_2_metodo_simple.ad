@@ -1,0 +1,17 @@
+# Test 2: Método de Instancia Simple
+# Objetivo: Verificar que obj.metodo() funciona
+
+struct Circulo {
+    radio
+}
+
+fn Circulo_area(self) {
+    return self.radio * self.radio * 314159 / 100000
+}
+
+let c = Circulo { radio: 5 }
+let area = c.area()
+print area
+
+# Debería imprimir aproximadamente 78 (5*5*3.14159)
+

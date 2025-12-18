@@ -29,7 +29,7 @@ fn test_parse_struct_with_methods_and_fields_visibility() {
         }
     "#;
     let program = parse(src).unwrap();
-    if let Stmt::Struct { name, fields, init, destroy } = &program.statements[0] {
+    if let Stmt::Struct { name, fields, init, destroy, .. } = &program.statements[0] {
         assert_eq!(name, "Banco");
         
         // Verificar campos

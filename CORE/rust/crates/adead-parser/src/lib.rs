@@ -1,4 +1,4 @@
-﻿use adead_common::{ADeadError, Result};
+use adead_common::{ADeadError, Result};
 use chumsky::prelude::*;
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -92,6 +92,10 @@ pub enum Expr {
     },
     MethodCall {                // expr.method_name(args)
         object: Box<Expr>,
+        method: String,
+        args: Vec<Expr>,
+    },
+    SuperCall {                 // super.method_name(args) - llamada a método del padre
         method: String,
         args: Vec<Expr>,
     },
@@ -230,9 +234,11 @@ pub enum Stmt {
     // Structs/Clases (Fase 1.2 - O1, O2 - RAII)
     Struct {
         name: String,
+        parent: Option<String>,  // Herencia: extends Parent
         fields: Vec<StructField>,
         init: Option<StructMethod>,      // Constructor (O2)
         destroy: Option<StructMethod>,    // Destructor (O2.1 - Drop Trait)
+        methods: Vec<(String, StructMethod)>, // Métodos de instancia
     },
     Expr(Expr),
     Return(Option<Expr>),
@@ -799,9 +805,11 @@ fn stmt_parser() -> impl Parser<char, Stmt, Error = Simple<char>> + Clone {
             )
             .map(|(name, fields)| Stmt::Struct {
                 name,
+                parent: None,
                 fields,
                 init: None,
                 destroy: None,
+                methods: Vec::new(),
             })
             .labelled("struct statement");
 
@@ -837,6 +845,12 @@ fn stmt_parser() -> impl Parser<char, Stmt, Error = Simple<char>> + Clone {
             .padded()
             .ignore_then(ident.clone())
             .then(
+                just("extends")
+                    .padded()
+                    .ignore_then(ident.clone())
+                    .or_not()
+            )
+            .then(
                 just("{")
                     .padded()
                     .ignore_then(
@@ -845,12 +859,13 @@ fn stmt_parser() -> impl Parser<char, Stmt, Error = Simple<char>> + Clone {
                             .repeated()
                     )
                     .then_ignore(just("}").padded())
-                )
-            .map(|(class_name, methods)| {
+            )
+            .map(|((class_name, parent), methods)| {
                 // Extraer constructor (new) y otros métodos
                 let mut init_method = None;
                 let mut destroy_method = None;
                 let mut fields = Vec::new();
+                let mut other_methods = Vec::new();
                 
                 for (method_name, params, body) in methods {
                     if method_name == "new" {
@@ -882,15 +897,23 @@ fn stmt_parser() -> impl Parser<char, Stmt, Error = Simple<char>> + Clone {
                             params,
                             body,
                         });
+                    } else {
+                        // Guardar otros métodos en el struct
+                        other_methods.push((method_name, StructMethod {
+                            visibility: Visibility::Public,
+                            params,
+                            body,
+                        }));
                     }
-                    // TODO: Guardar otros métodos en el struct
                 }
                 
                 Stmt::Struct {
                     name: class_name,
+                    parent,
                     fields,
                     init: init_method,
                     destroy: destroy_method,
+                    methods: other_methods,
                 }
             })
             .labelled("class statement");
@@ -1189,30 +1212,94 @@ fn expr_parser() -> impl Parser<char, Expr, Error = Simple<char>> + Clone {
         let qualified_name = text::ident()
             .then(
                 just(".")
-                    .padded()
-                    .ignore_then(text::ident())
-                    .or_not()
+                .padded()
+                .ignore_then(text::ident())
+                .or_not()
             )
-            .map(|(first, second)| {
+            .try_map(|(first, second), span| {
                 if let Some(second) = second {
                     // modulo.funcion
-                    (Some(first), second)
+                    Ok((Some(first), second))
                 } else {
                     // solo funcion (sin módulo)
-                    (None, first)
+                    // IMPORTANTE: Evitar que Some/Ok/Err se parsen como llamadas a función
+                    if first == "Some" || first == "Ok" || first == "Err" {
+                        Err(Simple::custom(span, "Reserved constructor used as function name"))
+                    } else {
+                        Ok((None, first))
+                    }
+                }
+            });
+
+        // Parser para super.metodo(args) - llamada a método del padre
+        let super_call = just("super")
+            .padded()
+            .ignore_then(just(".").padded())
+            .ignore_then(text::ident())
+            .then(
+                just("(")
+                .padded()
+                .ignore_then(
+                    expr.clone()
+                    .separated_by(just(",").padded())
+                    .allow_trailing(),
+                )
+                .then_ignore(just(")").padded())
+            )
+            .map(|(method, args)| Expr::SuperCall {
+                method,
+                args,
+            });
+
+        // Parser para method calls: obj.metodo(args)
+        // NOTA: ClassName.new() se parsea como Call, no como MethodCall
+        // Solo obj.metodo() donde obj es una variable se parsea como MethodCall
+        let method_call = text::ident()
+            .padded()
+            .then(
+                just(".")
+                .padded()
+                .ignore_then(text::ident())
+                .then(
+                    just("(")
+                    .padded()
+                    .ignore_then(
+                        expr.clone()
+                        .separated_by(just(",").padded())
+                        .allow_trailing(),
+                    )
+                    .then_ignore(just(")").padded())
+                )
+            )
+            .try_map(|(obj_name, (method, args)), span| {
+                // Si el método es "new", parsear como Call (constructor), no MethodCall
+                if method == "new" {
+                    // Es un constructor: ClassName.new() -> Call { module: Some("ClassName"), name: "new", args }
+                    Ok(Expr::Call {
+                        module: Some(obj_name),
+                        name: method,
+                        args,
+                    })
+                } else {
+                    // Es un método de instancia: obj.metodo() -> MethodCall
+                    Ok(Expr::MethodCall {
+                        object: Box::new(Expr::Ident(obj_name)),
+                        method,
+                        args,
+                    })
                 }
             });
 
         let call = qualified_name
             .then(
                 just("(")
-                    .padded()
-                    .ignore_then(
-                        expr.clone()
-                            .separated_by(just(",").padded())
-                            .allow_trailing(),
-                    )
-                    .then_ignore(just(")").padded()),
+                .padded()
+                .ignore_then(
+                    expr.clone()
+                    .separated_by(just(",").padded())
+                    .allow_trailing(),
+                )
+                .then_ignore(just(")").padded()),
             )
             .map(|((module, name), args)| Expr::Call {
                 module,
@@ -1220,6 +1307,13 @@ fn expr_parser() -> impl Parser<char, Expr, Error = Simple<char>> + Clone {
                 args,
             })
             .or(atom);
+
+        // Combinar: super_call tiene prioridad, luego method_call, luego call
+        // super_call -> SuperCall
+        // method_call puede retornar Call (para constructores) o MethodCall (para métodos)
+        let call_or_method = super_call
+            .or(method_call)
+            .or(call);
 
         // Match expression (O0.4)
         let pattern = recursive(|_pattern| {
@@ -1277,7 +1371,7 @@ fn expr_parser() -> impl Parser<char, Expr, Error = Simple<char>> + Clone {
             })
             .labelled("match");
 
-        let unary = call
+        let unary = call_or_method
             .or(match_expr);
 
         // Aplicar field/method access despu├®s de call/match (Fase 1.2 - O1, O4)
@@ -1698,7 +1792,7 @@ mod tests {
             }
         "#;
         let program = parse(src).unwrap();
-        if let Stmt::Struct { name, fields, init, destroy } = &program.statements[0] {
+        if let Stmt::Struct { name, fields, init, destroy, .. } = &program.statements[0] {
             assert_eq!(name, "Persona");
             assert_eq!(fields.len(), 2);
             assert_eq!(fields[0].name, "nombre");
@@ -1952,4 +2046,3 @@ mod tests {
         }
     }
 }
-

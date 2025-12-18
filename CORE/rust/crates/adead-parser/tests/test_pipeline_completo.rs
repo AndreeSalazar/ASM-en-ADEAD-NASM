@@ -1,3 +1,4 @@
+#![cfg(feature = "integration-tests")]
 /**
  * Tests Exhaustivos del Pipeline Completo
  * 

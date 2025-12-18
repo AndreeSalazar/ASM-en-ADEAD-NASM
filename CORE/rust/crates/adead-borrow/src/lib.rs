@@ -63,7 +63,7 @@ impl BorrowChecker {
     pub fn check(&mut self, program: &Program) -> Result<()> {
         // Primera pasada: registrar structs con su información de visibilidad (O5)
         for stmt in &program.statements {
-            if let Stmt::Struct { name, fields, init, destroy } = stmt {
+            if let Stmt::Struct { name, fields, init, destroy, .. } = stmt {
                 let mut field_visibility = HashMap::new();
                 for field in fields {
                     field_visibility.insert(field.name.clone(), field.visibility);
@@ -178,7 +178,7 @@ impl BorrowChecker {
                 // Break y Continue no necesitan verificación especial de borrowing
                 Ok(())
             }
-            Stmt::Struct { name: _, fields: _, init: _, destroy: _ } => {
+            Stmt::Struct { .. } => {
                 // Structs se registran pero no necesitan verificación especial aquí
                 // Los campos se verifican cuando se usan
                 // Constructores y destructores se verifican como funciones normales

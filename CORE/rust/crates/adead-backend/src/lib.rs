@@ -1,5 +1,5 @@
 use adead_common::Result;
-use adead_parser::{BinOp, Expr, Pattern, Program, Stmt};
+use adead_parser::{BinOp, Expr, Pattern, Program, Stmt, StructMethod};
 use std::collections::HashMap;
 
 mod memory_pool;
@@ -34,6 +34,10 @@ pub struct CodeGenerator {
     loop_stack: Vec<LoopContext>, // Stack de contextos de loop para break/continue
     struct_definitions: HashMap<String, Vec<String>>, // Track struct field names for offset calculation
     variable_types: HashMap<String, String>, // Track variable types (for struct field access)
+    current_struct: Option<String>, // Struct actual que se está procesando (para super.metodo())
+    struct_parents: HashMap<String, Option<String>>, // Mapeo de struct -> parent (para herencia)
+    struct_methods: HashMap<String, Vec<String>>, // Track métodos de cada struct (para vtables)
+    vtable_counter: usize, // Contador para nombres únicos de vtables
 }
 
 impl CodeGenerator {
@@ -52,6 +56,10 @@ impl CodeGenerator {
             loop_stack: Vec::new(),
             struct_definitions: HashMap::new(),
             variable_types: HashMap::new(),
+            current_struct: None,
+            struct_parents: HashMap::new(),
+            struct_methods: HashMap::new(),
+            vtable_counter: 0,
         }
     }
     
@@ -161,13 +169,17 @@ impl CodeGenerator {
         // RUNTIME BOUNDARY END: Código Generado del Usuario
         // ============================================
         
-        // Generar funciones de usuario ANTES del main
-        // Separar funciones de otros statements
+        // Separar statements por tipo para procesar en orden correcto
+        // Orden: 1) Structs (para registrar tipos), 2) Funciones, 3) Resto
+        let mut structs = Vec::new();
         let mut user_functions = Vec::new();
         let mut other_statements = Vec::new();
         
         for stmt in &program.statements {
             match stmt {
+                Stmt::Struct { .. } => {
+                    structs.push(stmt);
+                }
                 Stmt::Fn { .. } => {
                     user_functions.push(stmt);
                 }
@@ -177,9 +189,92 @@ impl CodeGenerator {
             }
         }
         
-        // Generar funciones de usuario primero
+        // 1. Registrar structs primero (sin generar código, solo registrar tipos)
+        for stmt in &structs {
+            if let Stmt::Struct { name, fields, .. } = stmt {
+                let field_names: Vec<String> = fields.iter().map(|f| f.name.clone()).collect();
+                self.struct_definitions.insert(name.clone(), field_names);
+            }
+        }
+        
+        // 2. Asociar funciones globales con structs (si siguen patrón StructName_method)
+        // Esto permite usar fn StructName_method(self, ...) como métodos
+        let mut struct_methods_from_functions: HashMap<String, Vec<(String, StructMethod)>> = HashMap::new();
         for stmt in &user_functions {
-            self.generate_stmt_windows(stmt)?;
+            if let Stmt::Fn { name, params, body, .. } = stmt {
+                // Detectar patrón: StructName_methodName
+                if let Some(underscore_pos) = name.find('_') {
+                    let struct_name = &name[..underscore_pos];
+                    let method_name = &name[underscore_pos + 1..];
+                    
+                    // Verificar si el struct existe
+                    if self.struct_definitions.contains_key(struct_name) {
+                        // Si es 'new', es un constructor (puede o no tener 'self')
+                        // Si tiene 'self' como primer parámetro, es un método de instancia
+                        let is_constructor = method_name == "new";
+                        let is_instance_method = params.first().map(|p| p.name == "self").unwrap_or(false);
+                        
+                        if is_constructor || is_instance_method {
+                            let method = StructMethod {
+                                visibility: adead_parser::Visibility::Public,
+                                params: params.clone(),
+                                body: body.clone(),
+                            };
+                            struct_methods_from_functions
+                                .entry(struct_name.to_string())
+                                .or_insert_with(Vec::new)
+                                .push((method_name.to_string(), method));
+                        }
+                    }
+                }
+            }
+        }
+        
+        // 3. Generar funciones de usuario (que no son métodos de struct)
+        for stmt in &user_functions {
+            // Solo generar si no es un método de struct
+            let is_struct_method = if let Stmt::Fn { name, .. } = stmt {
+                if let Some(underscore_pos) = name.find('_') {
+                    let struct_name = &name[..underscore_pos];
+                    self.struct_definitions.contains_key(struct_name)
+                } else {
+                    false
+                }
+            } else {
+                false
+            };
+            
+            if !is_struct_method {
+                self.generate_stmt_windows(stmt)?;
+            }
+        }
+        
+        // 4. Generar structs (código de métodos y constructores)
+        // Si hay métodos desde funciones globales, agregarlos a los structs
+        for stmt in &structs {
+            match stmt {
+                Stmt::Struct { name, parent, fields, init, destroy, methods } => {
+                    let mut all_methods = methods.clone();
+                    if let Some(additional_methods) = struct_methods_from_functions.get(name) {
+                        // Agregar métodos adicionales desde funciones globales
+                        for (method_name, method) in additional_methods {
+                            all_methods.push((method_name.clone(), method.clone()));
+                        }
+                    }
+                    let modified_stmt = Stmt::Struct {
+                        name: name.clone(),
+                        parent: parent.clone(),
+                        fields: fields.clone(),
+                        init: init.clone(),
+                        destroy: destroy.clone(),
+                        methods: all_methods,
+                    };
+                    self.generate_stmt_windows(&modified_stmt)?;
+                }
+                _ => {
+                    self.generate_stmt_windows(stmt)?;
+                }
+            }
         }
         
         self.text_section.push("main:".to_string());
@@ -202,7 +297,7 @@ impl CodeGenerator {
         self.text_section.push("    mov [rbp+16], rax  ; save stdout handle at [rbp+16]".to_string());
 
         // Generar otros statements (no funciones) dentro del main
-        for stmt in &other_statements {
+        for stmt in other_statements.iter() {
             self.generate_stmt_windows(stmt)?;
         }
 
@@ -703,13 +798,23 @@ impl CodeGenerator {
             },
             Stmt::Let { mutable, name, value } => {
                 self.add_debug_comment(&format!("let {} = ...", if *mutable { format!("mut {}", name) } else { name.clone() }));
-                // Si el valor es un StructLiteral, registrar para destrucción RAII si tiene destroy
-                // y también registrar el tipo de la variable
-                let struct_name = if let Expr::StructLiteral { name: struct_name, .. } = value {
+                // Detectar si el valor es un constructor: ClassName.new(...)
+                let struct_name = if let Expr::Call { module: Some(class_name), name: method_name, .. } = value {
+                    if method_name == "new" && self.struct_definitions.contains_key(class_name) {
+                        // Es un constructor, registrar tipo
+                        if self.structs_with_destroy.contains_key(class_name) {
+                            self.variables_to_destroy.push((name.clone(), class_name.clone()));
+                        }
+                        self.variable_types.insert(name.clone(), class_name.clone());
+                        Some(class_name.clone())
+                    } else {
+                        None
+                    }
+                } else if let Expr::StructLiteral { name: struct_name, .. } = value {
+                    // Struct literal
                     if self.structs_with_destroy.contains_key(struct_name) {
                         self.variables_to_destroy.push((name.clone(), struct_name.clone()));
                     }
-                    // Registrar el tipo de la variable para acceso a campos
                     self.variable_types.insert(name.clone(), struct_name.clone());
                     Some(struct_name.clone())
                 } else {
@@ -995,15 +1100,189 @@ impl CodeGenerator {
                 // Nota: NO llamamos leave/ret aquí porque el epilogue de la función lo hará
                 // El código de la función saltará al epilogue después de return
             }
-            Stmt::Struct { name, fields, init, destroy: _ } => {
+            Stmt::Struct { name, parent, fields, init, destroy, methods } => {
+                // Registrar parent para super.metodo()
+                self.struct_parents.insert(name.clone(), parent.clone());
+                
                 // Registrar campos del struct para cálculo de offsets
-                let field_names: Vec<String> = fields.iter().map(|f| f.name.clone()).collect();
-                self.struct_definitions.insert(name.clone(), field_names.clone());
+                // Si hay herencia, incluir campos del padre
+                let mut all_field_names: Vec<String> = Vec::new();
+                
+                // Si hay padre, agregar sus campos primero
+                if let Some(parent_name) = &parent {
+                    if let Some(parent_fields) = self.struct_definitions.get(parent_name) {
+                        all_field_names.extend(parent_fields.clone());
+                    } else {
+                        return Err(adead_common::ADeadError::RuntimeError {
+                            message: format!("Struct padre '{}' no está definido antes de '{}'. Los structs padre deben definirse antes que los hijos.", parent_name, name),
+                        });
+                    }
+                }
+                
+                // Agregar campos propios del struct
+                let own_field_names: Vec<String> = fields.iter().map(|f| f.name.clone()).collect();
+                all_field_names.extend(own_field_names.clone());
+                
+                self.struct_definitions.insert(name.clone(), all_field_names);
+                
+                // Establecer struct actual para procesar métodos
+                let old_struct = self.current_struct.take();
+                self.current_struct = Some(name.clone());
+                
+                // Registrar si tiene destructor (para RAII)
+                if destroy.is_some() {
+                    self.structs_with_destroy.insert(name.clone(), true);
+                }
+                
+                // Registrar métodos de instancia (no estáticos) para vtables
+                let mut instance_methods: Vec<String> = Vec::new();
+                if let Some(parent_name) = &parent {
+                    // Si hay padre, heredar métodos del padre
+                    if let Some(parent_methods) = self.struct_methods.get(parent_name) {
+                        instance_methods.extend(parent_methods.clone());
+                    }
+                }
+                
+                // Generar métodos de instancia y estáticos
+                // Nota: Los métodos pueden venir del struct directamente o desde funciones globales asociadas
+                for (method_name, method) in methods {
+                    let method_label = format!("fn_{}_{}", name, method_name);
+                    
+                    // Detectar si es método estático (no tiene 'self' como primer parámetro)
+                    let is_static = method.params.is_empty() || method.params[0].name != "self";
+                    
+                    // Registrar métodos de instancia para vtable (no estáticos)
+                    if !is_static {
+                        // Si el método ya existe (heredado), reemplazarlo (override)
+                        if let Some(pos) = instance_methods.iter().position(|m| m == method_name) {
+                            instance_methods[pos] = method_name.clone();
+                        } else {
+                            instance_methods.push(method_name.clone());
+                        }
+                    }
+                    
+                    self.text_section.push(format!("    jmp {}_end", method_label));
+                    self.text_section.push(format!("{}:", method_label));
+                    
+                    // Guardar stack_offset inicial para restaurar después
+                    let saved_stack_offset = self.stack_offset;
+                    
+                    // Prologue ABI-safe
+                    self.generate_abi_prologue(true);
+                    
+                    if !is_static {
+                        // Método de instancia: self viene en RCX (primer parámetro implícito)
+                        let self_offset = self.stack_offset;
+                        self.stack_offset += 8;
+                        self.variables.insert("self".to_string(), self_offset);
+                        self.variable_types.insert("self".to_string(), name.clone());
+                        self.text_section.push(format!("    mov [rbp - {}], rcx  ; guardar self", self_offset + 8));
+                    }
+                    
+                    // Parámetros del método vienen en RCX (si estático), RDX, R8, R9... (si instancia)
+                    let param_start_reg = if is_static { 0 } else { 1 }; // Si estático, RCX es primer param; si instancia, RCX es self
+                    for (i, param) in method.params.iter().enumerate() {
+                        if !is_static && i == 0 && param.name == "self" {
+                            // self ya fue manejado arriba, saltar
+                            continue;
+                        }
+                        let offset = self.stack_offset;
+                        self.stack_offset += 8;
+                        self.variables.insert(param.name.clone(), offset);
+                        
+                        // Calcular índice real del parámetro (ajustado si es método de instancia)
+                        let param_index = if is_static { i } else { i - 1 }; // Si instancia, self no cuenta
+                        
+                        match param_index {
+                            0 => {
+                                // RCX (si estático) o RDX (si instancia) -> guardar en stack local
+                                let reg = if is_static { "rcx" } else { "rdx" };
+                                self.text_section.push(format!("    mov [rbp - {}], {}  ; guardar param{}: {}", offset + 8, reg, param_index, param.name));
+                            }
+                            1 => {
+                                // RDX (si estático) o R8 (si instancia) -> guardar en stack local
+                                let reg = if is_static { "rdx" } else { "r8" };
+                                self.text_section.push(format!("    mov [rbp - {}], {}  ; guardar param{}: {}", offset + 8, reg, param_index, param.name));
+                            }
+                            2 => {
+                                // R8 (si estático) o R9 (si instancia) -> guardar en stack local
+                                let reg = if is_static { "r8" } else { "r9" };
+                                self.text_section.push(format!("    mov [rbp - {}], {}  ; guardar param{}: {}", offset + 8, reg, param_index, param.name));
+                            }
+                            3 => {
+                                // R9 (si estático) o stack (si instancia) -> guardar en stack local
+                                if is_static {
+                                    self.text_section.push(format!("    mov [rbp - {}], r9  ; guardar param{}: {}", offset + 8, param_index, param.name));
+                                } else {
+                                    let stack_offset = 16 + (param_index - 3) * 8;
+                                    self.text_section.push(format!("    mov rax, [rbp + {}]  ; cargar param{} desde stack del caller", stack_offset, param_index));
+                                    self.text_section.push(format!("    mov [rbp - {}], rax  ; guardar param{}: {}", offset + 8, param_index, param.name));
+                                }
+                            }
+                            _ => {
+                                // Parámetros adicionales están en stack del caller
+                                let stack_offset = 16 + (param_index - 4) * 8;
+                                self.text_section.push(format!("    mov rax, [rbp + {}]  ; cargar param{} desde stack del caller", stack_offset, param_index));
+                                self.text_section.push(format!("    mov [rbp - {}], rax  ; guardar param{}: {}", offset + 8, param_index, param.name));
+                            }
+                        }
+                    }
+                    
+                    // Generar cuerpo del método
+                    let return_label = format!("{}_return", method_label);
+                    let mut has_explicit_return = false;
+                    
+                    for s in &method.body {
+                        match s {
+                            Stmt::Return(_) => {
+                                has_explicit_return = true;
+                                self.generate_stmt_windows(s)?;
+                                self.text_section.push(format!("    jmp {}", return_label));
+                            }
+                            _ => {
+                                self.generate_stmt_windows(s)?;
+                            }
+                        }
+                    }
+                    
+                    // Si no hay return explícito, retornar 0 por defecto
+                    self.text_section.push(format!("{}:", return_label));
+                    if !has_explicit_return {
+                        self.text_section.push("    mov rax, 0  ; return value por defecto".to_string());
+                    }
+                    
+                    // Epilogue ABI-safe
+                    self.generate_abi_epilogue(true);
+                    
+                    // Restaurar stack_offset
+                    self.stack_offset = saved_stack_offset;
+                    
+                    self.text_section.push(format!("{}_end:", method_label));
+                    
+                    // Limpiar variables locales del método
+                    self.variables.remove("self");
+                    for param in &method.params {
+                        self.variables.remove(&param.name);
+                    }
+                }
+                
+                // Guardar métodos de instancia para este struct
+                self.struct_methods.insert(name.clone(), instance_methods.clone());
+                
+                // Generar vtable en sección .data
+                if !instance_methods.is_empty() {
+                    let vtable_label = format!("vtable_{}", name);
+                    self.data_section.push(format!("{}:", vtable_label));
+                    for method_name in &instance_methods {
+                        let method_ptr = format!("fn_{}_{}", name, method_name);
+                        self.data_section.push(format!("    dq {}  ; método {}", method_ptr, method_name));
+                    }
+                }
                 
                 // Registrar struct y generar código para constructor si existe
                 if let Some(init_method) = init {
-                    // Generar función de constructor: StructName_init
-                    let init_label = format!("{}_init", name);
+                    // Generar función de constructor: fn_StructName_new
+                    let init_label = format!("fn_{}_new", name);
                     self.text_section.push(format!("    jmp {}_end", init_label));
                     self.text_section.push(format!("{}:", init_label));
                     self.text_section.push("    push rbp".to_string());
@@ -1016,6 +1295,15 @@ impl CodeGenerator {
                     self.variables.insert("self".to_string(), self_offset);
                     self.variable_types.insert("self".to_string(), name.clone());
                     self.text_section.push(format!("    mov [rbp - {}], rcx  ; guardar self", self_offset + 8));
+                    
+                    // Si hay herencia, llamar al constructor del padre primero
+                    if let Some(parent_name) = parent {
+                        self.text_section.push(format!("    ; Llamar constructor del padre: {}", parent_name));
+                        // self ya está en RCX, pasarlo al constructor del padre
+                        self.text_section.push("    sub rsp, 32  ; shadow space".to_string());
+                        self.text_section.push(format!("    call fn_{}_new  ; constructor del padre", parent_name));
+                        self.text_section.push("    add rsp, 32  ; restaurar shadow space".to_string());
+                    }
                     
                     // Los parámetros del usuario vienen en RDX, R8, R9... (RCX tiene self)
                     for (i, param) in init_method.params.iter().enumerate() {
@@ -1053,6 +1341,9 @@ impl CodeGenerator {
                         self.variables.remove(&param.name);
                     }
                 }
+                
+                // Restaurar struct anterior
+                self.current_struct = old_struct;
                 // Struct definitions are type information only, no code generation needed for the struct itself
             }
         }
@@ -1150,6 +1441,14 @@ impl CodeGenerator {
                 self.text_section.push("    mov rax, [rax]".to_string());
             }
             Expr::Ident(name) => {
+                // Verificar si es un struct definido (no una variable)
+                // Esto puede pasar si se intenta usar un struct como variable
+                if self.struct_definitions.contains_key(name) {
+                    return Err(adead_common::ADeadError::RuntimeError {
+                        message: format!("'{}' es un struct, no una variable. Usa '{}.new(...)' para crear una instancia.", name, name),
+                    });
+                }
+                
                 if let Some(&offset) = self.variables.get(name) {
                     // Load variable from stack (Windows x64)
                     // Variables are stored at negative offsets from rbp
@@ -1343,6 +1642,118 @@ impl CodeGenerator {
                 self.text_section.push("    movzx rax, al".to_string());
             }
             Expr::Call { module, name, args } => {
+                // Detectar llamada a constructor PRIMERO: ClassName.new(...)
+                // DEBE ir ANTES de built-ins y otras llamadas para tener prioridad
+                if let Some(class_name) = &module {
+                    if name == "new" {
+                        if !self.struct_definitions.contains_key(class_name) {
+                            return Err(adead_common::ADeadError::RuntimeError {
+                                message: format!("'{}' no es un struct definido. Asegúrate de que el struct esté definido antes de usar '{}.new(...)'.", class_name, class_name),
+                            });
+                        }
+                        // CONSTRUCTOR: ClassName.new(args)
+                        // Layout: [vtable_ptr (8)] [campo1 (8)] [campo2 (8)] ...
+                        // 1. Reservar espacio en stack para el struct (incluyendo vtable_ptr)
+                        let num_fields = self.struct_definitions.get(class_name)
+                            .map(|f| f.len())
+                            .unwrap_or(0);
+                        let struct_size = (num_fields + 1) * 8; // +1 para vtable_ptr
+                        let struct_offset = self.stack_offset;
+                        self.stack_offset += struct_size as i64;
+                        
+                        self.text_section.push(format!("    ; Crear instancia de {} ({} campos + vtable, {} bytes)", class_name, num_fields, struct_size));
+                        
+                        // Reservar espacio para el struct y calcular su dirección
+                        // El struct se ubicará en [rbp - struct_offset - 8] hasta [rbp - struct_offset - 8 - struct_size]
+                        let struct_base_offset = struct_offset + 8;
+                        
+                        // Inicializar puntero a vtable (primer campo, offset 0)
+                        if self.struct_methods.contains_key(class_name) && !self.struct_methods.get(class_name).unwrap().is_empty() {
+                            let vtable_label = format!("vtable_{}", class_name);
+                            self.text_section.push(format!("    lea rax, [rel {}]  ; cargar dirección de vtable", vtable_label));
+                            self.text_section.push(format!("    mov [rbp - {}], rax  ; inicializar vtable_ptr (offset 0)", struct_base_offset));
+                        } else {
+                            // Sin métodos virtuales, poner NULL
+                            self.text_section.push(format!("    mov qword [rbp - {}], 0  ; sin vtable", struct_base_offset));
+                        }
+                        
+                        // 2. Cargar argumentos del constructor PRIMERO (antes de modificar RCX)
+                        let mut arg_values = Vec::new();
+                        for arg in args.iter() {
+                            self.generate_expr_windows(arg)?;
+                            self.text_section.push("    push rax  ; guardar arg temporalmente".to_string());
+                            arg_values.push(());
+                        }
+                        
+                        // 3. Restaurar argumentos a registros (en orden inverso)
+                        for i in (0..args.len()).rev() {
+                            let reg = match i {
+                                0 => "rdx",  // Primer arg del usuario
+                                1 => "r8",
+                                2 => "r9",
+                                _ => continue,  // TODO: pasar en stack
+                            };
+                            self.text_section.push(format!("    pop {}  ; arg{}", reg, i));
+                        }
+                        
+                        // 4. self = dirección base del struct (usando el offset calculado)
+                        // Nota: self apunta al inicio del struct (donde está vtable_ptr)
+                        self.text_section.push(format!("    lea rcx, [rbp - {}]  ; self = puntero al struct (incluye vtable_ptr)", struct_base_offset));
+                        
+                        // 5. Llamar al constructor
+                        // Prioridad: fn_StructName_new (función explícita) > StructName_init (del struct)
+                        let constructor_name = format!("fn_{}_new", class_name);
+                        self.text_section.push("    sub rsp, 32  ; shadow space".to_string());
+                        self.text_section.push(format!("    call {}  ; constructor", constructor_name));
+                        self.text_section.push("    add rsp, 32  ; restaurar shadow space".to_string());
+                        
+                        // 6. Retornar dirección del struct en RAX
+                        self.text_section.push(format!("    lea rax, [rbp - {}]  ; retornar puntero al struct", struct_base_offset));
+                        // Registrar tipo de variable para acceso a campos
+                        // Nota: Esto se hace en Stmt::Let, pero aquí retornamos el puntero
+                        return Ok(());
+                    } else {
+                            // Llamada a método estático: StructName.metodo(args)
+                            // Métodos estáticos no tienen 'self', los parámetros van directamente en RCX, RDX, R8, R9...
+                            let num_args = args.len();
+                            let stack_args_count = if num_args > 4 { num_args - 4 } else { 0 };
+                            let total_stack_space = 32 + (stack_args_count * 8);
+                            
+                            self.text_section.push(format!("    ; Llamada a método estático {}.{}", class_name, name));
+                            self.text_section.push(format!("    sub rsp, {}  ; shadow space", 32));
+                            
+                            // Cargar argumentos en registros (RCX, RDX, R8, R9 para estáticos)
+                            for (i, arg) in args.iter().take(4).enumerate() {
+                                self.generate_expr_windows(arg)?;
+                                let reg = match i {
+                                    0 => "rcx",
+                                    1 => "rdx",
+                                    2 => "r8",
+                                    3 => "r9",
+                                    _ => unreachable!(),
+                                };
+                                self.text_section.push(format!("    mov {}, rax  ; param{}", reg, i));
+                            }
+                            
+                            // Argumentos adicionales en stack
+                            for (i, arg) in args.iter().skip(4).enumerate() {
+                                self.generate_expr_windows(arg)?;
+                                self.text_section.push("    push rax  ; arg en stack".to_string());
+                            }
+                            
+                            let function_name = format!("fn_{}_{}", class_name, name);
+                            self.text_section.push(format!("    call {}  ; método estático", function_name));
+                            
+                            // Limpiar argumentos del stack si los hay
+                            if stack_args_count > 0 {
+                                self.text_section.push(format!("    add rsp, {}  ; limpiar args del stack", stack_args_count * 8));
+                            }
+                            
+                            self.text_section.push(format!("    add rsp, {}  ; restaurar shadow space", 32));
+                            return Ok(());
+                    }
+                }
+                
                 // Detectar built-ins como len(arr) o len(s)
                 if module.is_none() && name == "len" && args.len() == 1 {
                     // Detectar si el argumento es string o array
@@ -1366,110 +1777,38 @@ impl CodeGenerator {
                     }
                     
                     // Retorna la longitud en RAX (ya está ahí)
-                } else {
-                    // Detectar llamada a constructor PRIMERO: ClassName.new(...)
-                    if let Some(class_name) = module {
-                        if name == "new" && self.struct_definitions.contains_key(class_name) {
-                            // CONSTRUCTOR: ClassName.new(args)
-                            // 1. Reservar espacio en stack para el struct
-                            let num_fields = self.struct_definitions.get(class_name)
-                                .map(|f| f.len())
-                                .unwrap_or(0);
-                            let struct_size = num_fields * 8;
-                            let struct_offset = self.stack_offset;
-                            self.stack_offset += struct_size as i64;
-                            
-                            self.text_section.push(format!("    ; Crear instancia de {} ({} campos, {} bytes)", class_name, num_fields, struct_size));
-                            
-                            // Reservar espacio para el struct y calcular su dirección
-                            // El struct se ubicará en [rbp - struct_offset - 8] hasta [rbp - struct_offset - 8 - struct_size]
-                            let struct_base_offset = struct_offset + 8;
-                            
-                            // 2. Cargar argumentos del constructor PRIMERO (antes de modificar RCX)
-                            let mut arg_values = Vec::new();
-                            for arg in args.iter() {
-                                self.generate_expr_windows(arg)?;
-                                self.text_section.push("    push rax  ; guardar arg temporalmente".to_string());
-                                arg_values.push(());
-                            }
-                            
-                            // 3. Restaurar argumentos a registros (en orden inverso)
-                            for i in (0..args.len()).rev() {
-                                let reg = match i {
-                                    0 => "rdx",  // Primer arg del usuario
-                                    1 => "r8",
-                                    2 => "r9",
-                                    _ => continue,  // TODO: pasar en stack
-                                };
-                                self.text_section.push(format!("    pop {}  ; arg{}", reg, i));
-                            }
-                            
-                            // 4. self = dirección base del struct (usando el offset calculado)
-                            self.text_section.push(format!("    lea rcx, [rbp - {}]  ; self = puntero al struct", struct_base_offset));
-                            
-                            // 5. Llamar al constructor
-                            self.text_section.push("    sub rsp, 32  ; shadow space".to_string());
-                            self.text_section.push(format!("    call {}_init", class_name));
-                            self.text_section.push("    add rsp, 32  ; restaurar shadow space".to_string());
-                            
-                            // 6. Retornar dirección del struct en RAX
-                            self.text_section.push(format!("    lea rax, [rbp - {}]  ; retornar puntero al struct", struct_base_offset));
-                        } else {
-                            // Llamada a función con módulo (no constructor)
-                            let num_args = args.len();
-                            let stack_args_count = if num_args > 4 { num_args - 4 } else { 0 };
-                            let total_stack_space = 32 + (stack_args_count * 8);
-                            
-                            self.text_section.push(format!("    sub rsp, {}  ; shadow space", 32));
-                            
-                            for (i, arg) in args.iter().take(4).enumerate() {
-                                self.generate_expr_windows(arg)?;
-                                let reg = match i {
-                                    0 => "rcx",
-                                    1 => "rdx",
-                                    2 => "r8",
-                                    3 => "r9",
-                                    _ => unreachable!(),
-                                };
-                                self.text_section.push(format!("    mov {}, rax  ; param{}", reg, i));
-                            }
-                            
-                            let function_name = format!("fn_{}_{}", class_name, name);
-                            self.text_section.push(format!("    call {}", function_name));
-                            self.text_section.push(format!("    add rsp, {}  ; restaurar shadow space", total_stack_space));
-                        }
-                    } else {
-                        // Llamada a función normal (ABI-safe)
-                        let num_args = args.len();
-                        let stack_args_count = if num_args > 4 { num_args - 4 } else { 0 };
-                        let total_stack_space = 32 + (stack_args_count * 8);
-                        
-                        self.text_section.push(format!("    sub rsp, {}  ; shadow space", 32));
-                        
-                        for arg in args.iter().skip(4).rev() {
-                            self.generate_expr_windows(arg)?;
-                            self.text_section.push("    push rax  ; parámetro adicional en stack".to_string());
-                        }
-                        
-                        for (i, arg) in args.iter().take(4).enumerate() {
-                            self.generate_expr_windows(arg)?;
-                            let reg = match i {
-                                0 => "rcx",
-                                1 => "rdx",
-                                2 => "r8",
-                                3 => "r9",
-                                _ => unreachable!(),
-                            };
-                            self.text_section.push(format!("    mov {}, rax  ; param{}", reg, i));
-                        }
-                        
-                        let function_name = format!("fn_{}", name);
-                        self.text_section.push(format!("    call {}", function_name));
-                        self.text_section.push(format!("    add rsp, {}  ; restaurar shadow space", total_stack_space));
-                    }
-                    
-                    // Valor de retorno está en RAX
+                    return Ok(());
                 }
+                
+                // Llamada a función normal (ABI-safe)
+                let num_args = args.len();
+                let stack_args_count = if num_args > 4 { num_args - 4 } else { 0 };
+                let total_stack_space = 32 + (stack_args_count * 8);
+                
+                self.text_section.push(format!("    sub rsp, {}  ; shadow space", 32));
+                
+                for arg in args.iter().skip(4).rev() {
+                    self.generate_expr_windows(arg)?;
+                    self.text_section.push("    push rax  ; parámetro adicional en stack".to_string());
+                }
+                
+                for (i, arg) in args.iter().take(4).enumerate() {
+                    self.generate_expr_windows(arg)?;
+                    let reg = match i {
+                        0 => "rcx",
+                        1 => "rdx",
+                        2 => "r8",
+                        3 => "r9",
+                        _ => unreachable!(),
+                    };
+                    self.text_section.push(format!("    mov {}, rax  ; param{}", reg, i));
+                }
+                
+                let function_name = format!("fn_{}", name);
+                self.text_section.push(format!("    call {}", function_name));
+                self.text_section.push(format!("    add rsp, {}  ; restaurar shadow space", total_stack_space));
+                
+                // Valor de retorno está en RAX
             }
             Expr::Assign { name, value } => {
                 // Verificar si es asignación a índice de array: arr[0] = value
@@ -1616,24 +1955,21 @@ impl CodeGenerator {
                 
                 self.generate_expr_windows(object)?;
                 
-                // Calcular offset del campo (negativo - stack crece hacia abajo)
-                // Struct layout en stack: campo0 en [ptr], campo1 en [ptr - 8], etc.
+                // Calcular offset del campo
+                // Struct layout: [vtable_ptr (0)] [campo0 (8)] [campo1 (16)] ...
                 let field_offset = if let Some(ref type_name) = struct_type {
                     if let Some(fields) = self.struct_definitions.get(type_name) {
-                        fields.iter().position(|f| f == field).unwrap_or(0) * 8
+                        // Buscar el campo y calcular offset (+8 porque vtable_ptr está en offset 0)
+                        fields.iter().position(|f| f == field).map(|pos| (pos + 1) * 8).unwrap_or(8)
                     } else {
-                        0
+                        8
                     }
                 } else {
-                    0
+                    8
                 };
                 
-                self.text_section.push(format!("    ; accediendo campo '{}' (offset: -{})", field, field_offset));
-                if field_offset == 0 {
-                    self.text_section.push("    mov rax, [rax]  ; cargar campo (offset 0)".to_string());
-                } else {
-                    self.text_section.push(format!("    mov rax, [rax - {}]  ; cargar campo", field_offset));
-                }
+                self.text_section.push(format!("    ; accediendo campo '{}' (offset: {})", field, field_offset));
+                self.text_section.push(format!("    mov rax, [rax + {}]  ; cargar campo", field_offset));
             }
             Expr::FieldAssign { object, field, value } => {
                 // Asignación a campo de struct: obj.field = value
@@ -1646,24 +1982,22 @@ impl CodeGenerator {
                 // Luego obtener la dirección del objeto
                 self.generate_expr_windows(object)?;
                 
-                // Calcular offset del campo (negativo - stack crece hacia abajo)
+                // Calcular offset del campo
+                // Struct layout: [vtable_ptr (0)] [campo0 (8)] [campo1 (16)] ...
                 let field_offset = if let Some(ref type_name) = struct_type {
                     if let Some(fields) = self.struct_definitions.get(type_name) {
-                        fields.iter().position(|f| f == field).unwrap_or(0) * 8
+                        // Buscar el campo y calcular offset (+8 porque vtable_ptr está en offset 0)
+                        fields.iter().position(|f| f == field).map(|pos| (pos + 1) * 8).unwrap_or(8)
                     } else {
-                        0
+                        8
                     }
                 } else {
-                    0
+                    8
                 };
                 
                 self.text_section.push("    pop rbx  ; restaurar valor a asignar".to_string());
-                self.text_section.push(format!("    ; asignando a campo '{}' (offset: -{})", field, field_offset));
-                if field_offset == 0 {
-                    self.text_section.push("    mov [rax], rbx  ; asignar campo (offset 0)".to_string());
-                } else {
-                    self.text_section.push(format!("    mov [rax - {}], rbx  ; asignar campo", field_offset));
-                }
+                self.text_section.push(format!("    ; asignando a campo '{}' (offset: {})", field, field_offset));
+                self.text_section.push(format!("    mov [rax + {}], rbx  ; asignar campo", field_offset));
             }
             Expr::Index { array, index } => {
                 // Indexación: arr[0] o s[0] (para strings, solo lectura de carácter)
@@ -1934,22 +2268,211 @@ impl CodeGenerator {
                         // string_lower retorna puntero al nuevo String en RAX (ya está ahí)
                     }
                     _ => {
-                        // Método genérico: llamar a fn_{method}
-                        self.generate_expr_windows(object)?;
-                        self.text_section.push("    push rax  ; guardar self".to_string());
+                        // Método de struct/clase: obj.metodo(args)
+                        // Determinar tipo del objeto
+                        let struct_type = self.get_struct_type_from_expr(object);
                         
-                        for arg in args {
-                            self.generate_expr_windows(arg)?;
-                            self.text_section.push("    push rax".to_string());
-                        }
-                        
-                        self.text_section.push(format!("    call fn_{}", method));
-                        
-                        let cleanup_size = (args.len() + 1) * 8;
-                        if cleanup_size > 0 {
-                            self.text_section.push(format!("    add rsp, {}", cleanup_size));
+                        if let Some(ref type_name) = struct_type {
+                            // Es un método de struct/clase
+                            // Evaluar objeto (puntero al struct en stack)
+                            self.generate_expr_windows(object)?;
+                            self.text_section.push("    push rax  ; guardar puntero al struct".to_string());
+                            
+                            // Evaluar argumentos
+                            for (i, arg) in args.iter().enumerate() {
+                                self.generate_expr_windows(arg)?;
+                                match i {
+                                    0 => {
+                                        self.text_section.push("    mov rdx, rax  ; arg0".to_string());
+                                    }
+                                    1 => {
+                                        self.text_section.push("    mov r8, rax  ; arg1".to_string());
+                                    }
+                                    2 => {
+                                        self.text_section.push("    mov r9, rax  ; arg2".to_string());
+                                    }
+                                    _ => {
+                                        self.text_section.push("    push rax  ; arg adicional en stack".to_string());
+                                    }
+                                }
+                            }
+                            
+                            // Preparar self (RCX) desde el objeto guardado
+                            self.text_section.push("    pop rcx  ; self (puntero al struct)".to_string());
+                            
+                            // Llamar a método: fn_StructName_method
+                            let method_label = format!("fn_{}_{}", type_name, method);
+                            self.text_section.push("    sub rsp, 32  ; shadow space".to_string());
+                            self.text_section.push(format!("    call {}", method_label));
+                            self.text_section.push("    add rsp, 32  ; restaurar shadow space".to_string());
+                            
+                            // RAX contiene el valor de retorno (si hay)
+                        } else {
+                            // No se pudo determinar el tipo del objeto
+                            // Intentar obtener el nombre de la variable para dar un error más claro
+                            let var_name = if let Expr::Ident(name) = object.as_ref() {
+                                name.clone()
+                            } else {
+                                "objeto".to_string()
+                            };
+                            
+                            return Err(adead_common::ADeadError::RuntimeError {
+                                message: format!(
+                                    "No se pudo determinar el tipo de '{}' para llamar al método '{}'. Asegúrate de que la variable esté correctamente tipada.",
+                                    var_name, method
+                                ),
+                            });
                         }
                     }
+                    _ => {
+                        // Método de struct/clase: obj.metodo(args)
+                        // Determinar tipo del objeto
+                        let struct_type = self.get_struct_type_from_expr(object);
+                        
+                        if let Some(ref type_name) = struct_type {
+                            // Es un método de struct/clase
+                            // Evaluar objeto (puntero al struct en stack)
+                            self.generate_expr_windows(object)?;
+                            self.text_section.push("    push rax  ; guardar puntero al struct".to_string());
+                            
+                            // Evaluar argumentos
+                            for (i, arg) in args.iter().enumerate() {
+                                self.generate_expr_windows(arg)?;
+                                match i {
+                                    0 => {
+                                        self.text_section.push("    mov rdx, rax  ; arg0".to_string());
+                                    }
+                                    1 => {
+                                        self.text_section.push("    mov r8, rax  ; arg1".to_string());
+                                    }
+                                    2 => {
+                                        self.text_section.push("    mov r9, rax  ; arg2".to_string());
+                                    }
+                                    _ => {
+                                        self.text_section.push("    push rax  ; arg adicional en stack".to_string());
+                                    }
+                                }
+                            }
+                            
+                            // Preparar self (RCX) desde el objeto guardado
+                            self.text_section.push("    pop rcx  ; self (puntero al struct)".to_string());
+                            
+                            // Verificar si el método está en la vtable (dispatch dinámico)
+                            let use_virtual_dispatch = if let Some(methods) = self.struct_methods.get(type_name) {
+                                methods.contains(method)
+                            } else {
+                                false
+                            };
+                            
+                            if use_virtual_dispatch {
+                                // DISPATCH DINÁMICO: Usar vtable para llamada virtual
+                                // 1. Cargar puntero a vtable desde [self + 0]
+                                self.text_section.push("    mov rax, [rcx]  ; cargar vtable_ptr desde [self + 0]".to_string());
+                                
+                                // 2. Calcular offset del método en la vtable
+                                if let Some(methods) = self.struct_methods.get(type_name) {
+                                    if let Some(method_index) = methods.iter().position(|m| m == method) {
+                                        let vtable_offset = method_index * 8; // Cada puntero es 8 bytes
+                                        
+                                        // 3. Cargar puntero al método desde [vtable + offset]
+                                        self.text_section.push(format!("    mov rax, [rax + {}]  ; cargar puntero al método desde vtable[{}]", vtable_offset, method_index));
+                                        
+                                        // 4. Llamar indirectamente usando el puntero
+                                        self.text_section.push("    sub rsp, 32  ; shadow space".to_string());
+                                        self.text_section.push("    call rax  ; llamada virtual (dispatch dinámico)".to_string());
+                                        self.text_section.push("    add rsp, 32  ; restaurar shadow space".to_string());
+                                    } else {
+                                        return Err(adead_common::ADeadError::RuntimeError {
+                                            message: format!("Método '{}' no encontrado en vtable de '{}'.", method, type_name),
+                                        });
+                                    }
+                                } else {
+                                    return Err(adead_common::ADeadError::RuntimeError {
+                                        message: format!("No se pudo encontrar vtable para '{}'.", type_name),
+                                    });
+                                }
+                            } else {
+                                // LLAMADA ESTÁTICA: Método no virtual, llamar directamente
+                                let method_label = format!("fn_{}_{}", type_name, method);
+                                self.text_section.push("    sub rsp, 32  ; shadow space".to_string());
+                                self.text_section.push(format!("    call {}  ; llamada estática", method_label));
+                                self.text_section.push("    add rsp, 32  ; restaurar shadow space".to_string());
+                            }
+                            
+                            // RAX contiene el valor de retorno (si hay)
+                        } else {
+                            // No se pudo determinar el tipo del objeto
+                            // Intentar obtener el nombre de la variable para dar un error más claro
+                            let var_name = if let Expr::Ident(name) = object.as_ref() {
+                                name.clone()
+                            } else {
+                                "objeto".to_string()
+                            };
+                            
+                            return Err(adead_common::ADeadError::RuntimeError {
+                                message: format!(
+                                    "No se pudo determinar el tipo de '{}' para llamar al método '{}'. Asegúrate de que la variable esté correctamente tipada.",
+                                    var_name, method
+                                ),
+                            });
+                        }
+                    }
+                }
+            }
+            Expr::SuperCall { method, args } => {
+                // super.metodo(args) - llamada a método del padre
+                // Obtener struct padre desde current_struct
+                if let Some(current_struct_name) = &self.current_struct {
+                    if let Some(parent_name) = self.struct_parents.get(current_struct_name) {
+                        if let Some(parent) = parent_name.clone() {
+                            // Evaluar argumentos
+                            for (i, arg) in args.iter().enumerate() {
+                                self.generate_expr_windows(arg)?;
+                                match i {
+                                    0 => {
+                                        self.text_section.push("    mov rdx, rax  ; arg0".to_string());
+                                    }
+                                    1 => {
+                                        self.text_section.push("    mov r8, rax  ; arg1".to_string());
+                                    }
+                                    2 => {
+                                        self.text_section.push("    mov r9, rax  ; arg2".to_string());
+                                    }
+                                    _ => {
+                                        self.text_section.push("    push rax  ; arg adicional en stack".to_string());
+                                    }
+                                }
+                            }
+                            
+                            // self ya está en el contexto (debe estar en RCX o en stack)
+                            // Si self está en variables, cargarlo; si no, asumir que está en RCX
+                            if let Some(&self_offset) = self.variables.get("self") {
+                                self.text_section.push(format!("    mov rcx, [rbp - {}]  ; self desde stack", self_offset + 8));
+                            }
+                            // Si no está en variables, asumir que ya está en RCX (contexto del método)
+                            
+                            // Llamar a método del padre: fn_ParentName_method
+                            let method_label = format!("fn_{}_{}", parent, method);
+                            self.text_section.push(format!("    ; Llamada a super.{}(), método del padre {}", method, parent));
+                            self.text_section.push("    sub rsp, 32  ; shadow space".to_string());
+                            self.text_section.push(format!("    call {}", method_label));
+                            self.text_section.push("    add rsp, 32  ; restaurar shadow space".to_string());
+                            
+                            // RAX contiene el valor de retorno (si hay)
+                        } else {
+                            return Err(adead_common::ADeadError::RuntimeError {
+                                message: format!("'{}' no tiene struct padre. 'super.metodo()' solo puede usarse dentro de structs con herencia.", current_struct_name),
+                            });
+                        }
+                    } else {
+                        return Err(adead_common::ADeadError::RuntimeError {
+                            message: format!("No se pudo encontrar información del struct '{}' para 'super.metodo()'.", current_struct_name),
+                        });
+                    }
+                } else {
+                    return Err(adead_common::ADeadError::RuntimeError {
+                        message: "'super.metodo()' solo puede usarse dentro de métodos de structs.".to_string(),
+                    });
                 }
             }
             Expr::Match { expr, arms } => {
@@ -2316,7 +2839,7 @@ impl CodeGenerator {
                 self.text_section.push("    pop rbp".to_string());
                 self.text_section.push("    ret".to_string());
             }
-            Stmt::Struct { name, fields, init, destroy: _ } => {
+            Stmt::Struct { name, parent: _, fields, init, destroy: _, methods: _ } => {
                 // Registrar campos del struct para cálculo de offsets
                 let field_names: Vec<String> = fields.iter().map(|f| f.name.clone()).collect();
                 self.struct_definitions.insert(name.clone(), field_names);
@@ -2556,6 +3079,57 @@ impl CodeGenerator {
                 // TODO: Implementar lógica de matching real
                 if let Some(first_arm) = arms.first() {
                     self.generate_expr(&first_arm.body)?;
+                }
+            }
+            Expr::SuperCall { method, args } => {
+                // super.metodo(args) - llamada a método del padre (Linux)
+                // Similar a Windows pero con convenciones System V
+                if let Some(current_struct_name) = &self.current_struct {
+                    if let Some(parent_name) = self.struct_parents.get(current_struct_name) {
+                        if let Some(parent) = parent_name.clone() {
+                            // Evaluar argumentos (System V: rdi, rsi, rdx, rcx, r8, r9)
+                            for (i, arg) in args.iter().enumerate() {
+                                self.generate_expr(arg)?;
+                                let reg = match i {
+                                    0 => "rdi",
+                                    1 => "rsi",
+                                    2 => "rdx",
+                                    3 => "rcx",
+                                    4 => "r8",
+                                    5 => "r9",
+                                    _ => {
+                                        self.text_section.push("    push rax  ; arg en stack".to_string());
+                                        continue;
+                                    }
+                                };
+                                self.text_section.push(format!("    mov {}, rax  ; arg{}", reg, i));
+                            }
+                            
+                            // self debe estar en rdi (primer parámetro en System V)
+                            if let Some(&self_offset) = self.variables.get("self") {
+                                self.text_section.push(format!("    mov rdi, [rbp - {}]  ; self desde stack", self_offset + 8));
+                            }
+                            
+                            // Llamar a método del padre
+                            let method_label = format!("fn_{}_{}", parent, method);
+                            self.text_section.push(format!("    ; Llamada a super.{}(), método del padre {}", method, parent));
+                            self.text_section.push(format!("    call {}", method_label));
+                            
+                            // RAX contiene el valor de retorno (si hay)
+                        } else {
+                            return Err(adead_common::ADeadError::RuntimeError {
+                                message: format!("'{}' no tiene struct padre. 'super.metodo()' solo puede usarse dentro de structs con herencia.", current_struct_name),
+                            });
+                        }
+                    } else {
+                        return Err(adead_common::ADeadError::RuntimeError {
+                            message: format!("No se pudo encontrar información del struct '{}' para 'super.metodo()'.", current_struct_name),
+                        });
+                    }
+                } else {
+                    return Err(adead_common::ADeadError::RuntimeError {
+                        message: "'super.metodo()' solo puede usarse dentro de métodos de structs.".to_string(),
+                    });
                 }
             }
             Expr::PropagateError(expr) => {
@@ -2851,13 +3425,14 @@ impl CodeGenerator {
     fn get_struct_type_from_expr(&self, expr: &Expr) -> Option<String> {
         match expr {
             Expr::Ident(name) => {
-                // Buscar en variable_types primero
+                // Buscar en variable_types primero (más confiable)
                 if let Some(type_name) = self.variable_types.get(name) {
                     return Some(type_name.clone());
                 }
                 // Fallback: buscar en struct_definitions para ver si existe un struct con ese nombre
+                // Solo si el nombre de la variable coincide exactamente (case-insensitive) con el struct
                 for (struct_name, _) in &self.struct_definitions {
-                    if name.to_lowercase().contains(&struct_name.to_lowercase()) {
+                    if name.to_lowercase() == struct_name.to_lowercase() {
                         return Some(struct_name.clone());
                     }
                 }

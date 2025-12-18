@@ -10,7 +10,9 @@ fn test_generate_some() {
     "#;
     let program = parse(src).unwrap();
     let mut gen = CodeGenerator::new();
+    println!("{:?}", program);
     let asm = gen.generate(&program).unwrap();
+    println!("{}", asm);
     
     // Verificar que se genera código para Some
     assert!(asm.contains("tag = 1 (Some)"));
