@@ -188,6 +188,8 @@ pub enum BinOp {
     Mul,
     Div,
     Mod,  // Módulo: a % b
+    Pow,      // ** (potencia)
+    FloorDiv, // // (división entera)
     Eq,
     Ne,
     Lt,
@@ -1705,15 +1707,33 @@ fn expr_parser() -> impl Parser<char, Expr, Error = Simple<char>> + Clone {
                 }
             });
 
-        let product = with_propagate
+        // Potencia: ** (mayor precedencia que multiplicación)
+        let power = with_propagate
             .clone()
             .then(
-                just("*")
+                just("**")
                     .padded()
-                    .to(BinOp::Mul)
+                    .to(BinOp::Pow)
+                    .then(with_propagate.clone())
+                    .repeated(),
+            )
+            .foldl(|l, (op, r)| Expr::BinaryOp {
+                op,
+                left: Box::new(l),
+                right: Box::new(r),
+            });
+
+        // Multiplicación, división, módulo, división entera
+        let product = power
+            .clone()
+            .then(
+                just("//")
+                    .padded()
+                    .to(BinOp::FloorDiv)
+                    .or(just("*").padded().to(BinOp::Mul))
                     .or(just("/").padded().to(BinOp::Div))
                     .or(just("%").padded().to(BinOp::Mod))
-                    .then(with_propagate.clone())
+                    .then(power.clone())
                     .repeated(),
             )
             .foldl(|l, (op, r)| Expr::BinaryOp {

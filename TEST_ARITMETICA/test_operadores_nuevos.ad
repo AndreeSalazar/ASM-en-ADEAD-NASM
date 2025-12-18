@@ -1,0 +1,26 @@
+# Test: Operadores Aritméticos Nuevos
+# Objetivo: Verificar **, //, y operadores compuestos
+
+# Potencia: **
+let base = 2
+let exp = 10
+let potencia = base ** exp
+print potencia  # Debería imprimir 1024
+
+# División entera: //
+let dividendo = 17
+let divisor = 5
+let cociente = dividendo // divisor
+print cociente  # Debería imprimir 3
+
+# Verificar diferencia entre / y //
+let div_normal = 17 / 5
+let div_entera = 17 // 5
+print div_normal   # 3 (división entera en ADead por ahora)
+print div_entera   # 3
+
+# Potencias varias
+print 3 ** 2   # 9
+print 5 ** 3   # 125
+print 10 ** 0  # 1
+print 1 ** 100 # 1

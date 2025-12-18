@@ -407,6 +407,15 @@ impl CGenerator {
             Expr::BinaryOp { op, left, right } => {
                 let left_code = self.generate_expr(left);
                 let right_code = self.generate_expr(right);
+                
+                // Casos especiales para operadores que necesitan funciones
+                if matches!(op, BinOp::Pow) {
+                    return format!("pow({}, {})", left_code, right_code);
+                }
+                if matches!(op, BinOp::FloorDiv) {
+                    return format!("({} / {})", left_code, right_code);
+                }
+                
                 let op_str = match op {
                     BinOp::Add => "+",
                     BinOp::Sub => "-",
@@ -421,6 +430,7 @@ impl CGenerator {
                     BinOp::Ge => ">=",
                     BinOp::And => "&&",
                     BinOp::Or => "||",
+                    BinOp::Pow | BinOp::FloorDiv => unreachable!(),
                 };
                 format!("({} {} {})", left_code, op_str, right_code)
             }

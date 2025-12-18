@@ -1619,26 +1619,57 @@ impl CodeGenerator {
                             self.text_section.push("    add rax, rbx".to_string());
                         }
                         BinOp::Sub => {
-                            self.text_section.push("    sub rbx, rax".to_string());
-                            self.text_section.push("    mov rax, rbx".to_string());
+                            self.text_section.push("    sub rax, rbx".to_string());
                         }
                         BinOp::Mul => {
                             self.text_section.push("    imul rax, rbx".to_string());
                         }
                         BinOp::Div => {
-                            self.text_section.push("    mov rdx, 0".to_string());
-                            self.text_section.push("    mov rcx, rax".to_string());
-                            self.text_section.push("    mov rax, rbx".to_string());
-                            self.text_section.push("    div rcx".to_string());
+                            // División entera: RAX / RBX → RAX (cociente), RDX (residuo)
+                            // Necesitamos sign-extend RAX a RDX:RAX antes de dividir
+                            self.text_section.push("    cqo  ; sign-extend rax to rdx:rax".to_string());
+                            self.text_section.push("    idiv rbx  ; rax = rax / rbx".to_string());
+                        }
+                        BinOp::FloorDiv => {
+                            // División entera (//): igual que Div pero asegurando resultado entero
+                            self.text_section.push("    cqo  ; sign-extend rax to rdx:rax".to_string());
+                            self.text_section.push("    idiv rbx  ; rax = rax // rbx (división entera)".to_string());
                         }
                         BinOp::Mod => {
-                            // Módulo: RAX = RBX % RAX
-                            // div rcx deja el resto en RDX
-                            self.text_section.push("    mov rdx, 0".to_string());
-                            self.text_section.push("    mov rcx, rax".to_string());
-                            self.text_section.push("    mov rax, rbx".to_string());
-                            self.text_section.push("    div rcx".to_string());
-                            self.text_section.push("    mov rax, rdx  ; resto (módulo) en RAX".to_string());
+                            // Módulo: RAX % RBX → RDX
+                            self.text_section.push("    cqo  ; sign-extend rax to rdx:rax".to_string());
+                            self.text_section.push("    idiv rbx  ; rdx = rax % rbx".to_string());
+                            self.text_section.push("    mov rax, rdx  ; mover residuo a rax".to_string());
+                        }
+                        BinOp::Pow => {
+                            // Potencia: RAX ** RBX
+                            // Implementación simple usando loop (para enteros)
+                            // Guardar base y exponente
+                            self.text_section.push("    push rax  ; guardar base".to_string());
+                            self.text_section.push("    push rbx  ; guardar exponente".to_string());
+                            
+                            // Caso especial: exponente 0
+                            let label_not_zero = self.new_label("pow_not_zero");
+                            let label_loop = self.new_label("pow_loop");
+                            let label_end = self.new_label("pow_end");
+                            
+                            self.text_section.push("    pop rcx  ; rcx = exponente".to_string());
+                            self.text_section.push("    pop rdx  ; rdx = base".to_string());
+                            self.text_section.push("    cmp rcx, 0".to_string());
+                            self.text_section.push(format!("    jne {}  ; si exp != 0", label_not_zero));
+                            self.text_section.push("    mov rax, 1  ; 0^0 = 1, x^0 = 1".to_string());
+                            self.text_section.push(format!("    jmp {}", label_end));
+                            
+                            // Loop de multiplicación
+                            self.text_section.push(format!("{}:", label_not_zero));
+                            self.text_section.push("    mov rax, 1  ; resultado = 1".to_string());
+                            self.text_section.push(format!("{}:", label_loop));
+                            self.text_section.push("    cmp rcx, 0".to_string());
+                            self.text_section.push(format!("    jle {}  ; si exp <= 0, terminar", label_end));
+                            self.text_section.push("    imul rax, rdx  ; resultado *= base".to_string());
+                            self.text_section.push("    dec rcx  ; exp--".to_string());
+                            self.text_section.push(format!("    jmp {}", label_loop));
+                            self.text_section.push(format!("{}:", label_end));
                         }
                         BinOp::Eq => {
                             self.text_section.push("    cmp rax, rbx".to_string());
@@ -3294,11 +3325,42 @@ impl CodeGenerator {
                         self.text_section.push("    cqo".to_string()); // sign extend rax to rdx:rax
                         self.text_section.push("    idiv rbx".to_string());
                     }
+                    BinOp::FloorDiv => {
+                        // División entera (//): igual que Div
+                        self.text_section.push("    cqo".to_string());
+                        self.text_section.push("    idiv rbx  ; división entera //".to_string());
+                    }
                     BinOp::Mod => {
                         // Módulo: RAX = RAX % RBX (resto de división)
                         self.text_section.push("    cqo".to_string()); // sign extend rax to rdx:rax
                         self.text_section.push("    idiv rbx".to_string());
                         self.text_section.push("    mov rax, rdx  ; resto (módulo) en RAX".to_string());
+                    }
+                    BinOp::Pow => {
+                        // Potencia: RAX ** RBX (Linux)
+                        self.text_section.push("    push rax  ; guardar base".to_string());
+                        self.text_section.push("    push rbx  ; guardar exponente".to_string());
+                        
+                        let label_not_zero = self.new_label("pow_not_zero");
+                        let label_loop = self.new_label("pow_loop");
+                        let label_end = self.new_label("pow_end");
+                        
+                        self.text_section.push("    pop rcx  ; rcx = exponente".to_string());
+                        self.text_section.push("    pop rdx  ; rdx = base".to_string());
+                        self.text_section.push("    cmp rcx, 0".to_string());
+                        self.text_section.push(format!("    jne {}  ; si exp != 0", label_not_zero));
+                        self.text_section.push("    mov rax, 1  ; x^0 = 1".to_string());
+                        self.text_section.push(format!("    jmp {}", label_end));
+                        
+                        self.text_section.push(format!("{}:", label_not_zero));
+                        self.text_section.push("    mov rax, 1  ; resultado = 1".to_string());
+                        self.text_section.push(format!("{}:", label_loop));
+                        self.text_section.push("    cmp rcx, 0".to_string());
+                        self.text_section.push(format!("    jle {}  ; si exp <= 0, terminar", label_end));
+                        self.text_section.push("    imul rax, rdx  ; resultado *= base".to_string());
+                        self.text_section.push("    dec rcx  ; exp--".to_string());
+                        self.text_section.push(format!("    jmp {}", label_loop));
+                        self.text_section.push(format!("{}:", label_end));
                     }
                     BinOp::Eq => {
                         self.text_section.push("    cmp rax, rbx".to_string());
