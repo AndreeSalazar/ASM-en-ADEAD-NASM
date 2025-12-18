@@ -1,0 +1,16 @@
+# Test 3: Constructor Simple (con números)
+# Objetivo: Verificar que Persona.new() funciona correctamente
+
+struct Persona {
+    id
+    edad
+}
+
+fn Persona_new(self, id, edad) {
+    self.id = id
+    self.edad = edad
+}
+
+let p = Persona.new(100, 25)
+print p.id
+print p.edad

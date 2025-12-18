@@ -1,0 +1,12 @@
+# Test 6: Método Estático Simple
+# Objetivo: Verificar que Calculadora.sumar() funciona
+
+struct Calculadora {
+}
+
+fn Calculadora_sumar(a, b) {
+    return a + b
+}
+
+let resultado = Calculadora.sumar(10, 20)
+print resultado

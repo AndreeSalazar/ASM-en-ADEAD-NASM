@@ -1,0 +1,13 @@
+struct Calculadora {
+}
+
+fn Calculadora_sumar(a, b) {
+    return a + b
+}
+
+fn Calculadora_new() {
+    let x = 0
+}
+
+let resultado = Calculadora.sumar(10, 20)
+print resultado

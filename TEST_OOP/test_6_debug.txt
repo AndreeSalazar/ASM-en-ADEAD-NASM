@@ -1,0 +1,101 @@
+default rel
+section .text
+extern GetStdHandle
+extern WriteFile
+extern ExitProcess
+extern VirtualAlloc
+extern VirtualFree
+global main
+; ============================================
+; Librería Estándar ADead - Funciones Predefinidas
+; ============================================
+
+    ; ADead: fn Calculadora_sumar (2)
+fn_Calculadora_sumar:
+    push rbp
+    mov rbp, rsp
+    push rbx  ; preservar registro no volátil
+    push rdi  ; preservar registro no volátil
+    push rsi  ; preservar registro no volátil
+    push r12  ; preservar registro no volátil
+    push r13  ; preservar registro no volátil
+    push r14  ; preservar registro no volátil
+    push r15  ; preservar registro no volátil
+    ; Asegurar stack alignment a 16 bytes
+    sub rsp, 8  ; alinear stack (56 bytes de push % 16 = 8)
+    sub rsp, 32  ; shadow space para llamadas a funciones externas
+    mov [rbp - 8], rcx  ; guardar param0: a
+    mov [rbp - 16], rdx  ; guardar param1: b
+    ; ADead: return statement
+    mov rax, [rbp - 8]  ; load variable a
+    push rax
+    mov rax, [rbp - 16]  ; load variable b
+    pop rbx
+    add rax, rbx
+    jmp fn_Calculadora_sumar_return
+fn_Calculadora_sumar_return:
+    add rsp, 32  ; restaurar shadow space
+    add rsp, 8  ; restaurar alineación de stack
+    pop r15  ; restaurar registro no volátil
+    pop r14  ; restaurar registro no volátil
+    pop r13  ; restaurar registro no volátil
+    pop r12  ; restaurar registro no volátil
+    pop rsi  ; restaurar registro no volátil
+    pop rdi  ; restaurar registro no volátil
+    pop rbx  ; restaurar registro no volátil
+    leave  ; restaurar rbp y rsp
+    ret
+fn_Calculadora_sumar_end:
+    jmp fn_Calculadora_sumar_end
+fn_Calculadora_sumar:
+    push rbp
+    mov rbp, rsp
+    push rbx  ; preservar registro no volátil
+    push rdi  ; preservar registro no volátil
+    push rsi  ; preservar registro no volátil
+    push r12  ; preservar registro no volátil
+    push r13  ; preservar registro no volátil
+    push r14  ; preservar registro no volátil
+    push r15  ; preservar registro no volátil
+    ; Asegurar stack alignment a 16 bytes
+    sub rsp, 8  ; alinear stack (56 bytes de push % 16 = 8)
+    sub rsp, 32  ; shadow space para llamadas a funciones externas
+    mov [rbp - 8], rcx  ; guardar param0: a
+    mov [rbp - 16], rdx  ; guardar param1: b
+    ; ADead: return statement
+    mov rax, [rbp - 8]  ; load variable a
+    push rax
+    mov rax, [rbp - 16]  ; load variable b
+    pop rbx
+    add rax, rbx
+    jmp fn_Calculadora_sumar_return
+fn_Calculadora_sumar_return:
+    add rsp, 32  ; restaurar shadow space
+    add rsp, 8  ; restaurar alineación de stack
+    pop r15  ; restaurar registro no volátil
+    pop r14  ; restaurar registro no volátil
+    pop r13  ; restaurar registro no volátil
+    pop r12  ; restaurar registro no volátil
+    pop rsi  ; restaurar registro no volátil
+    pop rdi  ; restaurar registro no volátil
+    pop rbx  ; restaurar registro no volátil
+    leave  ; restaurar rbp y rsp
+    ret
+fn_Calculadora_sumar_end:
+main:
+    ; Setup stack frame (Windows x64)
+    push rbp
+    mov rbp, rsp
+    ; Align stack to 16 bytes (Windows x64 requirement)
+    and rsp, -16
+    sub rsp, 64  ; Allocate space for shadow space (32) + local vars (32)
+    ; Get stdout handle (STD_OUTPUT_HANDLE = -11)
+    mov ecx, -11
+    call GetStdHandle
+    mov [rbp+16], rax  ; save stdout handle at [rbp+16]
+    ; Exit process
+    mov ecx, 0  ; Exit code 0 (success)
+    call ExitProcess
+    ; Should never reach here (ExitProcess terminates process)
+    leave
+    ret

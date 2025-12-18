@@ -1,0 +1,38 @@
+================================================================================
+🔍 ANÁLISIS INTELIGENTE DEL PROGRAMA
+================================================================================
+
+📊 RESUMEN EJECUTIVO
+--------------------------------------------------------------------------------
+Total de Statements: 4
+Structs: 1
+Funciones: 1
+Other Statements: 2
+Problemas Detectados: 1
+
+🏗️  STRUCTS DETECTADOS
+--------------------------------------------------------------------------------
+  • Calculadora (0 campos)
+
+⚙️  FUNCIONES DETECTADAS
+--------------------------------------------------------------------------------
+  📦 Método Estático Calculadora_sumar
+    Parámetros: 2
+    Struct: Calculadora
+    Método: sumar
+    Tiene self: false
+
+📝 STATEMENTS EN MAIN
+--------------------------------------------------------------------------------
+  ✅ [2] let resultado = MethodCall: sumar(2 args)
+  ✅ [3] print Ident: resultado
+
+🚨 PROBLEMAS DETECTADOS
+--------------------------------------------------------------------------------
+  ⚠️  ADVERTENCIAS:
+    • [Code Generation] Método estático 'Calculadora_sumar' de struct 'Calculadora' puede no generarse
+      💡 Sugerencia: Verificar que los métodos estáticos se generen como funciones globales
+      📍 Ubicación: fn_Calculadora_sumar
+
+================================================================================
+

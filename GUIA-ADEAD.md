@@ -9,27 +9,28 @@
 ## 📊 ESTADO GENERAL
 
 ```
-Progreso Total: ████████░░ 82% → Meta: 100% Producción
+Progreso Total: █████████░ 87% → Meta: 100% Producción
 
-✅ COMPLETADO (82%)          🔄 EN PROGRESO           ⏳ PENDIENTE (18%)
+✅ COMPLETADO (87%)          🔄 EN PROGRESO           ⏳ PENDIENTE (13%)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Tipos: int, string, array    Métodos de instancia    Floats (FPU)
-Variables let/mut            RAII/Destructores       Bool nativo
-Arrays (10 métodos)          OOP Mejoras             Diccionarios
-Strings (6 métodos)                                   Tuples
-Funciones ABI-safe            For con iterables       Sets
-Stdlib (11 funciones)                                        
-Control flow completo                                 OOP/Clases Avanzado
-For loops (range)                                     Herencia
-Break/Continue                                        Interfaces/Traits
-Operadores lógicos            Métodos estáticos       Polimorfismo
-Comentarios (#)                                       Match/Switch
-Dead Code Elimination                                 Try/Catch
-Debug Symbols                                         Módulos/Import
-Structs/OOP Básico                                    Lambdas
-                                                      Generics
-                                                      Async/Await
-                                                      File I/O
+Tipos: int, string, array    For con iterables       Floats (FPU)
+Variables let/mut            Métodos estáticos       Bool nativo
+Arrays (10 métodos)          RAII/Destructores       Diccionarios
+Strings (6 métodos)          Herencia básica         Tuples
+Funciones ABI-safe                                    Sets
+Stdlib (11 funciones)                                 Polimorfismo
+Control flow completo                                 Match/Switch
+For loops (range)                                     Try/Catch
+Break/Continue                                        Módulos/Import
+Operadores lógicos                                    Lambdas
+Comentarios (#)                                       Generics
+Dead Code Elimination                                 Async/Await
+Debug Symbols                                         File I/O
+Structs/OOP Básico ✅                                 Decoradores
+Campos y acceso ✅                                    Type hints
+Métodos instancia ✅                                  Comprehensions
+Constructores ✅
+Métodos con params ✅
 ```
 
 ---
@@ -428,40 +429,41 @@ shl rax, cl
 
 ---
 
-### FASE 4: OOP BÁSICO 🔥 PRIORIDAD ALTA
+### FASE 4: OOP BÁSICO ✅ COMPLETADA (18 Dic 2025)
 
-| Característica | Estado | Tiempo Est. | Descripción |
-|----------------|--------|-------------|-------------|
-| **Structs** | ✅ | - | Estructuras de datos con campos |
-| **Struct Literals** | ✅ | - | `Punto { x: 10, y: 20 }` |
-| **Acceso a Campos** | ✅ | - | `obj.campo` lectura y escritura |
-| **Constructores (init)** | ✅ | - | `fn new()` con parámetros |
-| **self/this** | ✅ | - | `self.campo = valor` en constructores |
-| **Clases** | 🔄 | 1 día | Mejorar generación de métodos |
-| **Métodos de Instancia** | 🔄 | 2 días | `obj.metodo()` funcionando |
-| **RAII/Destructores** | 🔄 | 1 día | `destroy()` automático |
+| Característica | Estado | Tests | Descripción |
+|----------------|--------|-------|-------------|
+| **Structs** | ✅ | test_1 | Estructuras de datos con campos |
+| **Struct Literals** | ✅ | test_1 | `Punto { x: 10, y: 20 }` |
+| **Acceso a Campos** | ✅ | test_1 | `obj.campo` lectura y escritura |
+| **Asignación Campos** | ✅ | test_1 | `obj.campo = valor` |
+| **Constructores** | ✅ | test_3 | `Struct.new(params)` funcional |
+| **Métodos Instancia** | ✅ | test_2 | `obj.metodo()` con self |
+| **Métodos con Params** | ✅ | test_4 | Múltiples parámetros |
+| **Return Values** | ✅ | test_2,4 | Métodos retornan valores |
 
-#### Estado Actual de OOP (Diciembre 2025)
+#### Estado Actual de OOP (18 Diciembre 2025)
 
-**✅ IMPLEMENTADO Y FUNCIONANDO:**
-- Structs con campos múltiples
-- Struct literals: `Punto { x: 10, y: 20 }`
-- Acceso a campos: `obj.campo` (lectura y escritura)
-- Constructores: `fn new(params)` con `self.campo = valor`
-- Múltiples instancias independientes
+**✅ COMPLETAMENTE IMPLEMENTADO Y VERIFICADO:**
+- ✅ Structs con campos múltiples
+- ✅ Struct literals: `Punto { x: 10, y: 20 }`
+- ✅ Acceso a campos: `obj.campo` (lectura)
+- ✅ Asignación a campos: `obj.campo = valor` (escritura)
+- ✅ Constructores: `Struct.new(params)` completamente funcional
+- ✅ Métodos de instancia: `obj.metodo()` con parámetro `self`
+- ✅ Métodos con parámetros: `obj.metodo(a, b, c)`
+- ✅ Return values desde métodos
+- ✅ Múltiples instancias independientes
+- ✅ Layout en memoria correcto (stack con offsets negativos)
+- ✅ Windows x64 ABI compliance total
 
-**🔄 EN MEJORA:**
-- Métodos de instancia: Sintaxis existe, generación mejorando
-- RAII/Destructores: `destroy()` definido, llamada automática mejorando
+**Tests Verificados:**
+- ✅ test_1_struct_basico.ad - Structs y campos (Output: 10, 20, 30, 40)
+- ✅ test_2_metodo_simple.ad - Métodos instancia (Output: 78)
+- ✅ test_3_constructor_simple.ad - Constructores (Output: 100, 25)
+- ✅ test_4_metodo_con_params.ad - Métodos params (Output: 8)
 
-**⏳ PLANIFICADO:**
-- Herencia (`extends`)
-- Interfaces/Traits (`implements`)
-- Métodos estáticos (`static fn`)
-- Visibilidad completa (`_privado`)
-- Polimorfismo con vtables
-
-**📋 Ver:** `PLAN-MEJORAS-OOP.md` para plan detallado de mejoras
+**📋 Ver:** `TEST_OOP/RESUMEN-FINAL-OOP.md` para documentación completa
 
 #### Implementación Clases (Actual)
 ```asm
@@ -504,15 +506,18 @@ Persona_new:
 
 ---
 
-### FASE 5: OOP AVANZADO
+### FASE 5: OOP AVANZADO 🔥 SIGUIENTE PRIORIDAD
 
 | Característica | Estado | Tiempo Est. | Descripción |
 |----------------|--------|-------------|-------------|
-| **Métodos estáticos** | ⏳ | 1 día | `static fn`, `StructName.metodo()` |
-| **Visibilidad** | ⏳ | 1 día | `_privado`, público (en AST, falta implementar) |
-| **Herencia** | ⏳ | 3 días | `extends` padre, `super.metodo()` |
-| **Interfaces/Traits** | ⏳ | 4 días | Contratos de comportamiento |
+| **Métodos estáticos** | 🔄 | 4 horas | `Struct.metodo()` - Infraestructura lista, ajuste parser |
+| **Visibilidad** | ⏳ | 1 día | `_privado`, público por defecto |
+| **Herencia simple** | ⏳ | 3 días | `class B extends A`, campos heredados |
+| **super.metodo()** | ⏳ | 1 día | Llamadas a métodos del padre |
+| **Interfaces/Traits** | ⏳ | 4 días | `class X implements Y`, contratos |
 | **Polimorfismo** | ⏳ | 2 días | Vtables, dispatch dinámico |
+| **Properties** | ⏳ | 2 días | Getters/setters automáticos |
+| **Operadores** | ⏳ | 2 días | Sobrecarga de operadores |
 
 ---
 

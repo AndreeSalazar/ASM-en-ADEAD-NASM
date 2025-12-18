@@ -1715,30 +1715,20 @@ impl CodeGenerator {
                             });
                     }
                             // CONSTRUCTOR: ClassName.new(args)
-                        // Layout: [vtable_ptr (8)] [campo1 (8)] [campo2 (8)] ...
-                        // 1. Reservar espacio en stack para el struct (incluyendo vtable_ptr)
+                        // Layout simple: [campo0 (0)] [campo1 (8)] [campo2 (16)] ...
+                        // 1. Reservar espacio en stack para el struct (sin vtable para structs simples)
                             let num_fields = self.struct_definitions.get(class_name)
                                 .map(|f| f.len())
                                 .unwrap_or(0);
-                        let struct_size = (num_fields + 1) * 8; // +1 para vtable_ptr
+                        let struct_size = num_fields * 8; // Sin vtable para structs simples
                             let struct_offset = self.stack_offset;
                             self.stack_offset += struct_size as i64;
                             
-                        self.text_section.push(format!("    ; Crear instancia de {} ({} campos + vtable, {} bytes)", class_name, num_fields, struct_size));
+                        self.text_section.push(format!("    ; Constructor: {}.new() ({} campos, {} bytes)", class_name, num_fields, struct_size));
+                        self.text_section.push(format!("    sub rsp, {}  ; reservar espacio para struct", struct_size));
                             
-                            // Reservar espacio para el struct y calcular su dirección
-                            // El struct se ubicará en [rbp - struct_offset - 8] hasta [rbp - struct_offset - 8 - struct_size]
+                            // Calcular dirección base del struct
                             let struct_base_offset = struct_offset + 8;
-                        
-                        // Inicializar puntero a vtable (primer campo, offset 0)
-                        if self.struct_methods.contains_key(class_name) && !self.struct_methods.get(class_name).unwrap().is_empty() {
-                            let vtable_label = format!("vtable_{}", class_name);
-                            self.text_section.push(format!("    lea rax, [rel {}]  ; cargar dirección de vtable", vtable_label));
-                            self.text_section.push(format!("    mov [rbp - {}], rax  ; inicializar vtable_ptr (offset 0)", struct_base_offset));
-                        } else {
-                            // Sin métodos virtuales, poner NULL
-                            self.text_section.push(format!("    mov qword [rbp - {}], 0  ; sin vtable", struct_base_offset));
-                        }
                             
                             // 2. Cargar argumentos del constructor PRIMERO (antes de modificar RCX)
                             let mut arg_values = Vec::new();
@@ -1759,12 +1749,10 @@ impl CodeGenerator {
                                 self.text_section.push(format!("    pop {}  ; arg{}", reg, i));
                             }
                             
-                            // 4. self = dirección base del struct (usando el offset calculado)
-                        // Nota: self apunta al inicio del struct (donde está vtable_ptr)
-                        self.text_section.push(format!("    lea rcx, [rbp - {}]  ; self = puntero al struct (incluye vtable_ptr)", struct_base_offset));
+                            // 4. self = dirección base del struct
+                        self.text_section.push(format!("    lea rcx, [rbp - {}]  ; self = puntero al struct", struct_base_offset));
                             
                             // 5. Llamar al constructor
-                        // Prioridad: fn_StructName_new (función explícita) > StructName_init (del struct)
                         let constructor_name = format!("fn_{}_new", class_name);
                             self.text_section.push("    sub rsp, 32  ; shadow space".to_string());
                         self.text_section.push(format!("    call {}  ; constructor", constructor_name));
@@ -1772,8 +1760,6 @@ impl CodeGenerator {
                             
                             // 6. Retornar dirección del struct en RAX
                             self.text_section.push(format!("    lea rax, [rbp - {}]  ; retornar puntero al struct", struct_base_offset));
-                        // Registrar tipo de variable para acceso a campos
-                        // Nota: Esto se hace en Stmt::Let, pero aquí retornamos el puntero
                         return Ok(());
                         } else {
                             // Llamada a método estático: StructName.metodo(args)
@@ -1998,19 +1984,27 @@ impl CodeGenerator {
                 }
                 
                 // Generar struct literal en stack
+                // Layout en memoria (stack crece hacia abajo):
+                // [rbp - 8]  = campo0 (offset 0 desde base)
+                // [rbp - 16] = campo1 (offset 8 desde base)
+                // [rbp - 24] = campo2 (offset 16 desde base)
+                // La dirección base apunta a [rbp - 8]
                 let struct_size = fields.len() * 8;
-                let offset = self.stack_offset;
+                let base_offset = self.stack_offset;
                 self.stack_offset += struct_size as i64;
-                self.text_section.push(format!("    sub rsp, {}  ; espacio para struct {} ({} campos)", struct_size, name, fields.len()));
+                self.text_section.push(format!("    ; Struct literal: {} ({} campos, {} bytes)", name, fields.len(), struct_size));
+                self.text_section.push(format!("    sub rsp, {}  ; reservar espacio para struct", struct_size));
                 
-                // Generar valores de campos
+                // Generar valores de campos en orden
                 for (i, (field_name, value)) in fields.iter().enumerate() {
                     self.generate_expr_windows(value)?;
-                    let field_offset = offset + (i as i64 * 8) + 8;
-                    self.text_section.push(format!("    mov [rbp - {}], rax  ; {}.{}", field_offset, name, field_name));
+                    let field_offset = base_offset + (i as i64 * 8);
+                    self.text_section.push(format!("    mov [rbp - {}], rax  ; {}.{} = {}", field_offset + 8, name, field_name, 
+                        if let Expr::Number(n) = value { n.to_string() } else { "expr".to_string() }));
                 }
                 
-                    self.text_section.push(format!("    lea rax, [rbp - {}]  ; dirección del struct {}", offset + 8, name));
+                // Retornar dirección base del struct (apunta al primer campo)
+                self.text_section.push(format!("    lea rax, [rbp - {}]  ; dirección del struct {}", base_offset + 8, name));
             }
             Expr::FieldAccess { object, field } => {
                 // Determinar el tipo del objeto para calcular el offset correcto
@@ -2019,48 +2013,67 @@ impl CodeGenerator {
                 self.generate_expr_windows(object)?;
                 
                 // Calcular offset del campo
-                // Struct layout: [vtable_ptr (0)] [campo0 (8)] [campo1 (16)] ...
+                // Layout en memoria: base apunta a campo0, campo1 está 8 bytes ABAJO en el stack
+                // Pero como usamos direcciones, campo1 está en [base - 8], NO [base + 8]
+                // CORRECCIÓN: En realidad, cuando hacemos lea rax, [rbp - X], rax apunta a esa dirección
+                // y los campos siguientes están en direcciones MENORES (stack crece hacia abajo)
+                // Por lo tanto: campo0 en [base], campo1 en [base - 8], campo2 en [base - 16]
                 let field_offset = if let Some(ref type_name) = struct_type {
                     if let Some(fields) = self.struct_definitions.get(type_name) {
-                        // Buscar el campo y calcular offset (+8 porque vtable_ptr está en offset 0)
-                        fields.iter().position(|f| f == field).map(|pos| (pos + 1) * 8).unwrap_or(8)
+                        // Buscar el campo y calcular offset NEGATIVO (stack crece hacia abajo)
+                        let pos = fields.iter().position(|f| f == field).unwrap_or(0);
+                        -(pos as i64 * 8)
                     } else {
-                        8
+                        0
                     }
                 } else {
-                    8
+                    0
                 };
                 
                 self.text_section.push(format!("    ; accediendo campo '{}' (offset: {})", field, field_offset));
-                self.text_section.push(format!("    mov rax, [rax + {}]  ; cargar campo", field_offset));
+                if field_offset == 0 {
+                    self.text_section.push("    mov rax, [rax]  ; cargar campo".to_string());
+                } else if field_offset < 0 {
+                    self.text_section.push(format!("    mov rax, [rax - {}]  ; cargar campo", -field_offset));
+                } else {
+                    self.text_section.push(format!("    mov rax, [rax + {}]  ; cargar campo", field_offset));
+                }
             }
             Expr::FieldAssign { object, field, value } => {
                 // Asignación a campo de struct: obj.field = value
                 let struct_type = self.get_struct_type_from_expr(object);
                 
-                // Primero generar el valor a asignar
-                self.generate_expr_windows(value)?;
-                self.text_section.push("    push rax  ; guardar valor a asignar".to_string());
-                
-                // Luego obtener la dirección del objeto
+                // PRIMERO: obtener la dirección del objeto y guardarla
                 self.generate_expr_windows(object)?;
+                self.text_section.push("    push rax  ; guardar dirección del objeto".to_string());
                 
-                // Calcular offset del campo
-                // Struct layout: [vtable_ptr (0)] [campo0 (8)] [campo1 (16)] ...
+                // SEGUNDO: generar el valor a asignar
+                self.generate_expr_windows(value)?;
+                self.text_section.push("    mov rbx, rax  ; mover valor a rbx".to_string());
+                
+                // TERCERO: restaurar dirección del objeto
+                self.text_section.push("    pop rax  ; restaurar dirección del objeto".to_string());
+                
+                // Calcular offset del campo (negativo porque stack crece hacia abajo)
                 let field_offset = if let Some(ref type_name) = struct_type {
                     if let Some(fields) = self.struct_definitions.get(type_name) {
-                        // Buscar el campo y calcular offset (+8 porque vtable_ptr está en offset 0)
-                        fields.iter().position(|f| f == field).map(|pos| (pos + 1) * 8).unwrap_or(8)
+                        let pos = fields.iter().position(|f| f == field).unwrap_or(0);
+                        -(pos as i64 * 8)
                     } else {
-                        8
+                        0
                     }
                 } else {
-                    8
+                    0
                 };
                 
-                self.text_section.push("    pop rbx  ; restaurar valor a asignar".to_string());
                 self.text_section.push(format!("    ; asignando a campo '{}' (offset: {})", field, field_offset));
-                self.text_section.push(format!("    mov [rax + {}], rbx  ; asignar campo", field_offset));
+                if field_offset == 0 {
+                    self.text_section.push("    mov [rax], rbx  ; asignar campo".to_string());
+                } else if field_offset < 0 {
+                    self.text_section.push(format!("    mov [rax - {}], rbx  ; asignar campo", -field_offset));
+                } else {
+                    self.text_section.push(format!("    mov [rax + {}], rbx  ; asignar campo", field_offset));
+                }
             }
             Expr::Index { array, index } => {
                 // Indexación: arr[0] o s[0] (para strings, solo lectura de carácter)

@@ -1,0 +1,10 @@
+struct Punto {
+    x
+    y
+}
+
+let p = Punto { x: 10, y: 20 }
+print p.x
+print p.y
+p.x = 30
+print p.x
