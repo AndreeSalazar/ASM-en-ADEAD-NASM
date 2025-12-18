@@ -8,10 +8,12 @@ mod stdlib;
 mod register_optimizer;
 mod dependency_graph;
 mod usage_analyzer;
+mod debug_analyzer;
 use optimizer::CodeOptimizer;
 use stdlib::StdLib;
 use dependency_graph::DependencyGraph;
 use usage_analyzer::UsageAnalyzer;
+use debug_analyzer::DebugAnalyzer;
 
 /// Contexto para loops (NASM-Universal.md - Break/Continue)
 /// Permite manejar break y continue dentro de loops anidados
@@ -106,6 +108,35 @@ impl CodeGenerator {
     }
 
     fn generate_windows(&mut self, program: &Program) -> Result<String> {
+        // ============================================
+        // DEBUG INTELIGENTE: Análisis Completo del Programa
+        // ============================================
+        // Activar debug inteligente (siempre activo para análisis completo)
+        eprintln!("\n[DEBUG] Iniciando análisis inteligente del programa...");
+        let debug_analyzer = DebugAnalyzer::new(true, true);
+        let debug_info = debug_analyzer.analyze_program(program);
+        eprintln!("[DEBUG] Análisis completo: {} statements, {} structs, {} funciones, {} otros statements", 
+            debug_info.total_statements, debug_info.structs.len(), debug_info.functions.len(), debug_info.other_statements.len());
+        
+        // Imprimir reporte detallado estilo Python
+        let report = debug_analyzer.generate_report(&debug_info);
+        if !report.is_empty() {
+            // Forzar output a ambos streams para máxima visibilidad
+            println!("\n{}", report);
+            eprintln!("\n{}", report);
+            // También escribir a archivo para debugging
+            if let Ok(mut debug_file) = std::fs::File::create("debug_analysis.txt") {
+                use std::io::Write;
+                let _ = writeln!(debug_file, "{}", report);
+            }
+            // Forzar flush inmediato
+            use std::io::Write;
+            std::io::stdout().flush().ok();
+            std::io::stderr().flush().ok();
+        } else {
+            eprintln!("[DEBUG] WARNING: El reporte está vacío!");
+        }
+        
         // Windows x64 calling convention:
         // - Parameters: RCX, RDX, R8, R9 (first 4 integer params)
         // - Shadow space: 32 bytes must be reserved before each call
@@ -175,19 +206,35 @@ impl CodeGenerator {
         let mut user_functions = Vec::new();
         let mut other_statements = Vec::new();
         
-        for stmt in &program.statements {
+        // DEBUG: Contar statements totales
+        eprintln!("[DEBUG] Total statements parseados: {}", program.statements.len());
+        
+        for (i, stmt) in program.statements.iter().enumerate() {
             match stmt {
-                Stmt::Struct { .. } => {
+                Stmt::Struct { name, .. } => {
+                    eprintln!("[DEBUG] Statement {}: Struct '{}'", i, name);
                     structs.push(stmt);
                 }
-                Stmt::Fn { .. } => {
+                Stmt::Fn { name, .. } => {
+                    eprintln!("[DEBUG] Statement {}: Function '{}'", i, name);
                     user_functions.push(stmt);
                 }
+                Stmt::Let { name, .. } => {
+                    eprintln!("[DEBUG] Statement {}: Let '{}' -> other_statements", i, name);
+                    other_statements.push(stmt);
+                }
+                Stmt::Print(_) => {
+                    eprintln!("[DEBUG] Statement {}: Print -> other_statements", i);
+                    other_statements.push(stmt);
+                }
                 _ => {
+                    eprintln!("[DEBUG] Statement {}: Other -> other_statements", i);
                     other_statements.push(stmt);
                 }
             }
         }
+        
+        eprintln!("[DEBUG] Structs: {}, Functions: {}, Other: {}", structs.len(), user_functions.len(), other_statements.len());
         
         // 1. Registrar structs primero (sin generar código, solo registrar tipos)
         for stmt in &structs {
@@ -211,10 +258,13 @@ impl CodeGenerator {
                     if self.struct_definitions.contains_key(struct_name) {
                         // Si es 'new', es un constructor (puede o no tener 'self')
                         // Si tiene 'self' como primer parámetro, es un método de instancia
+                        // Si NO tiene 'self', es un método estático
                         let is_constructor = method_name == "new";
                         let is_instance_method = params.first().map(|p| p.name == "self").unwrap_or(false);
+                        let is_static_method = !is_constructor && !is_instance_method;
                         
-                        if is_constructor || is_instance_method {
+                        // Registrar TODOS los métodos (constructores, instancia y estáticos)
+                        if is_constructor || is_instance_method || is_static_method {
                             let method = StructMethod {
                                 visibility: adead_parser::Visibility::Public,
                                 params: params.clone(),
@@ -232,19 +282,31 @@ impl CodeGenerator {
         
         // 3. Generar funciones de usuario (que no son métodos de struct)
         for stmt in &user_functions {
-            // Solo generar si no es un método de struct
-            let is_struct_method = if let Stmt::Fn { name, .. } = stmt {
-                if let Some(underscore_pos) = name.find('_') {
+            if let Stmt::Fn { name, params, .. } = stmt {
+                // Detectar si es método de struct
+                let is_struct_method = if let Some(underscore_pos) = name.find('_') {
                     let struct_name = &name[..underscore_pos];
-                    self.struct_definitions.contains_key(struct_name)
+                    if self.struct_definitions.contains_key(struct_name) {
+                        // Verificar si es constructor o método de instancia (con self)
+                        let method_name = &name[underscore_pos + 1..];
+                        let is_constructor = method_name == "new";
+                        let is_instance_method = params.first().map(|p| p.name == "self").unwrap_or(false);
+                        // Si es constructor o método de instancia, NO generar aquí (se generará con el struct)
+                        // Si es método estático (sin self), SÍ generar aquí como función global
+                        is_constructor || is_instance_method
+                    } else {
+                        false
+                    }
                 } else {
                     false
+                };
+                
+                if !is_struct_method {
+                    // Generar función global (no es método de struct)
+                    self.generate_stmt_windows(stmt)?;
                 }
             } else {
-                false
-            };
-            
-            if !is_struct_method {
+                // No es función, generar normalmente
                 self.generate_stmt_windows(stmt)?;
             }
         }
@@ -297,6 +359,7 @@ impl CodeGenerator {
         self.text_section.push("    mov [rbp+16], rax  ; save stdout handle at [rbp+16]".to_string());
 
         // Generar otros statements (no funciones) dentro del main
+        // El debug inteligente ya detectó problemas arriba si los hay
         for stmt in other_statements.iter() {
             self.generate_stmt_windows(stmt)?;
         }
@@ -1172,11 +1235,11 @@ impl CodeGenerator {
                     
                     if !is_static {
                         // Método de instancia: self viene en RCX (primer parámetro implícito)
-                        let self_offset = self.stack_offset;
-                        self.stack_offset += 8;
-                        self.variables.insert("self".to_string(), self_offset);
-                        self.variable_types.insert("self".to_string(), name.clone());
-                        self.text_section.push(format!("    mov [rbp - {}], rcx  ; guardar self", self_offset + 8));
+                    let self_offset = self.stack_offset;
+                    self.stack_offset += 8;
+                    self.variables.insert("self".to_string(), self_offset);
+                    self.variable_types.insert("self".to_string(), name.clone());
+                    self.text_section.push(format!("    mov [rbp - {}], rcx  ; guardar self", self_offset + 8));
                     }
                     
                     // Parámetros del método vienen en RCX (si estático), RDX, R8, R9... (si instancia)
@@ -1650,22 +1713,22 @@ impl CodeGenerator {
                             return Err(adead_common::ADeadError::RuntimeError {
                                 message: format!("'{}' no es un struct definido. Asegúrate de que el struct esté definido antes de usar '{}.new(...)'.", class_name, class_name),
                             });
-                        }
-                        // CONSTRUCTOR: ClassName.new(args)
+                    }
+                            // CONSTRUCTOR: ClassName.new(args)
                         // Layout: [vtable_ptr (8)] [campo1 (8)] [campo2 (8)] ...
                         // 1. Reservar espacio en stack para el struct (incluyendo vtable_ptr)
-                        let num_fields = self.struct_definitions.get(class_name)
-                            .map(|f| f.len())
-                            .unwrap_or(0);
+                            let num_fields = self.struct_definitions.get(class_name)
+                                .map(|f| f.len())
+                                .unwrap_or(0);
                         let struct_size = (num_fields + 1) * 8; // +1 para vtable_ptr
-                        let struct_offset = self.stack_offset;
-                        self.stack_offset += struct_size as i64;
-                        
+                            let struct_offset = self.stack_offset;
+                            self.stack_offset += struct_size as i64;
+                            
                         self.text_section.push(format!("    ; Crear instancia de {} ({} campos + vtable, {} bytes)", class_name, num_fields, struct_size));
-                        
-                        // Reservar espacio para el struct y calcular su dirección
-                        // El struct se ubicará en [rbp - struct_offset - 8] hasta [rbp - struct_offset - 8 - struct_size]
-                        let struct_base_offset = struct_offset + 8;
+                            
+                            // Reservar espacio para el struct y calcular su dirección
+                            // El struct se ubicará en [rbp - struct_offset - 8] hasta [rbp - struct_offset - 8 - struct_size]
+                            let struct_base_offset = struct_offset + 8;
                         
                         // Inicializar puntero a vtable (primer campo, offset 0)
                         if self.struct_methods.contains_key(class_name) && !self.struct_methods.get(class_name).unwrap().is_empty() {
@@ -1676,43 +1739,43 @@ impl CodeGenerator {
                             // Sin métodos virtuales, poner NULL
                             self.text_section.push(format!("    mov qword [rbp - {}], 0  ; sin vtable", struct_base_offset));
                         }
-                        
-                        // 2. Cargar argumentos del constructor PRIMERO (antes de modificar RCX)
-                        let mut arg_values = Vec::new();
-                        for arg in args.iter() {
-                            self.generate_expr_windows(arg)?;
-                            self.text_section.push("    push rax  ; guardar arg temporalmente".to_string());
-                            arg_values.push(());
-                        }
-                        
-                        // 3. Restaurar argumentos a registros (en orden inverso)
-                        for i in (0..args.len()).rev() {
-                            let reg = match i {
-                                0 => "rdx",  // Primer arg del usuario
-                                1 => "r8",
-                                2 => "r9",
-                                _ => continue,  // TODO: pasar en stack
-                            };
-                            self.text_section.push(format!("    pop {}  ; arg{}", reg, i));
-                        }
-                        
-                        // 4. self = dirección base del struct (usando el offset calculado)
+                            
+                            // 2. Cargar argumentos del constructor PRIMERO (antes de modificar RCX)
+                            let mut arg_values = Vec::new();
+                            for arg in args.iter() {
+                                self.generate_expr_windows(arg)?;
+                                self.text_section.push("    push rax  ; guardar arg temporalmente".to_string());
+                                arg_values.push(());
+                            }
+                            
+                            // 3. Restaurar argumentos a registros (en orden inverso)
+                            for i in (0..args.len()).rev() {
+                                let reg = match i {
+                                    0 => "rdx",  // Primer arg del usuario
+                                    1 => "r8",
+                                    2 => "r9",
+                                    _ => continue,  // TODO: pasar en stack
+                                };
+                                self.text_section.push(format!("    pop {}  ; arg{}", reg, i));
+                            }
+                            
+                            // 4. self = dirección base del struct (usando el offset calculado)
                         // Nota: self apunta al inicio del struct (donde está vtable_ptr)
                         self.text_section.push(format!("    lea rcx, [rbp - {}]  ; self = puntero al struct (incluye vtable_ptr)", struct_base_offset));
-                        
-                        // 5. Llamar al constructor
+                            
+                            // 5. Llamar al constructor
                         // Prioridad: fn_StructName_new (función explícita) > StructName_init (del struct)
                         let constructor_name = format!("fn_{}_new", class_name);
-                        self.text_section.push("    sub rsp, 32  ; shadow space".to_string());
+                            self.text_section.push("    sub rsp, 32  ; shadow space".to_string());
                         self.text_section.push(format!("    call {}  ; constructor", constructor_name));
-                        self.text_section.push("    add rsp, 32  ; restaurar shadow space".to_string());
-                        
-                        // 6. Retornar dirección del struct en RAX
-                        self.text_section.push(format!("    lea rax, [rbp - {}]  ; retornar puntero al struct", struct_base_offset));
+                            self.text_section.push("    add rsp, 32  ; restaurar shadow space".to_string());
+                            
+                            // 6. Retornar dirección del struct en RAX
+                            self.text_section.push(format!("    lea rax, [rbp - {}]  ; retornar puntero al struct", struct_base_offset));
                         // Registrar tipo de variable para acceso a campos
                         // Nota: Esto se hace en Stmt::Let, pero aquí retornamos el puntero
                         return Ok(());
-                    } else {
+                        } else {
                             // Llamada a método estático: StructName.metodo(args)
                             // Métodos estáticos no tienen 'self', los parámetros van directamente en RCX, RDX, R8, R9...
                             let num_args = args.len();
@@ -1747,7 +1810,7 @@ impl CodeGenerator {
                             // Limpiar argumentos del stack si los hay
                             if stack_args_count > 0 {
                                 self.text_section.push(format!("    add rsp, {}  ; limpiar args del stack", stack_args_count * 8));
-                            }
+                        }
                             
                             self.text_section.push(format!("    add rsp, {}  ; restaurar shadow space", 32));
                             return Ok(());
@@ -1760,9 +1823,9 @@ impl CodeGenerator {
                     let is_string = self.is_string_expr(&args[0]);
                     
                     // Generar expresión (puntero al Array o String)
-                    self.generate_expr_windows(&args[0])?;
+                            self.generate_expr_windows(&args[0])?;
                     self.text_section.push("    push rax  ; guardar puntero".to_string());
-                    
+                            
                     // Preparar parámetros: RCX = puntero
                     self.text_section.push("    pop rcx  ; puntero".to_string());
                     
@@ -1775,40 +1838,40 @@ impl CodeGenerator {
                         // Llamar a array_len (no necesita shadow space porque no llama a funciones externas)
                         self.text_section.push("    call array_len".to_string());
                     }
-                    
+                            
                     // Retorna la longitud en RAX (ya está ahí)
-                    return Ok(());
-                }
-                
+                            return Ok(());
+                        }
+                        
                 // Llamada a función normal (ABI-safe)
-                let num_args = args.len();
-                let stack_args_count = if num_args > 4 { num_args - 4 } else { 0 };
-                let total_stack_space = 32 + (stack_args_count * 8);
-                
-                self.text_section.push(format!("    sub rsp, {}  ; shadow space", 32));
-                
-                for arg in args.iter().skip(4).rev() {
-                    self.generate_expr_windows(arg)?;
-                    self.text_section.push("    push rax  ; parámetro adicional en stack".to_string());
-                }
-                
-                for (i, arg) in args.iter().take(4).enumerate() {
-                    self.generate_expr_windows(arg)?;
-                    let reg = match i {
-                        0 => "rcx",
-                        1 => "rdx",
-                        2 => "r8",
-                        3 => "r9",
-                        _ => unreachable!(),
-                    };
-                    self.text_section.push(format!("    mov {}, rax  ; param{}", reg, i));
-                }
-                
-                let function_name = format!("fn_{}", name);
-                self.text_section.push(format!("    call {}", function_name));
-                self.text_section.push(format!("    add rsp, {}  ; restaurar shadow space", total_stack_space));
-                
-                // Valor de retorno está en RAX
+                        let num_args = args.len();
+                        let stack_args_count = if num_args > 4 { num_args - 4 } else { 0 };
+                        let total_stack_space = 32 + (stack_args_count * 8);
+                        
+                        self.text_section.push(format!("    sub rsp, {}  ; shadow space", 32));
+                        
+                        for arg in args.iter().skip(4).rev() {
+                            self.generate_expr_windows(arg)?;
+                            self.text_section.push("    push rax  ; parámetro adicional en stack".to_string());
+                        }
+                        
+                        for (i, arg) in args.iter().take(4).enumerate() {
+                            self.generate_expr_windows(arg)?;
+                            let reg = match i {
+                                0 => "rcx",
+                                1 => "rdx",
+                                2 => "r8",
+                                3 => "r9",
+                                _ => unreachable!(),
+                            };
+                            self.text_section.push(format!("    mov {}, rax  ; param{}", reg, i));
+                        }
+                        
+                        let function_name = format!("fn_{}", name);
+                        self.text_section.push(format!("    call {}", function_name));
+                        self.text_section.push(format!("    add rsp, {}  ; restaurar shadow space", total_stack_space));
+                    
+                    // Valor de retorno está en RAX
             }
             Expr::Assign { name, value } => {
                 // Verificar si es asignación a índice de array: arr[0] = value
@@ -2393,7 +2456,7 @@ impl CodeGenerator {
                                 }
                             } else {
                                 // LLAMADA ESTÁTICA: Método no virtual, llamar directamente
-                                let method_label = format!("fn_{}_{}", type_name, method);
+                            let method_label = format!("fn_{}_{}", type_name, method);
                                 self.text_section.push("    sub rsp, 32  ; shadow space".to_string());
                                 self.text_section.push(format!("    call {}  ; llamada estática", method_label));
                                 self.text_section.push("    add rsp, 32  ; restaurar shadow space".to_string());

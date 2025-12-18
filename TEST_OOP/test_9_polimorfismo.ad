@@ -47,3 +47,4 @@ let g = Gato.new("Whiskers", "Negro")
 p.saludar()  # Debe llamar a Perro_saludar (dispatch dinámico)
 g.saludar()  # Debe llamar a Gato_saludar (dispatch dinámico)
 
+

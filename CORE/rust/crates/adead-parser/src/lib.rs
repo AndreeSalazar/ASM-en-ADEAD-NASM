@@ -260,15 +260,60 @@ pub fn parse_with_dir(source: &str, current_dir: Option<&std::path::Path>) -> Re
     // NOTA: El preprocesador de structs con sintaxis 'end' está deshabilitado
     // Ahora usamos sintaxis con llaves {} que el parser maneja directamente
     
+    // DEBUG: Activar análisis del parser
+    #[cfg(feature = "parser-debug")]
+    {
+        use crate::parser_debug::ParserDebugger;
+        let debugger = ParserDebugger::new(true, true);
+        eprintln!("[PARSER-DEBUG] Iniciando parsing del código fuente...");
+    }
+    
     let parser = program_parser();
     match parser.parse(source) {
         Ok(mut program) => {
+            // DEBUG: Analizar programa parseado
+            #[cfg(feature = "parser-debug")]
+            {
+                use crate::parser_debug::ParserDebugger;
+                let debugger = ParserDebugger::new(true, true);
+                debugger.analyze_parsed_program(&program, source);
+            }
+            
+            // Análisis siempre activo (sin feature flag) para debugging
+            eprintln!("[PARSER-INFO] Programa parseado: {} statements", program.statements.len());
+            let let_count = program.statements.iter().filter(|s| matches!(s, Stmt::Let { .. })).count();
+            let print_count = program.statements.iter().filter(|s| matches!(s, Stmt::Print(_))).count();
+            let fn_count = program.statements.iter().filter(|s| matches!(s, Stmt::Fn { .. })).count();
+            let struct_count = program.statements.iter().filter(|s| matches!(s, Stmt::Struct { .. })).count();
+            
+            eprintln!("[PARSER-INFO] Desglose: {} structs, {} funciones, {} let, {} print", 
+                struct_count, fn_count, let_count, print_count);
+            
+            // Verificar si hay statements esperados pero no parseados
+            let expected_let_print = source.lines()
+                .filter(|line| {
+                    let trimmed = line.trim();
+                    trimmed.starts_with("let ") || trimmed.starts_with("print ")
+                })
+                .count();
+            
+            if expected_let_print > (let_count + print_count) {
+                eprintln!("[PARSER-WARNING] ⚠️  Se esperaban {} statements Let/Print pero solo se parsearon {}!", 
+                    expected_let_print, let_count + print_count);
+                eprintln!("[PARSER-WARNING] Posible problema: El parser puede estar deteniéndose después de funciones.");
+            }
+            
             // POST-PROCESADOR: Resolver imports (Sprint 1.3)
             resolve_imports(&mut program, current_dir)?;
             
             Ok(program)
         }
         Err(errs) => {
+            eprintln!("[PARSER-ERROR] Error de parsing:");
+            for err in &errs {
+                eprintln!("[PARSER-ERROR]   {}", err);
+            }
+            
             let first = errs.first().unwrap();
             // chumsky 0.9 uses usize for spans, approximate line/col
             let (line, col) = (1, 1); // Simplified for MVP
@@ -1212,9 +1257,9 @@ fn expr_parser() -> impl Parser<char, Expr, Error = Simple<char>> + Clone {
         let qualified_name = text::ident()
             .then(
                 just(".")
-                .padded()
-                .ignore_then(text::ident())
-                .or_not()
+                    .padded()
+                    .ignore_then(text::ident())
+                    .or_not()
             )
             .try_map(|(first, second), span| {
                 if let Some(second) = second {
@@ -1293,13 +1338,13 @@ fn expr_parser() -> impl Parser<char, Expr, Error = Simple<char>> + Clone {
         let call = qualified_name
             .then(
                 just("(")
-                .padded()
-                .ignore_then(
-                    expr.clone()
-                    .separated_by(just(",").padded())
-                    .allow_trailing(),
-                )
-                .then_ignore(just(")").padded()),
+                    .padded()
+                    .ignore_then(
+                        expr.clone()
+                            .separated_by(just(",").padded())
+                            .allow_trailing(),
+                    )
+                    .then_ignore(just(")").padded()),
             )
             .map(|((module, name), args)| Expr::Call {
                 module,
