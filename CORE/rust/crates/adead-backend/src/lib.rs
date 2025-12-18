@@ -303,7 +303,7 @@ impl CodeGenerator {
                 
                 if !is_struct_method {
                     // Generar función global (no es método de struct)
-                    self.generate_stmt_windows(stmt)?;
+            self.generate_stmt_windows(stmt)?;
                 }
             } else {
                 // No es función, generar normalmente

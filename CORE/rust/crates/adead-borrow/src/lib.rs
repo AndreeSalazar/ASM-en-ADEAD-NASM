@@ -405,6 +405,13 @@ impl BorrowChecker {
                 self.check_expr(end)?;
                 Ok(())
             }
+            Expr::SuperCall { method, args } => {
+                // Verificar argumentos de super.metodo()
+                for arg in args {
+                    self.check_expr(arg)?;
+                }
+                Ok(())
+            }
         }
     }
 
@@ -596,6 +603,13 @@ impl BorrowChecker {
             Expr::Index { array, index } => {
                 self.check_expr_borrowing(array)?;
                 self.check_expr_borrowing(index)?;
+                Ok(())
+            }
+            Expr::SuperCall { args, .. } => {
+                // Verificar borrowing en argumentos de super.metodo()
+                for arg in args {
+                    self.check_expr_borrowing(arg)?;
+                }
                 Ok(())
             }
             _ => Ok(()), // Otros casos no necesitan verificación adicional

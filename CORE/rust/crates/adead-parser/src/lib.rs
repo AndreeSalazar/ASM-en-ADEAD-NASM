@@ -1,5 +1,6 @@
 use adead_common::{ADeadError, Result};
 use chumsky::prelude::*;
+use std::io::{self, Write};
 
 // ═══════════════════════════════════════════════════════════════════════════
 // ADead Parser - Compilador de ADead a NASM (x86_64)
@@ -269,8 +270,28 @@ pub fn parse_with_dir(source: &str, current_dir: Option<&std::path::Path>) -> Re
     }
     
     let parser = program_parser();
-    match parser.parse(source) {
+    
+    eprintln!("[PARSER-DEBUG] Iniciando parsing del código fuente ({} caracteres)", source.len());
+    eprintln!("[PARSER-DEBUG] Primeras líneas del código:");
+    for (i, line) in source.lines().take(5).enumerate() {
+        eprintln!("[PARSER-DEBUG]   Línea {}: '{}'", i + 1, line);
+    }
+    io::stderr().flush().ok();
+    
+    // Intentar parsear con manejo detallado de errores
+    eprintln!("[PARSER-DEBUG] Llamando a parser.parse()...");
+    io::stderr().flush().ok();
+    
+    let parse_result = parser.parse(source);
+    
+    eprintln!("[PARSER-DEBUG] parser.parse() retornó resultado");
+    io::stderr().flush().ok();
+    
+    match parse_result {
         Ok(mut program) => {
+            eprintln!("[PARSER-DEBUG] Parse exitoso (sin errores reportados)");
+            io::stderr().flush().ok();
+            
             // DEBUG: Analizar programa parseado
             #[cfg(feature = "parser-debug")]
             {
@@ -289,6 +310,17 @@ pub fn parse_with_dir(source: &str, current_dir: Option<&std::path::Path>) -> Re
             eprintln!("[PARSER-INFO] Desglose: {} structs, {} funciones, {} let, {} print", 
                 struct_count, fn_count, let_count, print_count);
             
+            // CRÍTICO: Si no se parseó nada, hay un problema grave
+            if program.statements.is_empty() {
+                eprintln!("[PARSER-ERROR] ⚠️⚠️⚠️  CRÍTICO: El parser retornó éxito pero NO parseó ningún statement!");
+                eprintln!("[PARSER-ERROR] Esto indica un problema grave en el parser o en el código fuente.");
+                eprintln!("[PARSER-ERROR] Primeras líneas del código fuente:");
+                for (i, line) in source.lines().take(10).enumerate() {
+                    eprintln!("[PARSER-ERROR]   Línea {}: {}", i + 1, line);
+                }
+                io::stderr().flush().ok();
+            }
+            
             // Verificar si hay statements esperados pero no parseados
             let expected_let_print = source.lines()
                 .filter(|line| {
@@ -301,6 +333,7 @@ pub fn parse_with_dir(source: &str, current_dir: Option<&std::path::Path>) -> Re
                 eprintln!("[PARSER-WARNING] ⚠️  Se esperaban {} statements Let/Print pero solo se parsearon {}!", 
                     expected_let_print, let_count + print_count);
                 eprintln!("[PARSER-WARNING] Posible problema: El parser puede estar deteniéndose después de funciones.");
+                io::stderr().flush().ok();
             }
             
             // POST-PROCESADOR: Resolver imports (Sprint 1.3)
@@ -309,10 +342,18 @@ pub fn parse_with_dir(source: &str, current_dir: Option<&std::path::Path>) -> Re
             Ok(program)
         }
         Err(errs) => {
-            eprintln!("[PARSER-ERROR] Error de parsing:");
-            for err in &errs {
-                eprintln!("[PARSER-ERROR]   {}", err);
+            eprintln!("[PARSER-ERROR] Error de parsing detectado:");
+            for (i, err) in errs.iter().enumerate() {
+                eprintln!("[PARSER-ERROR]   Error {}: {}", i + 1, err);
             }
+            io::stderr().flush().ok();
+            
+            // Mostrar contexto del código fuente donde falló
+            eprintln!("[PARSER-ERROR] Primeras líneas del código fuente:");
+            for (i, line) in source.lines().take(20).enumerate() {
+                eprintln!("[PARSER-ERROR]   Línea {}: {}", i + 1, line);
+            }
+            io::stderr().flush().ok();
             
             let first = errs.first().unwrap();
             // chumsky 0.9 uses usize for spans, approximate line/col
@@ -598,8 +639,20 @@ fn program_parser() -> impl Parser<char, Program, Error = Simple<char>> {
                 .repeated()
         )
         .then_ignore(end().or_not())  // Permitir trailing whitespace/newlines
-        .map(|stmts| Program {
+        .try_map(|stmts: Vec<Stmt>, span| {
+            // DEBUG: Verificar qué se parseó
+            eprintln!("[PARSER-DEBUG] program_parser: Se parsearon {} statements", stmts.len());
+            io::stderr().flush().ok();
+            
+            // Si no se parseó nada pero el span no está vacío, puede haber un problema
+            if stmts.is_empty() {
+                eprintln!("[PARSER-DEBUG] WARNING: program_parser retornó 0 statements pero el input puede no estar vacío");
+                io::stderr().flush().ok();
+            }
+            
+            Ok(Program {
             statements: stmts,
+            })
         })
 }
 
@@ -783,6 +836,123 @@ fn stmt_parser() -> impl Parser<char, Stmt, Error = Simple<char>> + Clone {
                 borrow_type: BorrowType::Owned,
             }));
 
+        // Parser específico para el cuerpo de funciones (sin return_stmt en nivel superior)
+        // Esto evita que return se parse como statement de nivel superior
+        let fn_body_stmt = recursive(|fn_body_stmt| {
+            let ident = text::ident().padded();
+            let expr = expr_parser();
+            let expr_for_print = expr.clone();
+            let expr_for_while = expr.clone();
+            let expr_for_expr_stmt = expr.clone();
+
+            // Print statement dentro de funciones
+            let print = just("print")
+                .padded()
+                .ignore_then(expr_for_print.clone())
+                .map(Stmt::Print)
+                .labelled("print statement");
+
+            let let_stmt = just("let")
+                .padded()
+                .then(just("mut").padded().or_not())
+                .then(ident.clone())
+                .then_ignore(just("=").padded())
+                .then(expr.clone())
+                .map(|(((_, mutable), name), value)| Stmt::Let {
+                    mutable: mutable.is_some(),
+                    name,
+                    value,
+                });
+
+            let if_stmt = just("if")
+                .padded()
+                .ignore_then(expr_for_while.clone())
+                .then(
+                    just("{")
+                        .padded()
+                        .ignore_then(fn_body_stmt.clone().repeated())
+                        .then_ignore(just("}").padded()),
+                )
+                .then(
+                    just("else")
+                        .padded()
+                        .ignore_then(
+                            just("{")
+                                .padded()
+                                .ignore_then(fn_body_stmt.clone().repeated())
+                                .then_ignore(just("}").padded()),
+                        )
+                        .or_not(),
+                )
+                .map(|((condition, then_body), else_body)| Stmt::If {
+                    condition,
+                    then_body,
+                    else_body,
+                });
+
+            let while_stmt = just("while")
+                .padded()
+                .ignore_then(expr_for_while.clone())
+                .then(
+                    just("{")
+                        .padded()
+                        .ignore_then(fn_body_stmt.clone().repeated())
+                        .then_ignore(just("}").padded()),
+                )
+                .map(|(condition, body)| Stmt::While { condition, body });
+
+            let break_stmt = just("break")
+                .padded()
+                .map(|_| Stmt::Break)
+                .labelled("break statement");
+
+            let continue_stmt = just("continue")
+                .padded()
+                .map(|_| Stmt::Continue)
+                .labelled("continue statement");
+
+            let field_assign_stmt = ident
+                .clone()
+                .then(just('.').ignore_then(ident.clone()))
+                .then_ignore(just("=").padded())
+                .then(expr.clone())
+                .map(|((obj_name, field_name), value)| Stmt::Expr(Expr::FieldAssign {
+                    object: Box::new(Expr::Ident(obj_name)),
+                    field: field_name,
+                    value: Box::new(value),
+                }));
+
+            let assign_stmt = ident
+                .clone()
+                .then_ignore(just("=").padded())
+                .then(expr.clone())
+                .map(|(name, value)| Stmt::Expr(Expr::Assign {
+                    name,
+                    value: Box::new(value),
+                }));
+
+            let expr_stmt = expr_for_expr_stmt.map(Stmt::Expr);
+
+            // CRÍTICO: return_stmt DEBE estar incluido aquí para funciones
+            let return_stmt = just("return")
+                .padded()
+                .ignore_then(expr.clone().or_not())
+                .map(Stmt::Return);
+
+            // Orden de precedencia para el cuerpo de funciones
+            while_stmt
+                .or(break_stmt)
+                .or(continue_stmt)
+                .or(if_stmt)
+                .or(print)
+                .or(let_stmt)
+                .or(return_stmt)  // return_stmt está aquí para el cuerpo de funciones
+                .or(field_assign_stmt)
+                .or(assign_stmt)
+                .or(expr_stmt)
+                .padded()
+        });
+
         // Parser para funciones con visibilidad opcional (Sprint 1.3 - Import básico)
         let fn_stmt = just("pub")
             .padded()
@@ -803,8 +973,15 @@ fn stmt_parser() -> impl Parser<char, Stmt, Error = Simple<char>> + Clone {
                 .then(
                     just("{")
                         .padded()
-                        .ignore_then(stmt.clone().repeated())
-                        .then_ignore(just("}").padded()),
+                        .ignore_then(
+                            fn_body_stmt
+                                .padded()
+                                .then_ignore(ws_and_comments())
+                                .repeated()
+                                .collect::<Vec<_>>()
+                        )
+                        .then_ignore(just("}").padded())
+                        .then_ignore(ws_and_comments()),  // CRÍTICO: Consumir whitespace/comentarios después del cierre
                 ))
             .map(|(visibility, ((name, params), body))| Stmt::Fn {
                 visibility: if visibility.is_some() { 
@@ -834,6 +1011,7 @@ fn stmt_parser() -> impl Parser<char, Stmt, Error = Simple<char>> + Clone {
 
         // Struct definition: struct Nombre { campo1 campo2 ... }
         // Los campos pueden estar separados por comas, espacios o newlines
+        // IMPORTANTE: Los campos son OPCIONALES (puede haber structs vacíos)
         let struct_stmt = just("struct")
                     .padded()
                     .ignore_then(text::ident())
@@ -843,18 +1021,22 @@ fn stmt_parser() -> impl Parser<char, Stmt, Error = Simple<char>> + Clone {
                     .ignore_then(
                         struct_field_simple
                             .padded()  // Permite whitespace (incluyendo newlines) alrededor de cada campo
-                            .repeated()
-                            .at_least(1)  // Al menos un campo
+                            .repeated()  // Campos opcionales (puede ser vacío)
+                            .collect::<Vec<_>>()  // Convertir a Vec explícitamente
                     )
                     .then_ignore(just("}").padded())
             )
-            .map(|(name, fields)| Stmt::Struct {
+            .map(|(name, fields)| {
+                eprintln!("[PARSER-DEBUG] struct_stmt: Parseando struct '{}' con {} campos", name, fields.len());
+                io::stderr().flush().ok();
+                Stmt::Struct {
                 name,
                 parent: None,
                 fields,
                 init: None,
                 destroy: None,
                 methods: Vec::new(),
+                }
             })
             .labelled("struct statement");
 
@@ -1001,22 +1183,44 @@ fn stmt_parser() -> impl Parser<char, Stmt, Error = Simple<char>> + Clone {
         // para evitar que se parseen mal las condiciones y bloques
         // El orden correcto es: keywords primero, luego expresiones simples
         // CRÍTICO: while_stmt debe estar PRIMERO para tener máxima precedencia
-        while_stmt  // PRIMERO: máxima precedencia para while
+        // CRÍTICO: fn_stmt debe estar ANTES de return_stmt para evitar que return se parse como statement de nivel superior
+        // DEBUG: Agregar debug para identificar qué statement se intenta parsear
+        let stmt_with_debug = while_stmt  // PRIMERO: máxima precedencia para while
             .or(for_stmt)     // For loops con rango
             .or(break_stmt)   // Break para salir de loops
             .or(continue_stmt) // Continue para saltar iteración
             .or(if_stmt)      // If tiene alta precedencia
             .or(class_stmt)   // OOP: Clases con métodos
-            .or(struct_stmt)  // OOP: Structs simples
+            .or(struct_stmt)  // OOP: Structs simples (DEBE estar antes de fn_stmt)
             .or(import_stmt)
+            .or(fn_stmt)      // CRÍTICO: fn_stmt ANTES de return_stmt para que return dentro de funciones se parse correctamente
             .or(print)
             .or(let_stmt)
-            .or(fn_stmt)
-            .or(return_stmt)
+            .or(return_stmt)  // return_stmt DESPUÉS de fn_stmt para evitar conflictos
             .or(field_assign_stmt)  // Field assignment ANTES de assign_stmt
             .or(assign_stmt)
             .or(expr_stmt)
             .padded()
+            .try_map(|stmt: Stmt, span| {
+                // DEBUG: Ver qué statement se parseó exitosamente
+                let stmt_type = match &stmt {
+                    Stmt::Struct { name, .. } => format!("Struct({})", name),
+                    Stmt::Fn { name, .. } => format!("Function({})", name),
+                    Stmt::Let { name, .. } => format!("Let({})", name),
+                    Stmt::Print(_) => "Print".to_string(),
+                    Stmt::If { .. } => "If".to_string(),
+                    Stmt::While { .. } => "While".to_string(),
+                    Stmt::Return(_) => "Return".to_string(),
+                    Stmt::Expr(_) => "Expr".to_string(),
+                    Stmt::Import(name) => format!("Import({})", name),
+                    _ => format!("Other({:?})", stmt),
+                };
+                eprintln!("[PARSER-DEBUG] stmt_parser: ✅ Se parseó exitosamente: {} (span: {:?})", stmt_type, span);
+                io::stderr().flush().ok();
+                Ok(stmt)
+            });
+        
+        stmt_with_debug
     })
 }
 

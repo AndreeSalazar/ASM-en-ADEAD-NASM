@@ -15,6 +15,7 @@ use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use std::fs;
 use std::path::PathBuf;
+use std::io::{self, Write};
 
 mod linker;
 use linker::{LinkerType, compile_and_link, link_objs_to_exe, assemble_asm_to_obj};
@@ -59,74 +60,104 @@ enum Commands {
         #[arg(long, default_value = "nasm")]
         backend: String,
         
-        /// Archivo ejecutable de salida
+        /// Archivo de salida (.exe)
         #[arg(short, long)]
         output: Option<PathBuf>,
         
-        /// Linker a usar: zig (recomendado), gcc, clang, auto
+        /// Linker a usar: auto (default), zig, gcc, clang
         #[arg(long, default_value = "auto")]
         linker: String,
         
-        /// Solo ensamblar (.asm → .obj), no linkear
+        /// Solo ensamblar a .obj (no linkear)
         #[arg(long)]
         assemble_only: bool,
     },
     
-    /// Linkea archivos .obj a ejecutable (.exe)
+    /// Linkea archivos .obj a .exe
     Link {
-        /// Archivos objeto (.obj) a linkear
+        /// Archivos .obj a linkear
         #[arg(required = true)]
         obj_files: Vec<PathBuf>,
         
-        /// Archivo ejecutable de salida
+        /// Archivo de salida (.exe)
         #[arg(short, long, required = true)]
         output: PathBuf,
         
-        /// Linker a usar: zig (recomendado), gcc, clang, auto
+        /// Linker a usar: auto (default), zig, gcc, clang
         #[arg(long, default_value = "auto")]
         linker: String,
     },
     
-    /// Ensambla archivo .asm a .obj usando NASM
+    /// Ensambla archivo .asm a .obj
     Assemble {
         /// Archivo de entrada (.asm)
         input: PathBuf,
         
-        /// Archivo objeto de salida (.obj)
+        /// Archivo de salida (.obj)
         #[arg(short, long)]
         output: Option<PathBuf>,
     },
 }
 
-// ============================================================================
-// MAIN
-// ============================================================================
-
-fn main() -> Result<()> {
+fn main() {
+    // Forzar flush inmediato de stderr y stdout para debugging
+    let _ = io::stderr().flush();
+    let _ = io::stdout().flush();
+    
+    eprintln!("[CLI-DEBUG] Iniciando CLI...");
+    io::stderr().flush().ok();
+    
     let cli = Cli::parse();
     
     match &cli.command {
         Commands::Compile { input, backend, output } => {
-            cmd_compile(input, backend, output.clone())
+            eprintln!("[CLI-DEBUG] Comando: compile, input: {:?}, backend: {}", input, backend);
+            io::stderr().flush().ok();
+            
+            if let Err(e) = cmd_compile(input, backend, output.clone()) {
+                eprintln!("[CLI-ERROR] Error en compile: {}", e);
+                io::stderr().flush().ok();
+                std::process::exit(1);
+            }
         }
         
         Commands::Build { input, backend, output, linker, assemble_only } => {
-            cmd_build(input, backend, output.clone(), linker, *assemble_only)
+            eprintln!("[CLI-DEBUG] Comando: build, input: {:?}, backend: {}", input, backend);
+            io::stderr().flush().ok();
+            
+            if let Err(e) = cmd_build(input, backend, output.clone(), linker, *assemble_only) {
+                eprintln!("[CLI-ERROR] Error en build: {}", e);
+                io::stderr().flush().ok();
+                std::process::exit(1);
+            }
         }
         
         Commands::Link { obj_files, output, linker } => {
-            cmd_link(obj_files, output, linker)
+            eprintln!("[CLI-DEBUG] Comando: link, obj_files: {:?}, output: {:?}", obj_files, output);
+            io::stderr().flush().ok();
+            
+            if let Err(e) = cmd_link(obj_files, output, linker) {
+                eprintln!("[CLI-ERROR] Error en link: {}", e);
+                io::stderr().flush().ok();
+                std::process::exit(1);
+            }
         }
         
         Commands::Assemble { input, output } => {
-            cmd_assemble(input, output.clone())
-        }
+            eprintln!("[CLI-DEBUG] Comando: assemble, input: {:?}", input);
+            io::stderr().flush().ok();
+            
+            if let Err(e) = cmd_assemble(input, output.clone()) {
+                eprintln!("[CLI-ERROR] Error en assemble: {}", e);
+                io::stderr().flush().ok();
+                std::process::exit(1);
     }
 }
-
-// ============================================================================
-// COMMANDS
-// ============================================================================
+    }
+    
+    eprintln!("[CLI-DEBUG] CLI terminado exitosamente");
+    io::stderr().flush().ok();
+}
 
 /// Comando: compile - Compila .ad a .asm
 fn cmd_compile(input: &PathBuf, backend: &str, output: Option<PathBuf>) -> Result<()> {
@@ -136,16 +167,28 @@ fn cmd_compile(input: &PathBuf, backend: &str, output: Option<PathBuf>) -> Resul
         path
     });
     
+    eprintln!("[CLI-DEBUG] Leyendo archivo: {:?}", input);
+    io::stderr().flush().ok();
+    
     let source = fs::read_to_string(input)
         .with_context(|| format!("Error leyendo archivo: {}", input.display()))?;
     
+    eprintln!("[CLI-DEBUG] Archivo leído: {} caracteres", source.len());
+    io::stderr().flush().ok();
+    
     println!("🔄 Compilando: {} → {}", input.display(), output_path.display());
+    io::stdout().flush().ok();
     
     match backend {
         "nasm" | "direct" | "auto" => {
             // PRIORIDAD: Backend NASM directo
+            eprintln!("[CLI-DEBUG] Usando backend NASM directo");
+            io::stderr().flush().ok();
+            
             compile_nasm_direct(&source, &output_path)?;
+            
             println!("✅ Compilado (NASM directo): {}", output_path.display());
+            io::stdout().flush().ok();
         }
         "cpp" | "c++" => {
             // Fallback: Pipeline C++
@@ -173,7 +216,7 @@ fn cmd_build(
     backend: &str, 
     output: Option<PathBuf>, 
     linker: &str, 
-    assemble_only: bool
+    assemble_only: bool,
 ) -> Result<()> {
     let linker_type = parse_linker_type(linker);
     
@@ -214,7 +257,11 @@ fn cmd_link(obj_files: &[PathBuf], output: &PathBuf, linker: &str) -> Result<()>
 
 /// Comando: assemble - Ensambla .asm a .obj
 fn cmd_assemble(input: &PathBuf, output: Option<PathBuf>) -> Result<()> {
-    let obj_file = output.unwrap_or_else(|| input.with_extension("obj"));
+    let obj_file = output.unwrap_or_else(|| {
+        let mut path = input.clone();
+        path.set_extension("obj");
+        path
+    });
     
     println!("🔧 Ensamblando: {} → {}", input.display(), obj_file.display());
     assemble_asm_to_obj(input, &obj_file)?;
@@ -230,18 +277,38 @@ fn cmd_assemble(input: &PathBuf, output: Option<PathBuf>) -> Result<()> {
 /// Compila usando backend NASM directo (PRIORIDAD)
 /// Genera ASM virgen y limpio sin dependencias externas
 fn compile_nasm_direct(source: &str, output_path: &PathBuf) -> Result<()> {
+    eprintln!("[CLI-DEBUG] Iniciando parse...");
+    io::stderr().flush().ok();
+    
     // Parsear código ADead
     let program = adead_parser::parse(source)
-        .map_err(|e| anyhow::anyhow!("Error de parser: {:?}", e))?;
+        .map_err(|e| {
+            eprintln!("[CLI-ERROR] Error de parser: {:?}", e);
+            io::stderr().flush().ok();
+            anyhow::anyhow!("Error de parser: {:?}", e)
+        })?;
+    
+    eprintln!("[CLI-DEBUG] Parse exitoso, iniciando generación NASM...");
+    io::stderr().flush().ok();
     
     // Generar NASM usando el backend directo
     let mut generator = adead_backend::CodeGenerator::new();
     let nasm_code = generator.generate(&program)
-        .map_err(|e| anyhow::anyhow!("Error generando NASM: {:?}", e))?;
+        .map_err(|e| {
+            eprintln!("[CLI-ERROR] Error generando NASM: {:?}", e);
+            io::stderr().flush().ok();
+            anyhow::anyhow!("Error generando NASM: {:?}", e)
+        })?;
+    
+    eprintln!("[CLI-DEBUG] Generación NASM exitosa, escribiendo archivo...");
+    io::stderr().flush().ok();
     
     // Escribir archivo ASM
     fs::write(output_path, nasm_code)
         .with_context(|| format!("Error escribiendo: {}", output_path.display()))?;
+    
+    eprintln!("[CLI-DEBUG] Archivo escrito exitosamente");
+    io::stderr().flush().ok();
     
     Ok(())
 }
@@ -282,11 +349,6 @@ fn compile_c_fallback(source: &str, output_path: &PathBuf) -> Result<()> {
     Ok(())
 }
 
-// ============================================================================
-// HELPERS
-// ============================================================================
-
-/// Parsea el tipo de linker desde string
 fn parse_linker_type(linker: &str) -> Option<LinkerType> {
     match linker.to_lowercase().as_str() {
         "zig" => Some(LinkerType::Zig),

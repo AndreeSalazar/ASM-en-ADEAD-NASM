@@ -1,0 +1,6 @@
+﻿struct Test {}
+fn test() {
+    return 10
+}
+let x = 20
+print x

@@ -282,3 +282,4 @@ print resultado
 
 **Última actualización:** 17 de Diciembre 2025
 
+
