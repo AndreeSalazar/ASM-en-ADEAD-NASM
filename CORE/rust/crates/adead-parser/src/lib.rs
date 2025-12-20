@@ -131,6 +131,13 @@ pub enum Expr {
         params: Vec<String>,
         body: Box<Expr>,
     },
+    // List comprehension (Sprint 4 - Python-like)
+    ListComprehension {         // [x * 2 for x in lista]
+        expr: Box<Expr>,        // expresión a evaluar
+        var: String,            // variable de iteración
+        iter: Box<Expr>,        // iterable
+        condition: Option<Box<Expr>>, // condición opcional (if)
+    },
 }
 
 /// Parte de un f-string (Sprint 2.3 - Python-like)
@@ -145,6 +152,7 @@ pub enum FStringPart {
 pub struct FnParam {
     pub name: String,
     pub borrow_type: BorrowType,  // Tipo de borrowing del par├ímetro
+    pub default_value: Option<Box<Expr>>,  // Valor por defecto (Sprint 3 - Python-like)
 }
 
 /// Tipo de borrowing para par├ímetros de funci├│n
@@ -872,6 +880,7 @@ fn stmt_parser() -> impl Parser<char, Stmt, Error = Simple<char>> + Clone {
             .labelled("continue statement");
 
         // Parser para par├ímetros de funci├│n (soporta borrowing)
+        // Nota: valores por defecto se manejan a nivel semántico, no sintáctico por ahora
         let fn_param = just("&")
             .padded()
             .then(just("mut").padded().or_not())
@@ -883,10 +892,12 @@ fn stmt_parser() -> impl Parser<char, Stmt, Error = Simple<char>> + Clone {
                 } else {
                     BorrowType::Borrowed
                 },
+                default_value: None,
             })
             .or(ident.clone().map(|name| FnParam {
                 name,
                 borrow_type: BorrowType::Owned,
+                default_value: None,
             }));
 
         // Parser específico para el cuerpo de funciones (sin return_stmt en nivel superior)
@@ -1489,6 +1500,28 @@ fn expr_parser() -> impl Parser<char, Expr, Error = Simple<char>> + Clone {
             })
             .labelled("f-string");
 
+        // List comprehension: [x * 2 for x in lista] o [x for x in lista if x > 0]
+        let list_comprehension = just('[')
+            .padded()
+            .ignore_then(expr.clone())
+            .then_ignore(just("for").padded())
+            .then(text::ident().padded())
+            .then_ignore(just("in").padded())
+            .then(expr.clone())
+            .then(
+                just("if").padded()
+                    .ignore_then(expr.clone())
+                    .or_not()
+            )
+            .then_ignore(just(']').padded())
+            .map(|(((map_expr, var), iter_expr), cond)| Expr::ListComprehension {
+                expr: Box::new(map_expr),
+                var,
+                iter: Box::new(iter_expr),
+                condition: cond.map(Box::new),
+            })
+            .labelled("list comprehension");
+
         // Array literal: [1, 2, 3] (Sprint 1.2)
         let array_literal = just('[')
             .padded()
@@ -1659,6 +1692,7 @@ fn expr_parser() -> impl Parser<char, Expr, Error = Simple<char>> + Clone {
             .or(bool_literal)  // Booleanos después de numbers pero antes de string
             .or(fstring)  // F-strings ANTES de string para que f"..." se parse correctamente
             .or(string)
+            .or(list_comprehension)  // List comprehension ANTES de array_literal
             .or(array_literal)  // Array literal antes de borrow
             .or(borrow)  // Borrow debe ir ANTES de ident para que &x se parse como Borrow, not como Call
             .or(deref)

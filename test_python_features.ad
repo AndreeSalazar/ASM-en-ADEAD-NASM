@@ -1,0 +1,39 @@
+# Test de características Python-like en ADead
+
+# Test 1: Operadores matemáticos
+let a = 2 ** 3
+print(a)
+
+let b = 10 // 3
+print(b)
+
+# Test 2: Built-in functions con valores positivos
+let x = abs(5)
+print(x)
+
+let m = min(3, 7)
+print(m)
+
+let n = max(3, 7)
+print(n)
+
+let p = pow(2, 4)
+print(p)
+
+# Test 3: Arrays y funciones de secuencia
+let arr = [1, 2, 3, 4, 5]
+let s = sum(arr)
+print(s)
+
+let l = len(arr)
+print(l)
+
+# Test 4: Conversiones de tipo
+let i = int(42)
+print(i)
+
+# Test 5: type()
+let t = type(42)
+print(t)
+
+print("Tests completados!")

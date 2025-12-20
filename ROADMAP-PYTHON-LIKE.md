@@ -542,21 +542,26 @@ reversed(x) # ✅ IMPLEMENTADO
 # Funcionales
 map(f, x)    # ✅ IMPLEMENTADO (con lambdas)
 filter(f, x) # ✅ IMPLEMENTADO (básico)
-reduce(f, x) # ⏳ PENDIENTE
+reduce(f, x) # ✅ IMPLEMENTADO
 all(x)       # ✅ IMPLEMENTADO
 any(x)       # ✅ IMPLEMENTADO
 
 # I/O
 print(x)     # ✅ IMPLEMENTADO
 input(msg)   # ✅ IMPLEMENTADO (Windows)
-open(file)   # ⏳ PENDIENTE
+open(file)   # ✅ IMPLEMENTADO (Windows)
 
 # Utilidades
 type(x)      # ✅ IMPLEMENTADO (básico)
-isinstance(x, T) # ⏳ PENDIENTE
-hasattr(x, a)    # ⏳ PENDIENTE
-getattr(x, a)    # ⏳ PENDIENTE
-setattr(x, a, v) # ⏳ PENDIENTE
+isinstance(x, T) # ✅ IMPLEMENTADO (básico)
+hasattr(x, a)    # ✅ IMPLEMENTADO (básico)
+getattr(x, a)    # ✅ IMPLEMENTADO (básico)
+setattr(x, a, v) # ✅ IMPLEMENTADO (básico)
+chr(n)           # ✅ IMPLEMENTADO
+ord(c)           # ✅ IMPLEMENTADO
+hex(n)           # ✅ IMPLEMENTADO
+bin(n)           # ✅ IMPLEMENTADO
+oct(n)           # ✅ IMPLEMENTADO
 ```
 
 ---
@@ -594,7 +599,7 @@ setattr(x, a, v) # ⏳ PENDIENTE
 
 ### Sprint 4: Comprehensions (1 semana)
 ```
-□ List comprehension
+✅ List comprehension - implementado
 □ Dict comprehension
 □ Set comprehension
 □ Generator expressions

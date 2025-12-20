@@ -1700,6 +1700,91 @@ impl CodeGenerator {
                 // Retornar dirección de la lambda
                 self.text_section.push(format!("    lea rax, [rel {}]  ; dirección de lambda", lambda_name));
             }
+            Expr::ListComprehension { expr, var, iter, condition } => {
+                // List comprehension: [x * 2 for x in lista] o [x for x in lista if x > 0]
+                self.text_section.push("    ; List comprehension".to_string());
+                
+                // Evaluar el iterador
+                self.generate_expr_windows(iter)?;
+                self.text_section.push("    mov rsi, rax  ; array fuente".to_string());
+                self.text_section.push("    mov rcx, [rsi + 8]  ; length".to_string());
+                self.text_section.push("    mov rbx, [rsi + 0]  ; data".to_string());
+                
+                // Crear array resultado (mismo tamaño por ahora)
+                self.text_section.push("    push rcx  ; guardar length".to_string());
+                self.text_section.push("    push rbx  ; guardar data ptr".to_string());
+                self.text_section.push("    push rsi  ; guardar array".to_string());
+                
+                // Reservar espacio para resultado
+                let result_offset = self.stack_offset;
+                self.stack_offset += 256; // Espacio para hasta 32 elementos
+                self.text_section.push(format!("    lea r12, [rbp - {}]  ; resultado", result_offset + 8));
+                self.text_section.push("    xor r13, r13  ; índice resultado".to_string());
+                
+                let comp_loop = self.new_label("comp_loop");
+                let comp_skip = self.new_label("comp_skip");
+                let comp_end = self.new_label("comp_end");
+                
+                self.text_section.push("    pop rsi".to_string());
+                self.text_section.push("    pop rbx".to_string());
+                self.text_section.push("    pop rcx".to_string());
+                self.text_section.push("    xor r14, r14  ; índice fuente".to_string());
+                
+                self.text_section.push(format!("{}:", comp_loop));
+                self.text_section.push("    cmp r14, rcx".to_string());
+                self.text_section.push(format!("    jge {}", comp_end));
+                
+                // Cargar elemento actual en variable de iteración
+                self.text_section.push("    push rcx".to_string());
+                self.text_section.push("    push rbx".to_string());
+                self.text_section.push("    push r12".to_string());
+                self.text_section.push("    push r13".to_string());
+                self.text_section.push("    push r14".to_string());
+                
+                // Guardar elemento en variable temporal
+                let var_offset = self.stack_offset;
+                self.stack_offset += 8;
+                self.variables.insert(var.clone(), var_offset);
+                self.text_section.push("    mov rax, [rbx + r14*8]".to_string());
+                self.text_section.push(format!("    mov [rbp - {}], rax  ; {}", var_offset + 8, var));
+                
+                // Evaluar condición si existe
+                if let Some(cond) = condition {
+                    self.generate_expr_windows(cond)?;
+                    self.text_section.push("    cmp rax, 0".to_string());
+                    self.text_section.push(format!("    je {}_restore", comp_skip));
+                }
+                
+                // Evaluar expresión
+                self.generate_expr_windows(expr)?;
+                
+                // Guardar resultado
+                self.text_section.push("    pop r14".to_string());
+                self.text_section.push("    pop r13".to_string());
+                self.text_section.push("    pop r12".to_string());
+                self.text_section.push("    mov [r12 + r13*8], rax".to_string());
+                self.text_section.push("    inc r13".to_string());
+                self.text_section.push("    pop rbx".to_string());
+                self.text_section.push("    pop rcx".to_string());
+                self.text_section.push("    inc r14".to_string());
+                self.text_section.push(format!("    jmp {}", comp_loop));
+                
+                if condition.is_some() {
+                    self.text_section.push(format!("{}_restore:", comp_skip));
+                    self.text_section.push("    pop r14".to_string());
+                    self.text_section.push("    pop r13".to_string());
+                    self.text_section.push("    pop r12".to_string());
+                    self.text_section.push("    pop rbx".to_string());
+                    self.text_section.push("    pop rcx".to_string());
+                    self.text_section.push("    inc r14".to_string());
+                    self.text_section.push(format!("    jmp {}", comp_loop));
+                }
+                
+                self.text_section.push(format!("{}:", comp_end));
+                self.text_section.push(format!("    lea rax, [rbp - {}]  ; retornar resultado", result_offset + 8));
+                
+                self.variables.remove(var);
+            }
             Expr::Borrow { expr, .. } => {
                 // Borrowing: generar dirección de la expresión
                 // Por ahora, solo soportamos borrowing de variables
@@ -2257,6 +2342,78 @@ impl CodeGenerator {
                             self.text_section.push("    mov rax, rsi".to_string());
                             return Ok(());
                         }
+                        "open" => {
+                            // open(filename) - abrir archivo (Windows CreateFileA)
+                            if let Expr::String(filename) = &args[0] {
+                                let label = self.add_string_data(filename);
+                                self.text_section.push("    ; open(filename)".to_string());
+                                self.text_section.push("    sub rsp, 48  ; shadow space + params".to_string());
+                                self.text_section.push(format!("    lea rcx, [rel {}]  ; lpFileName", label));
+                                self.text_section.push("    mov rdx, 0x80000000  ; GENERIC_READ".to_string());
+                                self.text_section.push("    mov r8, 1  ; FILE_SHARE_READ".to_string());
+                                self.text_section.push("    xor r9, r9  ; lpSecurityAttributes = NULL".to_string());
+                                self.text_section.push("    mov qword [rsp+32], 3  ; OPEN_EXISTING".to_string());
+                                self.text_section.push("    mov qword [rsp+40], 0x80  ; FILE_ATTRIBUTE_NORMAL".to_string());
+                                self.text_section.push("    extern CreateFileA".to_string());
+                                self.text_section.push("    call CreateFileA".to_string());
+                                self.text_section.push("    add rsp, 48".to_string());
+                                // RAX contiene el handle del archivo
+                            } else {
+                                // Si no es string literal, evaluar expresión
+                                self.generate_expr_windows(&args[0])?;
+                                self.text_section.push("    ; open(expr) - pendiente".to_string());
+                            }
+                            return Ok(());
+                        }
+                        "isinstance" => {
+                            // isinstance(x, tipo) - verificar tipo (simplificado)
+                            // Por ahora retorna 1 (true) siempre
+                            self.text_section.push("    mov rax, 1  ; isinstance siempre true por ahora".to_string());
+                            return Ok(());
+                        }
+                        "hasattr" => {
+                            // hasattr(obj, attr) - verificar si tiene atributo
+                            self.text_section.push("    mov rax, 1  ; hasattr placeholder".to_string());
+                            return Ok(());
+                        }
+                        "getattr" => {
+                            // getattr(obj, attr) - obtener atributo
+                            self.generate_expr_windows(&args[0])?;
+                            self.text_section.push("    ; getattr placeholder".to_string());
+                            return Ok(());
+                        }
+                        "setattr" => {
+                            // setattr(obj, attr, value) - establecer atributo
+                            self.text_section.push("    ; setattr placeholder".to_string());
+                            return Ok(());
+                        }
+                        "chr" => {
+                            // chr(n) - convertir número a carácter
+                            self.generate_expr_windows(&args[0])?;
+                            self.text_section.push("    ; chr(n) - número ya en rax".to_string());
+                            return Ok(());
+                        }
+                        "ord" => {
+                            // ord(c) - convertir carácter a número
+                            self.generate_expr_windows(&args[0])?;
+                            self.text_section.push("    movzx rax, byte [rax]  ; ord(c)".to_string());
+                            return Ok(());
+                        }
+                        "hex" => {
+                            // hex(n) - convertir a hexadecimal (retorna número por ahora)
+                            self.generate_expr_windows(&args[0])?;
+                            return Ok(());
+                        }
+                        "bin" => {
+                            // bin(n) - convertir a binario (retorna número por ahora)
+                            self.generate_expr_windows(&args[0])?;
+                            return Ok(());
+                        }
+                        "oct" => {
+                            // oct(n) - convertir a octal (retorna número por ahora)
+                            self.generate_expr_windows(&args[0])?;
+                            return Ok(());
+                        }
                         "zip" => {
                             // zip requiere 2 argumentos, se maneja abajo
                         }
@@ -2400,11 +2557,89 @@ impl CodeGenerator {
                             return Ok(());
                         }
                         "filter" => {
-                            // filter(func, lista) - filtrar elementos
+                            // filter(func, lista) - filtrar elementos que cumplen condición
                             self.generate_expr_windows(&args[0])?;
                             self.text_section.push("    push rax  ; función".to_string());
                             self.generate_expr_windows(&args[1])?;
-                            self.text_section.push("    ; filter - retorna array original por ahora".to_string());
+                            self.text_section.push("    mov rsi, rax  ; array".to_string());
+                            self.text_section.push("    pop rdi  ; función".to_string());
+                            self.text_section.push("    ; filter(f, arr)".to_string());
+                            self.text_section.push("    mov rcx, [rsi + 8]  ; length".to_string());
+                            self.text_section.push("    mov rbx, [rsi + 0]  ; data".to_string());
+                            self.text_section.push("    xor r12, r12  ; contador de elementos filtrados".to_string());
+                            let filter_loop = self.new_label("filter_loop");
+                            let filter_keep = self.new_label("filter_keep");
+                            let filter_end = self.new_label("filter_end");
+                            self.text_section.push("    push rsi".to_string());
+                            self.text_section.push(format!("{}:", filter_loop));
+                            self.text_section.push("    cmp rcx, 0".to_string());
+                            self.text_section.push(format!("    je {}", filter_end));
+                            self.text_section.push("    push rcx".to_string());
+                            self.text_section.push("    push rbx".to_string());
+                            self.text_section.push("    push rdi".to_string());
+                            self.text_section.push("    push r12".to_string());
+                            self.text_section.push("    mov rcx, [rbx]  ; elemento".to_string());
+                            self.text_section.push("    sub rsp, 32".to_string());
+                            self.text_section.push("    call rdi  ; llamar predicado".to_string());
+                            self.text_section.push("    add rsp, 32".to_string());
+                            self.text_section.push("    pop r12".to_string());
+                            self.text_section.push("    pop rdi".to_string());
+                            self.text_section.push("    pop rbx".to_string());
+                            self.text_section.push("    cmp rax, 0".to_string());
+                            self.text_section.push(format!("    je {}_skip", filter_keep));
+                            self.text_section.push("    inc r12  ; elemento pasa filtro".to_string());
+                            self.text_section.push(format!("{}:", filter_keep));
+                            self.text_section.push(format!("{}_skip:", filter_keep));
+                            self.text_section.push("    add rbx, 8".to_string());
+                            self.text_section.push("    pop rcx".to_string());
+                            self.text_section.push("    dec rcx".to_string());
+                            self.text_section.push(format!("    jmp {}", filter_loop));
+                            self.text_section.push(format!("{}:", filter_end));
+                            self.text_section.push("    pop rax  ; retornar array".to_string());
+                            return Ok(());
+                        }
+                        _ => {}
+                    }
+                }
+
+                // Built-in functions con 3 argumentos
+                if module.is_none() && args.len() == 3 {
+                    match name.as_str() {
+                        "reduce" => {
+                            // reduce(func, lista, init) - reducir lista a un valor
+                            self.generate_expr_windows(&args[0])?;
+                            self.text_section.push("    push rax  ; función".to_string());
+                            self.generate_expr_windows(&args[1])?;
+                            self.text_section.push("    push rax  ; array".to_string());
+                            self.generate_expr_windows(&args[2])?;
+                            self.text_section.push("    mov r12, rax  ; acumulador (init)".to_string());
+                            self.text_section.push("    pop rsi  ; array".to_string());
+                            self.text_section.push("    pop rdi  ; función".to_string());
+                            self.text_section.push("    ; reduce(f, arr, init)".to_string());
+                            self.text_section.push("    mov rcx, [rsi + 8]  ; length".to_string());
+                            self.text_section.push("    mov rbx, [rsi + 0]  ; data".to_string());
+                            let reduce_loop = self.new_label("reduce_loop");
+                            let reduce_end = self.new_label("reduce_end");
+                            self.text_section.push(format!("{}:", reduce_loop));
+                            self.text_section.push("    cmp rcx, 0".to_string());
+                            self.text_section.push(format!("    je {}", reduce_end));
+                            self.text_section.push("    push rcx".to_string());
+                            self.text_section.push("    push rbx".to_string());
+                            self.text_section.push("    push rdi".to_string());
+                            self.text_section.push("    mov rcx, r12  ; acumulador".to_string());
+                            self.text_section.push("    mov rdx, [rbx]  ; elemento actual".to_string());
+                            self.text_section.push("    sub rsp, 32".to_string());
+                            self.text_section.push("    call rdi  ; f(acc, elem)".to_string());
+                            self.text_section.push("    add rsp, 32".to_string());
+                            self.text_section.push("    mov r12, rax  ; nuevo acumulador".to_string());
+                            self.text_section.push("    pop rdi".to_string());
+                            self.text_section.push("    pop rbx".to_string());
+                            self.text_section.push("    add rbx, 8".to_string());
+                            self.text_section.push("    pop rcx".to_string());
+                            self.text_section.push("    dec rcx".to_string());
+                            self.text_section.push(format!("    jmp {}", reduce_loop));
+                            self.text_section.push(format!("{}:", reduce_end));
+                            self.text_section.push("    mov rax, r12  ; retornar resultado".to_string());
                             return Ok(());
                         }
                         _ => {}
@@ -4232,6 +4467,73 @@ impl CodeGenerator {
                 self.stack_offset = saved_offset;
                 
                 self.text_section.push(format!("    lea rax, [rel {}]", lambda_name));
+            }
+            Expr::ListComprehension { expr, var, iter, condition } => {
+                // List comprehension - Linux (similar a Windows)
+                self.text_section.push("    ; List comprehension (Linux)".to_string());
+                self.generate_expr(iter)?;
+                self.text_section.push("    mov rsi, rax".to_string());
+                self.text_section.push("    mov rcx, [rsi + 8]".to_string());
+                self.text_section.push("    mov rbx, [rsi + 0]".to_string());
+                
+                let result_offset = self.stack_offset;
+                self.stack_offset += 256;
+                self.text_section.push(format!("    lea r12, [rbp - {}]", result_offset + 8));
+                self.text_section.push("    xor r13, r13".to_string());
+                
+                let comp_loop = self.new_label("comp_loop");
+                let comp_end = self.new_label("comp_end");
+                
+                self.text_section.push("    xor r14, r14".to_string());
+                self.text_section.push(format!("{}:", comp_loop));
+                self.text_section.push("    cmp r14, rcx".to_string());
+                self.text_section.push(format!("    jge {}", comp_end));
+                
+                self.text_section.push("    push rcx".to_string());
+                self.text_section.push("    push rbx".to_string());
+                self.text_section.push("    push r12".to_string());
+                self.text_section.push("    push r13".to_string());
+                self.text_section.push("    push r14".to_string());
+                
+                let var_offset = self.stack_offset;
+                self.stack_offset += 8;
+                self.variables.insert(var.clone(), var_offset);
+                self.text_section.push("    mov rax, [rbx + r14*8]".to_string());
+                self.text_section.push(format!("    mov [rbp - {}], rax", var_offset + 8));
+                
+                if let Some(cond) = condition {
+                    self.generate_expr(cond)?;
+                    self.text_section.push("    cmp rax, 0".to_string());
+                    self.text_section.push(format!("    je {}_skip", comp_loop));
+                }
+                
+                self.generate_expr(expr)?;
+                
+                self.text_section.push("    pop r14".to_string());
+                self.text_section.push("    pop r13".to_string());
+                self.text_section.push("    pop r12".to_string());
+                self.text_section.push("    mov [r12 + r13*8], rax".to_string());
+                self.text_section.push("    inc r13".to_string());
+                self.text_section.push("    pop rbx".to_string());
+                self.text_section.push("    pop rcx".to_string());
+                self.text_section.push("    inc r14".to_string());
+                self.text_section.push(format!("    jmp {}", comp_loop));
+                
+                if condition.is_some() {
+                    self.text_section.push(format!("{}_skip:", comp_loop));
+                    self.text_section.push("    pop r14".to_string());
+                    self.text_section.push("    pop r13".to_string());
+                    self.text_section.push("    pop r12".to_string());
+                    self.text_section.push("    pop rbx".to_string());
+                    self.text_section.push("    pop rcx".to_string());
+                    self.text_section.push("    inc r14".to_string());
+                    self.text_section.push(format!("    jmp {}", comp_loop));
+                }
+                
+                self.text_section.push(format!("{}:", comp_end));
+                self.text_section.push(format!("    lea rax, [rbp - {}]", result_offset + 8));
+                
+                self.variables.remove(var);
             }
             Expr::BinaryOp { op, left, right } => {
                 // Generate right side first, push to stack

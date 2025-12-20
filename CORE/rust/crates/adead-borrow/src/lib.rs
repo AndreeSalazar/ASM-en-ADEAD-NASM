@@ -479,6 +479,15 @@ impl BorrowChecker {
                 self.check_expr(body)?;
                 Ok(())
             }
+            Expr::ListComprehension { expr, var: _, iter, condition } => {
+                // List comprehension: verificar expresión, iterador y condición
+                self.check_expr(expr)?;
+                self.check_expr(iter)?;
+                if let Some(cond) = condition {
+                    self.check_expr(cond)?;
+                }
+                Ok(())
+            }
         }
     }
 

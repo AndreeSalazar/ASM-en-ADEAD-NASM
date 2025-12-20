@@ -4,26 +4,36 @@
 
 📊 RESUMEN EJECUTIVO
 --------------------------------------------------------------------------------
-Total de Statements: 12
+Total de Statements: 22
 Structs: 0
 Funciones: 0
-Other Statements: 12
+Other Statements: 22
 Problemas Detectados: 0
 
 📝 STATEMENTS EN MAIN
 --------------------------------------------------------------------------------
-  ✅ [0] print String("=== Test Built-in Functions ===\n")
-  ✅ [1] let neg = BinaryOp { op: Sub, left: Number(0), right: Number(42) }
-  ✅ [2] let pos = Call: abs(1 args)
-  ✅ [3] print Ident: pos
-  ✅ [4] print String("\n")
-  ✅ [5] let m1 = Call: min(2 args)
-  ✅ [6] print Ident: m1
-  ✅ [7] print String("\n")
-  ✅ [8] let m2 = Call: max(2 args)
-  ✅ [9] print Ident: m2
-  ✅ [10] print String("\n")
-  ✅ [11] print String("=== Fin ===\n")
+  ✅ [0] let a = BinaryOp { op: Pow, left: Number(2), right: Number(3) }
+  ✅ [1] print Ident: a
+  ✅ [2] let b = BinaryOp { op: FloorDiv, left: Number(10), right: Number(3) }
+  ✅ [3] print Ident: b
+  ✅ [4] let x = Call: abs(1 args)
+  ✅ [5] print Ident: x
+  ✅ [6] let m = Call: min(2 args)
+  ✅ [7] print Ident: m
+  ✅ [8] let n = Call: max(2 args)
+  ✅ [9] print Ident: n
+  ✅ [10] let p = Call: pow(2 args)
+  ✅ [11] print Ident: p
+  ✅ [12] let arr = ArrayLiteral([Number(1), Number(2), Number(3), Number(4), Number(5)])
+  ✅ [13] let s = Call: sum(1 args)
+  ✅ [14] print Ident: s
+  ✅ [15] let l = Call: len(1 args)
+  ✅ [16] print Ident: l
+  ✅ [17] let i = Call: int(1 args)
+  ✅ [18] print Ident: i
+  ✅ [19] let t = Call: type(1 args)
+  ✅ [20] print Ident: t
+  ✅ [21] print String("Tests completados!")
 
 ✅ NO SE DETECTARON PROBLEMAS
 --------------------------------------------------------------------------------
