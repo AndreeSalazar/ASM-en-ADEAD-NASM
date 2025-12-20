@@ -488,6 +488,45 @@ impl BorrowChecker {
                 }
                 Ok(())
             }
+            Expr::DictLiteral { pairs } => {
+                // Dict: verificar cada par key-value
+                for (key, value) in pairs {
+                    self.check_expr(key)?;
+                    self.check_expr(value)?;
+                }
+                Ok(())
+            }
+            Expr::SetLiteral(elements) => {
+                // Set: verificar cada elemento
+                for element in elements {
+                    self.check_expr(element)?;
+                }
+                Ok(())
+            }
+            Expr::Ternary { condition, then_expr, else_expr } => {
+                // Operador ternario: verificar condición y ambas ramas
+                self.check_expr(condition)?;
+                self.check_expr(then_expr)?;
+                self.check_expr(else_expr)?;
+                Ok(())
+            }
+            Expr::DictComprehension { key_expr, value_expr, var: _, iter, condition } => {
+                self.check_expr(key_expr)?;
+                self.check_expr(value_expr)?;
+                self.check_expr(iter)?;
+                if let Some(cond) = condition {
+                    self.check_expr(cond)?;
+                }
+                Ok(())
+            }
+            Expr::SetComprehension { expr, var: _, iter, condition } => {
+                self.check_expr(expr)?;
+                self.check_expr(iter)?;
+                if let Some(cond) = condition {
+                    self.check_expr(cond)?;
+                }
+                Ok(())
+            }
         }
     }
 

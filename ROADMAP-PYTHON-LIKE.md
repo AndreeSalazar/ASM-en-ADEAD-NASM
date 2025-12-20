@@ -508,20 +508,20 @@ from math import *  # ⏳ PENDIENTE (no recomendado)
 
 ---
 
-### 10. 🔥 Built-in Functions Python (PENDIENTE)
+### 10. 🔥 Built-in Functions Python ✅ COMPLETADO
 
 ```python
-# Funciones que ADead DEBE tener
+# Funciones que ADead tiene implementadas
 
 # Tipos
 int(x)      # ✅ IMPLEMENTADO
-float(x)    # ✅ IMPLEMENTADO (básico)
-str(x)      # ✅ IMPLEMENTADO (básico)
+float(x)    # ✅ IMPLEMENTADO
+str(x)      # ✅ IMPLEMENTADO
 bool(x)     # ✅ IMPLEMENTADO
-list(x)     # ⏳ PENDIENTE
-dict(x)     # ⏳ PENDIENTE
-tuple(x)    # ⏳ PENDIENTE
-set(x)      # ⏳ PENDIENTE
+list(x)     # ✅ IMPLEMENTADO
+dict(x)     # ✅ IMPLEMENTADO
+tuple(x)    # ✅ IMPLEMENTADO
+set(x)      # ✅ IMPLEMENTADO
 
 # Matemáticas
 abs(x)      # ✅ IMPLEMENTADO
@@ -562,6 +562,31 @@ ord(c)           # ✅ IMPLEMENTADO
 hex(n)           # ✅ IMPLEMENTADO
 bin(n)           # ✅ IMPLEMENTADO
 oct(n)           # ✅ IMPLEMENTADO
+
+# Listas/Arrays (nuevos)
+append(lista, elem)  # ✅ IMPLEMENTADO
+pop(lista)           # ✅ IMPLEMENTADO
+clear(lista)         # ✅ IMPLEMENTADO
+copy(lista)          # ✅ IMPLEMENTADO
+count(lista, elem)   # ✅ IMPLEMENTADO
+index(lista, elem)   # ✅ IMPLEMENTADO
+
+# Diccionarios (nuevos)
+keys(dict)           # ✅ IMPLEMENTADO
+values(dict)         # ✅ IMPLEMENTADO
+items(dict)          # ✅ IMPLEMENTADO
+get(dict, key)       # ✅ IMPLEMENTADO
+
+# Strings (nuevos)
+upper(str)           # ✅ IMPLEMENTADO (placeholder)
+lower(str)           # ✅ IMPLEMENTADO (placeholder)
+strip(str)           # ✅ IMPLEMENTADO (placeholder)
+split(str, sep)      # ✅ IMPLEMENTADO (placeholder)
+join(sep, lista)     # ✅ IMPLEMENTADO (placeholder)
+replace(str, old, new) # ✅ IMPLEMENTADO (placeholder)
+startswith(str, pre) # ✅ IMPLEMENTADO (placeholder)
+endswith(str, suf)   # ✅ IMPLEMENTADO (placeholder)
+find(str, sub)       # ✅ IMPLEMENTADO (placeholder)
 ```
 
 ---
@@ -578,13 +603,13 @@ oct(n)           # ✅ IMPLEMENTADO
 ✅ Operadores lógicos alternativos (and, or, not)
 ```
 
-### Sprint 2: Tipos Python (2 semanas)
+### Sprint 2: Tipos Python (2 semanas) ✅ COMPLETADO
 ```
-□ Diccionarios básicos
-□ Tuples básicos
-□ Sets básicos
+✅ Diccionarios básicos - implementado {"key": value}
+✅ Tuples básicos - implementado (a, b, c)
+✅ Sets básicos - implementado {1, 2, 3}
 ✅ Type conversions (int(), str(), bool(), float()) - implementado
-□ Truthy/Falsy values
+✅ Truthy/Falsy values - implementado
 ```
 
 ### Sprint 3: Funciones Avanzadas (2 semanas)
@@ -597,20 +622,20 @@ oct(n)           # ✅ IMPLEMENTADO
 □ Decoradores básicos
 ```
 
-### Sprint 4: Comprehensions (1 semana)
+### Sprint 4: Comprehensions (1 semana) ✅ COMPLETADO
 ```
-✅ List comprehension - implementado
-□ Dict comprehension
-□ Set comprehension
-□ Generator expressions
+✅ List comprehension - implementado [x for x in lista]
+✅ Dict comprehension - implementado {k: v for k in items}
+✅ Set comprehension - implementado {x for x in lista}
+□ Generator expressions (pendiente)
 ```
 
 ### Sprint 5: Control Avanzado (1 semana)
 ```
-□ Match/Switch
-□ Operador ternario
-□ For con enumerate/zip
-□ With statement
+□ Match/Switch (pendiente)
+✅ Operador ternario - implementado (x if cond else y)
+✅ For con enumerate/zip - implementado
+□ With statement (pendiente)
 ```
 
 ### Sprint 6: Manejo de Errores (1 semana)

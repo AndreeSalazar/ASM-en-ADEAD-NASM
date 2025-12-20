@@ -138,6 +138,33 @@ pub enum Expr {
         iter: Box<Expr>,        // iterable
         condition: Option<Box<Expr>>, // condición opcional (if)
     },
+    // Diccionarios (Sprint 2 - Python-like)
+    DictLiteral {               // {"key": value, "key2": value2}
+        pairs: Vec<(Expr, Expr)>,  // (key, value) pairs
+    },
+    // Sets (Sprint 2 - Python-like)
+    SetLiteral(Vec<Expr>),      // {1, 2, 3}
+    // Operador ternario (Sprint 5 - Python-like)
+    Ternary {                   // x if condition else y
+        condition: Box<Expr>,
+        then_expr: Box<Expr>,
+        else_expr: Box<Expr>,
+    },
+    // Dict comprehension (Sprint 4 - Python-like)
+    DictComprehension {         // {k: v for k, v in items}
+        key_expr: Box<Expr>,
+        value_expr: Box<Expr>,
+        var: String,
+        iter: Box<Expr>,
+        condition: Option<Box<Expr>>,
+    },
+    // Set comprehension (Sprint 4 - Python-like)
+    SetComprehension {          // {x * 2 for x in lista}
+        expr: Box<Expr>,
+        var: String,
+        iter: Box<Expr>,
+        condition: Option<Box<Expr>>,
+    },
 }
 
 /// Parte de un f-string (Sprint 2.3 - Python-like)
@@ -1534,6 +1561,34 @@ fn expr_parser() -> impl Parser<char, Expr, Error = Simple<char>> + Clone {
             .map(Expr::ArrayLiteral)
             .labelled("array literal");
 
+        // Dict literal: {"key": value, "key2": value2}
+        let dict_pair = expr.clone()
+            .then_ignore(just(':').padded())
+            .then(expr.clone());
+        
+        let dict_literal = just('{')
+            .padded()
+            .ignore_then(
+                dict_pair
+                    .separated_by(just(',').padded())
+                    .allow_trailing()
+            )
+            .then_ignore(just('}').padded())
+            .map(|pairs| Expr::DictLiteral { pairs })
+            .labelled("dict literal");
+
+        // Set literal: {1, 2, 3} (sin ':' para distinguir de dict)
+        let set_literal = just('{')
+            .padded()
+            .ignore_then(
+                expr.clone()
+                    .separated_by(just(',').padded())
+                    .at_least(1)  // Al menos 1 elemento para distinguir de dict vacío
+            )
+            .then_ignore(just('}').padded())
+            .map(Expr::SetLiteral)
+            .labelled("set literal");
+
         // Identificador - filtrar keywords para evitar que "while", "if", etc. se parseen como identificadores
         // NOTA: "self" NO está filtrado para permitir self.campo = valor en clases
         let ident = text::ident()
@@ -1694,6 +1749,8 @@ fn expr_parser() -> impl Parser<char, Expr, Error = Simple<char>> + Clone {
             .or(string)
             .or(list_comprehension)  // List comprehension ANTES de array_literal
             .or(array_literal)  // Array literal antes de borrow
+            .or(dict_literal)  // Dict literal: {"key": value}
+            .or(set_literal)   // Set literal: {1, 2, 3}
             .or(borrow)  // Borrow debe ir ANTES de ident para que &x se parse como Borrow, not como Call
             .or(deref)
             .or(not_expr)  // Negación lógica: !expr

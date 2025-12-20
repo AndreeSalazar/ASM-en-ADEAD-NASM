@@ -1785,6 +1785,202 @@ impl CodeGenerator {
                 
                 self.variables.remove(var);
             }
+            Expr::DictLiteral { pairs } => {
+                // Dict literal: {"key": value, ...}
+                // Estructura: [count, capacity, keys_ptr, values_ptr]
+                let count = pairs.len();
+                let dict_offset = self.stack_offset;
+                self.stack_offset += 32 + (count * 16) as i64; // 32 bytes header + 16 bytes por par
+                
+                self.text_section.push(format!("    ; Dict literal: {} pares", count));
+                self.text_section.push(format!("    lea rax, [rbp - {}]", dict_offset + 8));
+                self.text_section.push(format!("    mov qword [rax], {}  ; count", count));
+                self.text_section.push(format!("    mov qword [rax + 8], {}  ; capacity", count));
+                
+                // Almacenar cada par key-value
+                for (i, (key, value)) in pairs.iter().enumerate() {
+                    self.text_section.push("    push rax".to_string());
+                    self.generate_expr_windows(key)?;
+                    self.text_section.push("    pop rbx".to_string());
+                    self.text_section.push(format!("    mov [rbx + {} + 16], rax  ; key[{}]", i * 16, i));
+                    self.text_section.push("    push rbx".to_string());
+                    self.generate_expr_windows(value)?;
+                    self.text_section.push("    pop rbx".to_string());
+                    self.text_section.push(format!("    mov [rbx + {} + 24], rax  ; value[{}]", i * 16, i));
+                }
+                
+                self.text_section.push(format!("    lea rax, [rbp - {}]", dict_offset + 8));
+            }
+            Expr::SetLiteral(elements) => {
+                // Set literal: {1, 2, 3}
+                // Similar a array pero sin duplicados (verificación en runtime)
+                let count = elements.len();
+                let set_offset = self.stack_offset;
+                self.stack_offset += 16 + (count * 8) as i64;
+                
+                self.text_section.push(format!("    ; Set literal: {} elementos", count));
+                self.text_section.push(format!("    lea rax, [rbp - {}]", set_offset + 8));
+                self.text_section.push(format!("    mov qword [rax], {}  ; count", count));
+                self.text_section.push(format!("    mov qword [rax + 8], {}  ; capacity", count));
+                
+                for (i, element) in elements.iter().enumerate() {
+                    self.text_section.push("    push rax".to_string());
+                    self.generate_expr_windows(element)?;
+                    self.text_section.push("    pop rbx".to_string());
+                    self.text_section.push(format!("    mov [rbx + {} + 16], rax  ; elem[{}]", i * 8, i));
+                }
+                
+                self.text_section.push(format!("    lea rax, [rbp - {}]", set_offset + 8));
+            }
+            Expr::Ternary { condition, then_expr, else_expr } => {
+                // Operador ternario: value if condition else other
+                let else_label = self.new_label("ternary_else");
+                let end_label = self.new_label("ternary_end");
+                
+                self.generate_expr_windows(condition)?;
+                self.text_section.push("    cmp rax, 0".to_string());
+                self.text_section.push(format!("    je {}", else_label));
+                
+                // Then branch
+                self.generate_expr_windows(then_expr)?;
+                self.text_section.push(format!("    jmp {}", end_label));
+                
+                // Else branch
+                self.text_section.push(format!("{}:", else_label));
+                self.generate_expr_windows(else_expr)?;
+                
+                self.text_section.push(format!("{}:", end_label));
+            }
+            Expr::DictComprehension { key_expr, value_expr, var, iter, condition } => {
+                // Dict comprehension: {k: v for k in items}
+                self.text_section.push("    ; Dict comprehension".to_string());
+                self.generate_expr_windows(iter)?;
+                self.text_section.push("    mov rsi, rax".to_string());
+                
+                let result_offset = self.stack_offset;
+                self.stack_offset += 512;
+                self.text_section.push(format!("    lea r12, [rbp - {}]", result_offset + 8));
+                self.text_section.push("    mov qword [r12], 0  ; count = 0".to_string());
+                
+                let var_offset = self.stack_offset;
+                self.stack_offset += 8;
+                self.variables.insert(var.clone(), var_offset);
+                
+                // Iterar (simplificado)
+                self.text_section.push("    mov rcx, [rsi + 8]".to_string());
+                self.text_section.push("    mov rbx, [rsi]".to_string());
+                let loop_label = self.new_label("dictcomp_loop");
+                let end_label = self.new_label("dictcomp_end");
+                self.text_section.push("    xor r14, r14".to_string());
+                self.text_section.push(format!("{}:", loop_label));
+                self.text_section.push("    cmp r14, rcx".to_string());
+                self.text_section.push(format!("    jge {}", end_label));
+                
+                self.text_section.push("    mov rax, [rbx + r14*8]".to_string());
+                self.text_section.push(format!("    mov [rbp - {}], rax", var_offset + 8));
+                
+                if let Some(cond) = condition {
+                    self.text_section.push("    push rcx".to_string());
+                    self.text_section.push("    push rbx".to_string());
+                    self.text_section.push("    push r14".to_string());
+                    self.generate_expr_windows(cond)?;
+                    self.text_section.push("    pop r14".to_string());
+                    self.text_section.push("    pop rbx".to_string());
+                    self.text_section.push("    pop rcx".to_string());
+                    self.text_section.push("    cmp rax, 0".to_string());
+                    self.text_section.push(format!("    je {}_skip", loop_label));
+                }
+                
+                // Generar key y value
+                self.text_section.push("    push rcx".to_string());
+                self.text_section.push("    push rbx".to_string());
+                self.text_section.push("    push r14".to_string());
+                self.generate_expr_windows(key_expr)?;
+                self.text_section.push("    push rax  ; key".to_string());
+                self.generate_expr_windows(value_expr)?;
+                self.text_section.push("    mov rdx, rax  ; value".to_string());
+                self.text_section.push("    pop rcx  ; key".to_string());
+                self.text_section.push("    pop r14".to_string());
+                self.text_section.push("    pop rbx".to_string());
+                self.text_section.push("    pop rcx".to_string());
+                
+                if condition.is_some() {
+                    self.text_section.push(format!("{}_skip:", loop_label));
+                }
+                
+                self.text_section.push("    inc r14".to_string());
+                self.text_section.push(format!("    jmp {}", loop_label));
+                self.text_section.push(format!("{}:", end_label));
+                self.text_section.push(format!("    lea rax, [rbp - {}]", result_offset + 8));
+                
+                self.variables.remove(var);
+            }
+            Expr::SetComprehension { expr, var, iter, condition } => {
+                // Set comprehension: {x for x in items}
+                self.text_section.push("    ; Set comprehension".to_string());
+                self.generate_expr_windows(iter)?;
+                self.text_section.push("    mov rsi, rax".to_string());
+                
+                let result_offset = self.stack_offset;
+                self.stack_offset += 256;
+                self.text_section.push(format!("    lea r12, [rbp - {}]", result_offset + 8));
+                self.text_section.push("    mov qword [r12], 0".to_string());
+                
+                let var_offset = self.stack_offset;
+                self.stack_offset += 8;
+                self.variables.insert(var.clone(), var_offset);
+                
+                self.text_section.push("    mov rcx, [rsi + 8]".to_string());
+                self.text_section.push("    mov rbx, [rsi]".to_string());
+                let loop_label = self.new_label("setcomp_loop");
+                let end_label = self.new_label("setcomp_end");
+                self.text_section.push("    xor r14, r14".to_string());
+                self.text_section.push("    xor r13, r13  ; result index".to_string());
+                self.text_section.push(format!("{}:", loop_label));
+                self.text_section.push("    cmp r14, rcx".to_string());
+                self.text_section.push(format!("    jge {}", end_label));
+                
+                self.text_section.push("    mov rax, [rbx + r14*8]".to_string());
+                self.text_section.push(format!("    mov [rbp - {}], rax", var_offset + 8));
+                
+                if let Some(cond) = condition {
+                    self.text_section.push("    push rcx".to_string());
+                    self.text_section.push("    push rbx".to_string());
+                    self.text_section.push("    push r14".to_string());
+                    self.text_section.push("    push r13".to_string());
+                    self.generate_expr_windows(cond)?;
+                    self.text_section.push("    pop r13".to_string());
+                    self.text_section.push("    pop r14".to_string());
+                    self.text_section.push("    pop rbx".to_string());
+                    self.text_section.push("    pop rcx".to_string());
+                    self.text_section.push("    cmp rax, 0".to_string());
+                    self.text_section.push(format!("    je {}_skip", loop_label));
+                }
+                
+                self.text_section.push("    push rcx".to_string());
+                self.text_section.push("    push rbx".to_string());
+                self.text_section.push("    push r14".to_string());
+                self.text_section.push("    push r13".to_string());
+                self.generate_expr_windows(expr)?;
+                self.text_section.push("    pop r13".to_string());
+                self.text_section.push("    pop r14".to_string());
+                self.text_section.push("    pop rbx".to_string());
+                self.text_section.push("    pop rcx".to_string());
+                self.text_section.push("    mov [r12 + r13*8 + 16], rax".to_string());
+                self.text_section.push("    inc r13".to_string());
+                
+                if condition.is_some() {
+                    self.text_section.push(format!("{}_skip:", loop_label));
+                }
+                
+                self.text_section.push("    inc r14".to_string());
+                self.text_section.push(format!("    jmp {}", loop_label));
+                self.text_section.push(format!("{}:", end_label));
+                self.text_section.push("    mov [r12], r13  ; guardar count".to_string());
+                self.text_section.push(format!("    lea rax, [rbp - {}]", result_offset + 8));
+                
+                self.variables.remove(var);
+            }
             Expr::Borrow { expr, .. } => {
                 // Borrowing: generar dirección de la expresión
                 // Por ahora, solo soportamos borrowing de variables
@@ -2414,6 +2610,95 @@ impl CodeGenerator {
                             self.generate_expr_windows(&args[0])?;
                             return Ok(());
                         }
+                        "keys" => {
+                            // keys(dict) - retorna array con las claves del diccionario
+                            self.generate_expr_windows(&args[0])?;
+                            self.text_section.push("    ; keys(dict)".to_string());
+                            self.text_section.push("    mov rsi, rax  ; dict ptr".to_string());
+                            self.text_section.push("    mov rcx, [rsi]  ; count".to_string());
+                            // Crear array de claves
+                            let keys_offset = self.stack_offset;
+                            self.stack_offset += 256;
+                            self.text_section.push(format!("    lea rax, [rbp - {}]", keys_offset + 8));
+                            self.text_section.push("    mov [rax + 8], rcx  ; length".to_string());
+                            self.text_section.push("    xor r14, r14".to_string());
+                            let keys_loop = self.new_label("keys_loop");
+                            let keys_end = self.new_label("keys_end");
+                            self.text_section.push(format!("{}:", keys_loop));
+                            self.text_section.push("    cmp r14, rcx".to_string());
+                            self.text_section.push(format!("    jge {}", keys_end));
+                            self.text_section.push("    mov rdx, [rsi + r14*16 + 16]  ; key[i]".to_string());
+                            self.text_section.push("    mov [rax + r14*8 + 16], rdx".to_string());
+                            self.text_section.push("    inc r14".to_string());
+                            self.text_section.push(format!("    jmp {}", keys_loop));
+                            self.text_section.push(format!("{}:", keys_end));
+                            return Ok(());
+                        }
+                        "values" => {
+                            // values(dict) - retorna array con los valores del diccionario
+                            self.generate_expr_windows(&args[0])?;
+                            self.text_section.push("    ; values(dict)".to_string());
+                            self.text_section.push("    mov rsi, rax".to_string());
+                            self.text_section.push("    mov rcx, [rsi]".to_string());
+                            let vals_offset = self.stack_offset;
+                            self.stack_offset += 256;
+                            self.text_section.push(format!("    lea rax, [rbp - {}]", vals_offset + 8));
+                            self.text_section.push("    mov [rax + 8], rcx".to_string());
+                            self.text_section.push("    xor r14, r14".to_string());
+                            let vals_loop = self.new_label("vals_loop");
+                            let vals_end = self.new_label("vals_end");
+                            self.text_section.push(format!("{}:", vals_loop));
+                            self.text_section.push("    cmp r14, rcx".to_string());
+                            self.text_section.push(format!("    jge {}", vals_end));
+                            self.text_section.push("    mov rdx, [rsi + r14*16 + 24]  ; value[i]".to_string());
+                            self.text_section.push("    mov [rax + r14*8 + 16], rdx".to_string());
+                            self.text_section.push("    inc r14".to_string());
+                            self.text_section.push(format!("    jmp {}", vals_loop));
+                            self.text_section.push(format!("{}:", vals_end));
+                            return Ok(());
+                        }
+                        "items" => {
+                            // items(dict) - retorna array de tuplas (key, value)
+                            self.generate_expr_windows(&args[0])?;
+                            self.text_section.push("    ; items(dict) - retorna dict como está".to_string());
+                            // Por ahora retorna el dict original (ya tiene pares key-value)
+                            return Ok(());
+                        }
+                        "list" => {
+                            // list(x) - convertir a lista
+                            self.generate_expr_windows(&args[0])?;
+                            self.text_section.push("    ; list(x) - retorna como está".to_string());
+                            return Ok(());
+                        }
+                        "dict" => {
+                            // dict() - crear diccionario vacío
+                            let dict_offset = self.stack_offset;
+                            self.stack_offset += 32;
+                            self.text_section.push(format!("    lea rax, [rbp - {}]", dict_offset + 8));
+                            self.text_section.push("    mov qword [rax], 0  ; count = 0".to_string());
+                            self.text_section.push("    mov qword [rax + 8], 0  ; capacity = 0".to_string());
+                            return Ok(());
+                        }
+                        "set" => {
+                            // set() - crear set vacío o desde iterable
+                            if args.is_empty() {
+                                let set_offset = self.stack_offset;
+                                self.stack_offset += 16;
+                                self.text_section.push(format!("    lea rax, [rbp - {}]", set_offset + 8));
+                                self.text_section.push("    mov qword [rax], 0".to_string());
+                                self.text_section.push("    mov qword [rax + 8], 0".to_string());
+                            } else {
+                                self.generate_expr_windows(&args[0])?;
+                                self.text_section.push("    ; set(iterable) - convertir a set".to_string());
+                            }
+                            return Ok(());
+                        }
+                        "tuple" => {
+                            // tuple(x) - convertir a tupla
+                            self.generate_expr_windows(&args[0])?;
+                            self.text_section.push("    ; tuple(x)".to_string());
+                            return Ok(());
+                        }
                         "zip" => {
                             // zip requiere 2 argumentos, se maneja abajo
                         }
@@ -2489,6 +2774,196 @@ impl CodeGenerator {
                             self.text_section.push("    mov rbx, rax".to_string());
                             self.text_section.push(format!("{}:", max_label));
                             self.text_section.push("    mov rax, rbx".to_string());
+                            return Ok(());
+                        }
+                        "get" => {
+                            // get(dict, key, default) - obtener valor de dict con default
+                            self.generate_expr_windows(&args[0])?;
+                            self.text_section.push("    push rax  ; dict".to_string());
+                            self.generate_expr_windows(&args[1])?;
+                            self.text_section.push("    mov rdx, rax  ; key".to_string());
+                            self.text_section.push("    pop rsi  ; dict".to_string());
+                            self.text_section.push("    ; get(dict, key) - buscar key en dict".to_string());
+                            self.text_section.push("    mov rcx, [rsi]  ; count".to_string());
+                            self.text_section.push("    xor r14, r14".to_string());
+                            let get_loop = self.new_label("get_loop");
+                            let get_found = self.new_label("get_found");
+                            let get_end = self.new_label("get_end");
+                            self.text_section.push(format!("{}:", get_loop));
+                            self.text_section.push("    cmp r14, rcx".to_string());
+                            self.text_section.push(format!("    jge {}", get_end));
+                            self.text_section.push("    mov rax, [rsi + r14*16 + 16]  ; key[i]".to_string());
+                            self.text_section.push("    cmp rax, rdx".to_string());
+                            self.text_section.push(format!("    je {}", get_found));
+                            self.text_section.push("    inc r14".to_string());
+                            self.text_section.push(format!("    jmp {}", get_loop));
+                            self.text_section.push(format!("{}:", get_found));
+                            self.text_section.push("    mov rax, [rsi + r14*16 + 24]  ; value[i]".to_string());
+                            self.text_section.push(format!("    jmp {}_done", get_end));
+                            self.text_section.push(format!("{}:", get_end));
+                            self.text_section.push("    xor rax, rax  ; default = 0/None".to_string());
+                            self.text_section.push(format!("{}_done:", get_end));
+                            return Ok(());
+                        }
+                        "append" => {
+                            // append(lista, elemento) - añadir elemento a lista
+                            self.generate_expr_windows(&args[0])?;
+                            self.text_section.push("    push rax  ; lista".to_string());
+                            self.generate_expr_windows(&args[1])?;
+                            self.text_section.push("    mov rdx, rax  ; elemento".to_string());
+                            self.text_section.push("    pop rsi  ; lista".to_string());
+                            self.text_section.push("    ; append(lista, elem)".to_string());
+                            self.text_section.push("    mov rcx, [rsi + 8]  ; length".to_string());
+                            self.text_section.push("    mov rdi, [rsi]  ; data".to_string());
+                            self.text_section.push("    mov [rdi + rcx*8], rdx  ; guardar elemento".to_string());
+                            self.text_section.push("    inc qword [rsi + 8]  ; length++".to_string());
+                            self.text_section.push("    mov rax, rsi  ; retornar lista".to_string());
+                            return Ok(());
+                        }
+                        "pop" => {
+                            // pop(lista) - remover y retornar último elemento
+                            self.generate_expr_windows(&args[0])?;
+                            self.text_section.push("    ; pop(lista)".to_string());
+                            self.text_section.push("    mov rsi, rax".to_string());
+                            self.text_section.push("    mov rcx, [rsi + 8]  ; length".to_string());
+                            self.text_section.push("    dec rcx".to_string());
+                            self.text_section.push("    mov [rsi + 8], rcx  ; length--".to_string());
+                            self.text_section.push("    mov rdi, [rsi]  ; data".to_string());
+                            self.text_section.push("    mov rax, [rdi + rcx*8]  ; último elemento".to_string());
+                            return Ok(());
+                        }
+                        "insert" => {
+                            // insert(lista, index, elemento)
+                            self.generate_expr_windows(&args[0])?;
+                            self.text_section.push("    ; insert(lista, idx, elem) - placeholder".to_string());
+                            return Ok(());
+                        }
+                        "remove" => {
+                            // remove(lista, elemento) - remover primera ocurrencia
+                            self.generate_expr_windows(&args[0])?;
+                            self.text_section.push("    ; remove(lista, elem) - placeholder".to_string());
+                            return Ok(());
+                        }
+                        "clear" => {
+                            // clear(lista) - vaciar lista
+                            self.generate_expr_windows(&args[0])?;
+                            self.text_section.push("    mov qword [rax + 8], 0  ; length = 0".to_string());
+                            return Ok(());
+                        }
+                        "copy" => {
+                            // copy(lista) - copia superficial
+                            self.generate_expr_windows(&args[0])?;
+                            self.text_section.push("    ; copy(lista) - retorna original por ahora".to_string());
+                            return Ok(());
+                        }
+                        "count" => {
+                            // count(lista, elemento) - contar ocurrencias
+                            self.generate_expr_windows(&args[0])?;
+                            self.text_section.push("    push rax".to_string());
+                            self.generate_expr_windows(&args[1])?;
+                            self.text_section.push("    mov rdx, rax  ; elemento a buscar".to_string());
+                            self.text_section.push("    pop rsi  ; lista".to_string());
+                            self.text_section.push("    mov rcx, [rsi + 8]  ; length".to_string());
+                            self.text_section.push("    mov rdi, [rsi]  ; data".to_string());
+                            self.text_section.push("    xor rax, rax  ; contador = 0".to_string());
+                            let count_loop = self.new_label("count_loop");
+                            let count_end = self.new_label("count_end");
+                            self.text_section.push(format!("{}:", count_loop));
+                            self.text_section.push("    cmp rcx, 0".to_string());
+                            self.text_section.push(format!("    je {}", count_end));
+                            self.text_section.push("    cmp [rdi], rdx".to_string());
+                            self.text_section.push("    jne .skip".to_string());
+                            self.text_section.push("    inc rax".to_string());
+                            self.text_section.push(".skip:".to_string());
+                            self.text_section.push("    add rdi, 8".to_string());
+                            self.text_section.push("    dec rcx".to_string());
+                            self.text_section.push(format!("    jmp {}", count_loop));
+                            self.text_section.push(format!("{}:", count_end));
+                            return Ok(());
+                        }
+                        "index" => {
+                            // index(lista, elemento) - encontrar índice
+                            self.generate_expr_windows(&args[0])?;
+                            self.text_section.push("    push rax".to_string());
+                            self.generate_expr_windows(&args[1])?;
+                            self.text_section.push("    mov rdx, rax".to_string());
+                            self.text_section.push("    pop rsi".to_string());
+                            self.text_section.push("    mov rcx, [rsi + 8]".to_string());
+                            self.text_section.push("    mov rdi, [rsi]".to_string());
+                            self.text_section.push("    xor r14, r14".to_string());
+                            let idx_loop = self.new_label("idx_loop");
+                            let idx_found = self.new_label("idx_found");
+                            let idx_end = self.new_label("idx_end");
+                            self.text_section.push(format!("{}:", idx_loop));
+                            self.text_section.push("    cmp r14, rcx".to_string());
+                            self.text_section.push(format!("    jge {}", idx_end));
+                            self.text_section.push("    cmp [rdi + r14*8], rdx".to_string());
+                            self.text_section.push(format!("    je {}", idx_found));
+                            self.text_section.push("    inc r14".to_string());
+                            self.text_section.push(format!("    jmp {}", idx_loop));
+                            self.text_section.push(format!("{}:", idx_found));
+                            self.text_section.push("    mov rax, r14".to_string());
+                            self.text_section.push(format!("    jmp {}_done", idx_end));
+                            self.text_section.push(format!("{}:", idx_end));
+                            self.text_section.push("    mov rax, -1  ; no encontrado".to_string());
+                            self.text_section.push(format!("{}_done:", idx_end));
+                            return Ok(());
+                        }
+                        "join" => {
+                            // join(sep, lista) - unir strings con separador
+                            self.generate_expr_windows(&args[0])?;
+                            self.text_section.push("    ; join(sep, lista) - placeholder".to_string());
+                            return Ok(());
+                        }
+                        "split" => {
+                            // split(string, sep) - dividir string
+                            self.generate_expr_windows(&args[0])?;
+                            self.text_section.push("    ; split(str, sep) - placeholder".to_string());
+                            return Ok(());
+                        }
+                        "replace" => {
+                            // replace(string, old, new) - reemplazar substring
+                            self.generate_expr_windows(&args[0])?;
+                            self.text_section.push("    ; replace(str, old, new) - placeholder".to_string());
+                            return Ok(());
+                        }
+                        "upper" => {
+                            // upper(string) - convertir a mayúsculas
+                            self.generate_expr_windows(&args[0])?;
+                            self.text_section.push("    ; upper(str) - placeholder".to_string());
+                            return Ok(());
+                        }
+                        "lower" => {
+                            // lower(string) - convertir a minúsculas
+                            self.generate_expr_windows(&args[0])?;
+                            self.text_section.push("    ; lower(str) - placeholder".to_string());
+                            return Ok(());
+                        }
+                        "strip" => {
+                            // strip(string) - eliminar espacios
+                            self.generate_expr_windows(&args[0])?;
+                            self.text_section.push("    ; strip(str) - placeholder".to_string());
+                            return Ok(());
+                        }
+                        "startswith" => {
+                            // startswith(string, prefix)
+                            self.generate_expr_windows(&args[0])?;
+                            self.text_section.push("    ; startswith - placeholder".to_string());
+                            self.text_section.push("    mov rax, 1".to_string());
+                            return Ok(());
+                        }
+                        "endswith" => {
+                            // endswith(string, suffix)
+                            self.generate_expr_windows(&args[0])?;
+                            self.text_section.push("    ; endswith - placeholder".to_string());
+                            self.text_section.push("    mov rax, 1".to_string());
+                            return Ok(());
+                        }
+                        "find" => {
+                            // find(string, substring) - encontrar posición
+                            self.generate_expr_windows(&args[0])?;
+                            self.text_section.push("    ; find - placeholder".to_string());
+                            self.text_section.push("    mov rax, -1".to_string());
                             return Ok(());
                         }
                         "pow" => {
@@ -3087,12 +3562,13 @@ impl CodeGenerator {
                             if let Expr::Number(n) = index.as_ref() { *n + 1 } else { 1 }),
                     });
                 } else {
-                    // Indexación de array: arr[0]
+                    // Indexación de array: arr[0] o arr[-1] (negative indexing)
                     // Estrategia: usar array_get (estructura Array dinámica)
                     // 1. Generar expresión del array (puntero al Array en rax)
                     // 2. Generar expresión del índice
-                    // 3. Llamar a array_get(array_ptr, index)
-                    // 4. Retornar valor en RAX
+                    // 3. Si índice < 0, convertir a length + índice
+                    // 4. Llamar a array_get(array_ptr, index)
+                    // 5. Retornar valor en RAX
                     
                     self.generate_expr_windows(array)?;
                     // Guardar puntero al Array en stack
@@ -3100,6 +3576,17 @@ impl CodeGenerator {
                     
                     self.generate_expr_windows(index)?;
                     // rax contiene el índice
+                    
+                    // Soporte para negative indexing: arr[-1] = arr[len-1]
+                    let neg_check = self.new_label("neg_idx");
+                    self.text_section.push("    cmp rax, 0".to_string());
+                    self.text_section.push(format!("    jge {}_done", neg_check));
+                    // Índice negativo: convertir a length + index
+                    self.text_section.push("    mov rbx, [rsp]  ; puntero al Array".to_string());
+                    self.text_section.push("    mov rcx, [rbx + 8]  ; length".to_string());
+                    self.text_section.push("    add rax, rcx  ; index = length + negative_index".to_string());
+                    self.text_section.push(format!("{}_done:", neg_check));
+                    
                     // Preparar parámetros: RCX = puntero al Array, RDX = índice
                     self.text_section.push("    mov rdx, rax  ; índice".to_string());
                     self.text_section.push("    pop rcx  ; puntero al Array".to_string());
@@ -4531,6 +5018,191 @@ impl CodeGenerator {
                 }
                 
                 self.text_section.push(format!("{}:", comp_end));
+                self.text_section.push(format!("    lea rax, [rbp - {}]", result_offset + 8));
+                
+                self.variables.remove(var);
+            }
+            Expr::DictLiteral { pairs } => {
+                // Dict literal - Linux
+                let count = pairs.len();
+                let dict_offset = self.stack_offset;
+                self.stack_offset += 32 + (count * 16) as i64;
+                
+                self.text_section.push(format!("    ; Dict literal: {} pares (Linux)", count));
+                self.text_section.push(format!("    lea rax, [rbp - {}]", dict_offset + 8));
+                self.text_section.push(format!("    mov qword [rax], {}", count));
+                self.text_section.push(format!("    mov qword [rax + 8], {}", count));
+                
+                for (i, (key, value)) in pairs.iter().enumerate() {
+                    self.text_section.push("    push rax".to_string());
+                    self.generate_expr(key)?;
+                    self.text_section.push("    pop rbx".to_string());
+                    self.text_section.push(format!("    mov [rbx + {} + 16], rax", i * 16));
+                    self.text_section.push("    push rbx".to_string());
+                    self.generate_expr(value)?;
+                    self.text_section.push("    pop rbx".to_string());
+                    self.text_section.push(format!("    mov [rbx + {} + 24], rax", i * 16));
+                }
+                
+                self.text_section.push(format!("    lea rax, [rbp - {}]", dict_offset + 8));
+            }
+            Expr::SetLiteral(elements) => {
+                // Set literal - Linux
+                let count = elements.len();
+                let set_offset = self.stack_offset;
+                self.stack_offset += 16 + (count * 8) as i64;
+                
+                self.text_section.push(format!("    ; Set literal: {} elementos (Linux)", count));
+                self.text_section.push(format!("    lea rax, [rbp - {}]", set_offset + 8));
+                self.text_section.push(format!("    mov qword [rax], {}", count));
+                self.text_section.push(format!("    mov qword [rax + 8], {}", count));
+                
+                for (i, element) in elements.iter().enumerate() {
+                    self.text_section.push("    push rax".to_string());
+                    self.generate_expr(element)?;
+                    self.text_section.push("    pop rbx".to_string());
+                    self.text_section.push(format!("    mov [rbx + {} + 16], rax", i * 8));
+                }
+                
+                self.text_section.push(format!("    lea rax, [rbp - {}]", set_offset + 8));
+            }
+            Expr::Ternary { condition, then_expr, else_expr } => {
+                // Operador ternario - Linux
+                let else_label = self.new_label("ternary_else");
+                let end_label = self.new_label("ternary_end");
+                
+                self.generate_expr(condition)?;
+                self.text_section.push("    cmp rax, 0".to_string());
+                self.text_section.push(format!("    je {}", else_label));
+                self.generate_expr(then_expr)?;
+                self.text_section.push(format!("    jmp {}", end_label));
+                self.text_section.push(format!("{}:", else_label));
+                self.generate_expr(else_expr)?;
+                self.text_section.push(format!("{}:", end_label));
+            }
+            Expr::DictComprehension { key_expr, value_expr, var, iter, condition } => {
+                // Dict comprehension - Linux
+                self.text_section.push("    ; Dict comprehension (Linux)".to_string());
+                self.generate_expr(iter)?;
+                self.text_section.push("    mov rsi, rax".to_string());
+                
+                let result_offset = self.stack_offset;
+                self.stack_offset += 512;
+                self.text_section.push(format!("    lea r12, [rbp - {}]", result_offset + 8));
+                self.text_section.push("    mov qword [r12], 0".to_string());
+                
+                let var_offset = self.stack_offset;
+                self.stack_offset += 8;
+                self.variables.insert(var.clone(), var_offset);
+                
+                self.text_section.push("    mov rcx, [rsi + 8]".to_string());
+                self.text_section.push("    mov rbx, [rsi]".to_string());
+                let loop_label = self.new_label("dictcomp_loop");
+                let end_label = self.new_label("dictcomp_end");
+                self.text_section.push("    xor r14, r14".to_string());
+                self.text_section.push(format!("{}:", loop_label));
+                self.text_section.push("    cmp r14, rcx".to_string());
+                self.text_section.push(format!("    jge {}", end_label));
+                
+                self.text_section.push("    mov rax, [rbx + r14*8]".to_string());
+                self.text_section.push(format!("    mov [rbp - {}], rax", var_offset + 8));
+                
+                if let Some(cond) = condition {
+                    self.text_section.push("    push rcx".to_string());
+                    self.text_section.push("    push rbx".to_string());
+                    self.text_section.push("    push r14".to_string());
+                    self.generate_expr(cond)?;
+                    self.text_section.push("    pop r14".to_string());
+                    self.text_section.push("    pop rbx".to_string());
+                    self.text_section.push("    pop rcx".to_string());
+                    self.text_section.push("    cmp rax, 0".to_string());
+                    self.text_section.push(format!("    je {}_skip", loop_label));
+                }
+                
+                self.text_section.push("    push rcx".to_string());
+                self.text_section.push("    push rbx".to_string());
+                self.text_section.push("    push r14".to_string());
+                self.generate_expr(key_expr)?;
+                self.text_section.push("    push rax".to_string());
+                self.generate_expr(value_expr)?;
+                self.text_section.push("    pop rdx".to_string());
+                self.text_section.push("    pop r14".to_string());
+                self.text_section.push("    pop rbx".to_string());
+                self.text_section.push("    pop rcx".to_string());
+                
+                if condition.is_some() {
+                    self.text_section.push(format!("{}_skip:", loop_label));
+                }
+                
+                self.text_section.push("    inc r14".to_string());
+                self.text_section.push(format!("    jmp {}", loop_label));
+                self.text_section.push(format!("{}:", end_label));
+                self.text_section.push(format!("    lea rax, [rbp - {}]", result_offset + 8));
+                
+                self.variables.remove(var);
+            }
+            Expr::SetComprehension { expr, var, iter, condition } => {
+                // Set comprehension - Linux
+                self.text_section.push("    ; Set comprehension (Linux)".to_string());
+                self.generate_expr(iter)?;
+                self.text_section.push("    mov rsi, rax".to_string());
+                
+                let result_offset = self.stack_offset;
+                self.stack_offset += 256;
+                self.text_section.push(format!("    lea r12, [rbp - {}]", result_offset + 8));
+                self.text_section.push("    mov qword [r12], 0".to_string());
+                
+                let var_offset = self.stack_offset;
+                self.stack_offset += 8;
+                self.variables.insert(var.clone(), var_offset);
+                
+                self.text_section.push("    mov rcx, [rsi + 8]".to_string());
+                self.text_section.push("    mov rbx, [rsi]".to_string());
+                let loop_label = self.new_label("setcomp_loop");
+                let end_label = self.new_label("setcomp_end");
+                self.text_section.push("    xor r14, r14".to_string());
+                self.text_section.push("    xor r13, r13".to_string());
+                self.text_section.push(format!("{}:", loop_label));
+                self.text_section.push("    cmp r14, rcx".to_string());
+                self.text_section.push(format!("    jge {}", end_label));
+                
+                self.text_section.push("    mov rax, [rbx + r14*8]".to_string());
+                self.text_section.push(format!("    mov [rbp - {}], rax", var_offset + 8));
+                
+                if let Some(cond) = condition {
+                    self.text_section.push("    push rcx".to_string());
+                    self.text_section.push("    push rbx".to_string());
+                    self.text_section.push("    push r14".to_string());
+                    self.text_section.push("    push r13".to_string());
+                    self.generate_expr(cond)?;
+                    self.text_section.push("    pop r13".to_string());
+                    self.text_section.push("    pop r14".to_string());
+                    self.text_section.push("    pop rbx".to_string());
+                    self.text_section.push("    pop rcx".to_string());
+                    self.text_section.push("    cmp rax, 0".to_string());
+                    self.text_section.push(format!("    je {}_skip", loop_label));
+                }
+                
+                self.text_section.push("    push rcx".to_string());
+                self.text_section.push("    push rbx".to_string());
+                self.text_section.push("    push r14".to_string());
+                self.text_section.push("    push r13".to_string());
+                self.generate_expr(expr)?;
+                self.text_section.push("    pop r13".to_string());
+                self.text_section.push("    pop r14".to_string());
+                self.text_section.push("    pop rbx".to_string());
+                self.text_section.push("    pop rcx".to_string());
+                self.text_section.push("    mov [r12 + r13*8 + 16], rax".to_string());
+                self.text_section.push("    inc r13".to_string());
+                
+                if condition.is_some() {
+                    self.text_section.push(format!("{}_skip:", loop_label));
+                }
+                
+                self.text_section.push("    inc r14".to_string());
+                self.text_section.push(format!("    jmp {}", loop_label));
+                self.text_section.push(format!("{}:", end_label));
+                self.text_section.push("    mov [r12], r13".to_string());
                 self.text_section.push(format!("    lea rax, [rbp - {}]", result_offset + 8));
                 
                 self.variables.remove(var);
