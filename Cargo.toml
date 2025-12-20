@@ -27,3 +27,26 @@ chumsky = "0.9"
 logos = "0.14"
 pretty_assertions = "1.4"
 
+# ═══════════════════════════════════════════════════════════════
+# OPTIMIZACIONES DE BUILD
+# ═══════════════════════════════════════════════════════════════
+
+# Perfil de desarrollo: builds rápidos para iteración
+[profile.dev]
+opt-level = 0          # Sin optimización para compilación rápida
+debug = true           # Símbolos de debug
+incremental = true     # Compilación incremental
+codegen-units = 256    # Más unidades = compilación paralela más rápida
+
+# Perfil de release: máxima optimización
+[profile.release]
+opt-level = 3          # Máxima optimización
+lto = "thin"           # Link-Time Optimization ligero (balance velocidad/tamaño)
+codegen-units = 1      # Una unidad para mejor optimización
+panic = "abort"        # Abort en panic (binario más pequeño)
+strip = true           # Eliminar símbolos de debug
+
+# Perfil para desarrollo rápido con algo de optimización
+[profile.dev.package."*"]
+opt-level = 2          # Optimizar dependencias en dev
+

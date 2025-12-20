@@ -395,24 +395,25 @@ impl CodeGenerator {
 
     fn finish_generation(&mut self) -> Result<String> {
         // OPTIMIZACIÓN: Aplicar optimizaciones al código generado
-        let mut optimizer = CodeOptimizer::new();
+        let optimizer = CodeOptimizer::new();
         let text_code = self.text_section.join("\n");
-        optimizer.analyze_usage(&text_code);
         
-        // Eliminar código muerto (funciones no usadas)
-        let optimized_text = optimizer.remove_dead_code(&text_code);
-        let optimized_lines: Vec<String> = optimized_text.lines().map(|s| s.to_string()).collect();
+        // Eliminar código muerto y limpiar formato
+        let cleaned_text = optimizer.clean_asm(&text_code);
+        let optimized_lines: Vec<String> = cleaned_text.lines().map(|s| s.to_string()).collect();
         
         let mut output = String::new();
         
-        // En Windows, poner default rel al principio
-        #[cfg(target_os = "windows")]
-        {
-            // default rel ya está en generate_windows, pero asegurarse aquí también
-        }
+        // Header con información del compilador
+        output.push_str("; ═══════════════════════════════════════════════════════════════\n");
+        output.push_str("; ADead Compiler - Generated NASM x86_64 (Windows)\n");
+        output.push_str("; ═══════════════════════════════════════════════════════════════\n\n");
         
         // Data section primero (necesario para Windows)
         if !self.data_section.is_empty() {
+            output.push_str("; ─────────────────────────────────────────────────────────────────\n");
+            output.push_str("; DATA SECTION\n");
+            output.push_str("; ─────────────────────────────────────────────────────────────────\n");
             output.push_str("section .data\n");
             for line in &self.data_section {
                 output.push_str(line);
@@ -421,7 +422,10 @@ impl CodeGenerator {
             output.push('\n');
         }
         
-        // Text section (optimizado - dead code eliminado)
+        // Text section (optimizado y limpio)
+        output.push_str("; ─────────────────────────────────────────────────────────────────\n");
+        output.push_str("; CODE SECTION\n");
+        output.push_str("; ─────────────────────────────────────────────────────────────────\n");
         for line in &optimized_lines {
             output.push_str(line);
             output.push('\n');
@@ -446,6 +450,93 @@ impl CodeGenerator {
                         self.text_section.push("    lea r9, [rbp+24]  ; lpNumberOfBytesWritten (local var)".to_string());
                         self.text_section.push("    mov qword [rsp+32], 0  ; lpOverlapped = NULL (5th param in shadow space)".to_string());
                         self.text_section.push("    call WriteFile".to_string());
+                    }
+                    Expr::FString { parts } => {
+                        // F-string: imprimir cada parte secuencialmente
+                        use adead_parser::FStringPart;
+                        
+                        self.text_section.push(format!("    ; Print f-string con {} partes", parts.len()));
+                        
+                        for part in parts {
+                            match part {
+                                FStringPart::Literal(s) => {
+                                    // Imprimir literal directamente
+                                    let label = self.add_string_data(s);
+                                    self.text_section.push(format!("    ; Print literal: \"{}\"", s.escape_default()));
+                                    self.text_section.push("    mov rcx, [rbp+16]  ; stdout".to_string());
+                                    self.text_section.push(format!("    lea rdx, [rel {}]", label));
+                                    self.text_section.push(format!("    mov r8, {}_len", label));
+                                    self.text_section.push("    lea r9, [rbp+24]".to_string());
+                                    self.text_section.push("    mov qword [rsp+32], 0".to_string());
+                                    self.text_section.push("    call WriteFile".to_string());
+                                }
+                                FStringPart::Expr(inner_expr) => {
+                                    // Evaluar expresión y convertir a string, luego imprimir
+                                    self.text_section.push("    ; Print expresión interpolada".to_string());
+                                    self.generate_expr_windows(inner_expr)?;
+                                    // RAX tiene el valor numérico
+                                    
+                                    // Buffer temporal en stack para conversión
+                                    let buf_offset = self.stack_offset;
+                                    self.stack_offset += 24;
+                                    self.text_section.push("    sub rsp, 24".to_string());
+                                    self.text_section.push(format!("    lea rdi, [rbp - {}]", buf_offset + 8));
+                                    self.text_section.push("    mov rbx, rdi  ; inicio buffer".to_string());
+                                    self.text_section.push("    mov rcx, 10".to_string());
+                                    
+                                    // Caso especial: 0
+                                    let not_zero = self.new_label("fstr_nz");
+                                    let convert_done = self.new_label("fstr_cvt_done");
+                                    self.text_section.push("    cmp rax, 0".to_string());
+                                    self.text_section.push(format!("    jne {}", not_zero));
+                                    self.text_section.push("    mov byte [rdi], '0'".to_string());
+                                    self.text_section.push("    inc rdi".to_string());
+                                    self.text_section.push(format!("    jmp {}", convert_done));
+                                    
+                                    // Convertir número a dígitos (al revés)
+                                    self.text_section.push(format!("{}:", not_zero));
+                                    let digit_loop = self.new_label("fstr_digit");
+                                    self.text_section.push(format!("{}:", digit_loop));
+                                    self.text_section.push("    xor rdx, rdx".to_string());
+                                    self.text_section.push("    div rcx".to_string());
+                                    self.text_section.push("    add dl, '0'".to_string());
+                                    self.text_section.push("    mov [rdi], dl".to_string());
+                                    self.text_section.push("    inc rdi".to_string());
+                                    self.text_section.push("    cmp rax, 0".to_string());
+                                    self.text_section.push(format!("    jne {}", digit_loop));
+                                    
+                                    // Revertir dígitos in-place
+                                    self.text_section.push("    mov rsi, rbx  ; inicio".to_string());
+                                    self.text_section.push("    mov r8, rdi   ; fin+1".to_string());
+                                    self.text_section.push("    dec r8        ; fin".to_string());
+                                    let rev_loop = self.new_label("fstr_rev");
+                                    let rev_end = self.new_label("fstr_rev_end");
+                                    self.text_section.push(format!("{}:", rev_loop));
+                                    self.text_section.push("    cmp rsi, r8".to_string());
+                                    self.text_section.push(format!("    jge {}", rev_end));
+                                    self.text_section.push("    mov al, [rsi]".to_string());
+                                    self.text_section.push("    mov cl, [r8]".to_string());
+                                    self.text_section.push("    mov [rsi], cl".to_string());
+                                    self.text_section.push("    mov [r8], al".to_string());
+                                    self.text_section.push("    inc rsi".to_string());
+                                    self.text_section.push("    dec r8".to_string());
+                                    self.text_section.push(format!("    jmp {}", rev_loop));
+                                    self.text_section.push(format!("{}:", rev_end));
+                                    
+                                    self.text_section.push(format!("{}:", convert_done));
+                                    // Calcular longitud: rdi - rbx
+                                    self.text_section.push("    sub rdi, rbx  ; longitud".to_string());
+                                    self.text_section.push("    mov r8, rdi   ; longitud para WriteFile".to_string());
+                                    
+                                    // WriteFile
+                                    self.text_section.push("    mov rcx, [rbp+16]  ; stdout".to_string());
+                                    self.text_section.push("    mov rdx, rbx       ; buffer".to_string());
+                                    self.text_section.push("    lea r9, [rbp+24]".to_string());
+                                    self.text_section.push("    mov qword [rsp+32], 0".to_string());
+                                    self.text_section.push("    call WriteFile".to_string());
+                                }
+                            }
+                        }
                     }
                     Expr::Float(f) => {
                         // Float literal: convertir a string en compile-time
@@ -499,14 +590,11 @@ impl CodeGenerator {
                         self.text_section.push("    call WriteFile".to_string());
                     }
                     Expr::Ident(name) => {
-                        // Verificar si la variable es string o numérica
+                        // Verificar tipo de variable: string, bool, o numérica
                         if self.is_string_expr(expr) {
-                            // Variable que contiene String struct: cargar puntero al String desde la variable
+                            // Variable que contiene String struct
                             if let Some(&offset) = self.variables.get(name) {
-                                // La variable contiene el puntero al String struct
                                 self.text_section.push(format!("    mov rax, [rbp - {}]  ; cargar puntero al String struct desde variable {}", offset + 8, name));
-                                
-                                // Cargar String->data y String->length
                                 self.text_section.push("    mov rdx, [rax + 0]  ; String->data".to_string());
                                 self.text_section.push("    mov r8, [rax + 8]  ; String->length".to_string());
                             } else {
@@ -514,15 +602,46 @@ impl CodeGenerator {
                                     message: format!("undefined variable: {} in print statement", name),
                                 });
                             }
-                            // Preparar WriteFile call
                             self.text_section.push("    ; Prepare WriteFile call for String variable".to_string());
                             self.text_section.push("    mov rcx, [rbp+16]  ; stdout handle".to_string());
-                            // RDX ya está listo (String->data)
-                            // R8 ya está listo (String->length)
                             self.text_section.push("    lea r9, [rbp+24]  ; lpNumberOfBytesWritten".to_string());
                             self.text_section.push("    mov qword [r9], 0  ; inicializar".to_string());
                             self.text_section.push("    mov qword [rsp+32], 0  ; lpOverlapped = NULL".to_string());
                             self.text_section.push("    call WriteFile".to_string());
+                        } else if self.is_bool_expr(expr) {
+                            // Variable booleana: imprimir "true" o "false"
+                            if let Some(&offset) = self.variables.get(name) {
+                                let true_label = self.add_string_data("true");
+                                let false_label = self.add_string_data("false");
+                                let print_bool = self.new_label("print_bool");
+                                let print_bool_end = self.new_label("print_bool_end");
+                                
+                                self.text_section.push(format!("    ; Print bool variable {}", name));
+                                self.text_section.push(format!("    mov rax, [rbp - {}]  ; cargar valor bool", offset + 8));
+                                self.text_section.push("    cmp rax, 0".to_string());
+                                self.text_section.push(format!("    je {}", print_bool));
+                                // True
+                                self.text_section.push("    mov rcx, [rbp+16]  ; stdout".to_string());
+                                self.text_section.push(format!("    lea rdx, [rel {}]", true_label));
+                                self.text_section.push(format!("    mov r8, {}_len", true_label));
+                                self.text_section.push("    lea r9, [rbp+24]".to_string());
+                                self.text_section.push("    mov qword [rsp+32], 0".to_string());
+                                self.text_section.push("    call WriteFile".to_string());
+                                self.text_section.push(format!("    jmp {}", print_bool_end));
+                                // False
+                                self.text_section.push(format!("{}:", print_bool));
+                                self.text_section.push("    mov rcx, [rbp+16]  ; stdout".to_string());
+                                self.text_section.push(format!("    lea rdx, [rel {}]", false_label));
+                                self.text_section.push(format!("    mov r8, {}_len", false_label));
+                                self.text_section.push("    lea r9, [rbp+24]".to_string());
+                                self.text_section.push("    mov qword [rsp+32], 0".to_string());
+                                self.text_section.push("    call WriteFile".to_string());
+                                self.text_section.push(format!("{}:", print_bool_end));
+                            } else {
+                                return Err(adead_common::ADeadError::RuntimeError {
+                                    message: format!("undefined variable: {} in print statement", name),
+                                });
+                            }
                         } else {
                             // Variable numérica: evaluar expresión y convertir a string
                             // Usar la misma lógica que para expresiones numéricas complejas
@@ -861,7 +980,7 @@ impl CodeGenerator {
             },
             Stmt::Let { mutable, name, value } => {
                 self.add_debug_comment(&format!("let {} = ...", if *mutable { format!("mut {}", name) } else { name.clone() }));
-                // Detectar si el valor es un constructor: ClassName.new(...)
+                // Detectar tipo de valor y registrar
                 let struct_name = if let Expr::Call { module: Some(class_name), name: method_name, .. } = value {
                     if method_name == "new" && self.struct_definitions.contains_key(class_name) {
                         // Es un constructor, registrar tipo
@@ -880,6 +999,10 @@ impl CodeGenerator {
                     }
                     self.variable_types.insert(name.clone(), struct_name.clone());
                     Some(struct_name.clone())
+                } else if matches!(value, Expr::Bool(_)) {
+                    // Booleano: registrar tipo
+                    self.variable_types.insert(name.clone(), "bool".to_string());
+                    None
                 } else {
                     None
                 };
@@ -902,6 +1025,30 @@ impl CodeGenerator {
                 self.text_section
                     .push(format!("    mov [rbp - {}], rax  ; variable {} ({})", 
                         offset + 8, name, if *mutable { "mutable" } else { "immutable" }));
+            }
+            Stmt::MultiLet { mutable, names, values } => {
+                // Múltiple asignación Python-style: let a, b = 1, 2
+                self.add_debug_comment(&format!("multi-let {:?} = ...", names));
+                
+                // Evaluar cada valor y asignarlo a su variable correspondiente
+                for (i, name) in names.iter().enumerate() {
+                    // Si hay menos valores que nombres, usar el último valor
+                    let value = if i < values.len() { &values[i] } else { &values[values.len() - 1] };
+                    
+                    self.generate_expr_windows(value)?;
+                    
+                    let offset = if let Some(&existing_offset) = self.variables.get(name) {
+                        existing_offset
+                    } else {
+                        let offset = self.stack_offset;
+                        self.stack_offset += 8;
+                        self.variables.insert(name.clone(), offset);
+                        offset
+                    };
+                    self.text_section
+                        .push(format!("    mov [rbp - {}], rax  ; variable {} ({})", 
+                            offset + 8, name, if *mutable { "mutable" } else { "immutable" }));
+                }
             }
             Stmt::Import(_module_name) => {
                 // Import statements son procesados en tiempo de compilación
@@ -1491,6 +1638,68 @@ impl CodeGenerator {
                 // RAX contiene el puntero al Array (en heap)
                 // Este puntero debe ser almacenado en una variable para uso posterior
             }
+            Expr::TupleLiteral(elements) => {
+                // Tuple literal: (1, 2, 3)
+                // Almacenar elementos consecutivamente en stack
+                let count = elements.len();
+                let tuple_size = count * 8;
+                let base_offset = self.stack_offset;
+                
+                self.stack_offset += tuple_size as i64;
+                self.text_section.push(format!("    ; Tuple literal: {} elementos", count));
+                
+                // Generar y almacenar cada elemento
+                for (i, element) in elements.iter().enumerate() {
+                    self.generate_expr_windows(element)?;
+                    let element_offset = base_offset + (i as i64 * 8);
+                    self.text_section.push(format!("    mov [rbp - {}], rax  ; tuple[{}]", element_offset + 8, i));
+                }
+                
+                // Retornar puntero al inicio de la tupla
+                self.text_section.push(format!("    lea rax, [rbp - {}]  ; puntero a tupla", base_offset + 8));
+            }
+            Expr::Lambda { params, body } => {
+                // Lambda: lambda x, y: x + y
+                // Por ahora, generar una función anónima y retornar su dirección
+                let lambda_name = self.new_label("lambda");
+                
+                // Guardar contexto actual
+                let saved_vars = self.variables.clone();
+                let saved_offset = self.stack_offset;
+                
+                // Generar función lambda
+                self.text_section.push(format!("    jmp {}_end  ; saltar definición de lambda", lambda_name));
+                self.text_section.push(format!("{}:", lambda_name));
+                self.text_section.push("    push rbp".to_string());
+                self.text_section.push("    mov rbp, rsp".to_string());
+                self.text_section.push("    sub rsp, 64".to_string());
+                
+                // Mapear parámetros a registros (Windows x64: RCX, RDX, R8, R9)
+                let param_regs = ["rcx", "rdx", "r8", "r9"];
+                self.stack_offset = 0;
+                for (i, param) in params.iter().enumerate() {
+                    self.stack_offset += 8;
+                    self.variables.insert(param.clone(), self.stack_offset);
+                    if i < 4 {
+                        self.text_section.push(format!("    mov [rbp - {}], {}  ; param {}", self.stack_offset + 8, param_regs[i], param));
+                    }
+                }
+                
+                // Generar cuerpo de lambda
+                self.generate_expr_windows(body)?;
+                
+                // Retornar
+                self.text_section.push("    leave".to_string());
+                self.text_section.push("    ret".to_string());
+                self.text_section.push(format!("{}_end:", lambda_name));
+                
+                // Restaurar contexto
+                self.variables = saved_vars;
+                self.stack_offset = saved_offset;
+                
+                // Retornar dirección de la lambda
+                self.text_section.push(format!("    lea rax, [rel {}]  ; dirección de lambda", lambda_name));
+            }
             Expr::Borrow { expr, .. } => {
                 // Borrowing: generar dirección de la expresión
                 // Por ahora, solo soportamos borrowing de variables
@@ -1642,22 +1851,22 @@ impl CodeGenerator {
                             self.text_section.push("    mov rax, rdx  ; mover residuo a rax".to_string());
                         }
                         BinOp::Pow => {
-                            // Potencia: RAX ** RBX
+                            // Potencia: RBX ** RAX (base ** exponente)
+                            // Después de evaluar: rbx = left (base), rax = right (exponente)
                             // Implementación simple usando loop (para enteros)
-                            // Guardar base y exponente
-                            self.text_section.push("    push rax  ; guardar base".to_string());
-                            self.text_section.push("    push rbx  ; guardar exponente".to_string());
                             
-                            // Caso especial: exponente 0
                             let label_not_zero = self.new_label("pow_not_zero");
                             let label_loop = self.new_label("pow_loop");
                             let label_end = self.new_label("pow_end");
                             
-                            self.text_section.push("    pop rcx  ; rcx = exponente".to_string());
-                            self.text_section.push("    pop rdx  ; rdx = base".to_string());
+                            // rcx = exponente (rax), rdx = base (rbx)
+                            self.text_section.push("    mov rcx, rax  ; rcx = exponente".to_string());
+                            self.text_section.push("    mov rdx, rbx  ; rdx = base".to_string());
+                            
+                            // Caso especial: exponente 0
                             self.text_section.push("    cmp rcx, 0".to_string());
                             self.text_section.push(format!("    jne {}  ; si exp != 0", label_not_zero));
-                            self.text_section.push("    mov rax, 1  ; 0^0 = 1, x^0 = 1".to_string());
+                            self.text_section.push("    mov rax, 1  ; x^0 = 1".to_string());
                             self.text_section.push(format!("    jmp {}", label_end));
                             
                             // Loop de multiplicación
@@ -1834,6 +2043,374 @@ impl CodeGenerator {
                     }
                 }
                 
+                // Built-in functions de conversión de tipos
+                if module.is_none() && args.len() == 1 {
+                    match name.as_str() {
+                        "int" => {
+                            // int(x) - convertir a entero
+                            self.generate_expr_windows(&args[0])?;
+                            // Si es float, truncar; si es string, parsear; si es bool, 0/1
+                            // Por ahora, asumimos que ya es numérico o bool
+                            self.text_section.push("    ; int(x) - valor ya en rax".to_string());
+                            return Ok(());
+                        }
+                        "float" => {
+                            // float(x) - convertir a float (por ahora solo retorna el valor)
+                            self.generate_expr_windows(&args[0])?;
+                            self.text_section.push("    ; float(x) - conversión pendiente".to_string());
+                            return Ok(());
+                        }
+                        "str" => {
+                            // str(x) - convertir a string (retorna puntero a string)
+                            self.generate_expr_windows(&args[0])?;
+                            self.text_section.push("    ; str(x) - valor numérico en rax".to_string());
+                            return Ok(());
+                        }
+                        "bool" => {
+                            // bool(x) - convertir a booleano (0 = false, != 0 = true)
+                            self.generate_expr_windows(&args[0])?;
+                            let true_label = self.new_label("bool_true");
+                            let end_label = self.new_label("bool_end");
+                            self.text_section.push("    cmp rax, 0".to_string());
+                            self.text_section.push(format!("    jne {}", true_label));
+                            self.text_section.push("    mov rax, 0  ; false".to_string());
+                            self.text_section.push(format!("    jmp {}", end_label));
+                            self.text_section.push(format!("{}:", true_label));
+                            self.text_section.push("    mov rax, 1  ; true".to_string());
+                            self.text_section.push(format!("{}:", end_label));
+                            return Ok(());
+                        }
+                        "abs" => {
+                            // abs(x) - valor absoluto
+                            self.generate_expr_windows(&args[0])?;
+                            let pos_label = self.new_label("abs_pos");
+                            self.text_section.push("    cmp rax, 0".to_string());
+                            self.text_section.push(format!("    jge {}", pos_label));
+                            self.text_section.push("    neg rax".to_string());
+                            self.text_section.push(format!("{}:", pos_label));
+                            return Ok(());
+                        }
+                        "round" => {
+                            // round(x) - redondear (por ahora solo retorna el valor entero)
+                            self.generate_expr_windows(&args[0])?;
+                            self.text_section.push("    ; round(x) - valor ya entero".to_string());
+                            return Ok(());
+                        }
+                        "sum" => {
+                            // sum(lista) - sumar todos los elementos de un array
+                            self.generate_expr_windows(&args[0])?;
+                            // RAX tiene puntero al Array struct
+                            self.text_section.push("    ; sum(lista)".to_string());
+                            self.text_section.push("    mov rsi, rax  ; puntero al Array".to_string());
+                            self.text_section.push("    mov rcx, [rsi + 8]  ; Array->length".to_string());
+                            self.text_section.push("    mov rdi, [rsi + 0]  ; Array->data".to_string());
+                            self.text_section.push("    xor rax, rax  ; suma = 0".to_string());
+                            let loop_label = self.new_label("sum_loop");
+                            let end_label = self.new_label("sum_end");
+                            self.text_section.push(format!("{}:", loop_label));
+                            self.text_section.push("    cmp rcx, 0".to_string());
+                            self.text_section.push(format!("    je {}", end_label));
+                            self.text_section.push("    add rax, [rdi]  ; suma += elemento".to_string());
+                            self.text_section.push("    add rdi, 8  ; siguiente elemento".to_string());
+                            self.text_section.push("    dec rcx".to_string());
+                            self.text_section.push(format!("    jmp {}", loop_label));
+                            self.text_section.push(format!("{}:", end_label));
+                            return Ok(());
+                        }
+                        "type" => {
+                            // type(x) - retorna tipo (por ahora solo un identificador numérico)
+                            // 0 = None, 1 = int, 2 = bool, 3 = string, 4 = array
+                            self.generate_expr_windows(&args[0])?;
+                            self.text_section.push("    mov rax, 1  ; tipo int por defecto".to_string());
+                            return Ok(());
+                        }
+                        "sorted" => {
+                            // sorted(lista) - retorna copia ordenada (bubble sort simple)
+                            self.generate_expr_windows(&args[0])?;
+                            self.text_section.push("    ; sorted(lista) - ordenar array".to_string());
+                            self.text_section.push("    mov rsi, rax  ; puntero al Array".to_string());
+                            self.text_section.push("    mov rcx, [rsi + 8]  ; length".to_string());
+                            self.text_section.push("    mov rdi, [rsi + 0]  ; data".to_string());
+                            // Bubble sort inline
+                            let outer_loop = self.new_label("sort_outer");
+                            let inner_loop = self.new_label("sort_inner");
+                            let no_swap = self.new_label("sort_no_swap");
+                            let sort_end = self.new_label("sort_end");
+                            self.text_section.push("    dec rcx  ; n-1 iteraciones".to_string());
+                            self.text_section.push(format!("{}:", outer_loop));
+                            self.text_section.push("    cmp rcx, 0".to_string());
+                            self.text_section.push(format!("    jle {}", sort_end));
+                            self.text_section.push("    push rcx".to_string());
+                            self.text_section.push("    mov rbx, rdi  ; ptr actual".to_string());
+                            self.text_section.push(format!("{}:", inner_loop));
+                            self.text_section.push("    cmp rcx, 0".to_string());
+                            self.text_section.push(format!("    jle {}_done", inner_loop));
+                            self.text_section.push("    mov rax, [rbx]".to_string());
+                            self.text_section.push("    mov rdx, [rbx + 8]".to_string());
+                            self.text_section.push("    cmp rax, rdx".to_string());
+                            self.text_section.push(format!("    jle {}", no_swap));
+                            self.text_section.push("    mov [rbx], rdx  ; swap".to_string());
+                            self.text_section.push("    mov [rbx + 8], rax".to_string());
+                            self.text_section.push(format!("{}:", no_swap));
+                            self.text_section.push("    add rbx, 8".to_string());
+                            self.text_section.push("    dec rcx".to_string());
+                            self.text_section.push(format!("    jmp {}", inner_loop));
+                            self.text_section.push(format!("{}_done:", inner_loop));
+                            self.text_section.push("    pop rcx".to_string());
+                            self.text_section.push("    dec rcx".to_string());
+                            self.text_section.push(format!("    jmp {}", outer_loop));
+                            self.text_section.push(format!("{}:", sort_end));
+                            self.text_section.push("    mov rax, rsi  ; retornar puntero al array".to_string());
+                            return Ok(());
+                        }
+                        "reversed" => {
+                            // reversed(lista) - invertir array in-place
+                            self.generate_expr_windows(&args[0])?;
+                            self.text_section.push("    ; reversed(lista)".to_string());
+                            self.text_section.push("    mov rsi, rax  ; puntero al Array".to_string());
+                            self.text_section.push("    mov rcx, [rsi + 8]  ; length".to_string());
+                            self.text_section.push("    mov rdi, [rsi + 0]  ; data inicio".to_string());
+                            self.text_section.push("    mov rbx, rcx".to_string());
+                            self.text_section.push("    dec rbx".to_string());
+                            self.text_section.push("    shl rbx, 3  ; * 8".to_string());
+                            self.text_section.push("    add rbx, rdi  ; data fin".to_string());
+                            self.text_section.push("    shr rcx, 1  ; length / 2".to_string());
+                            let rev_loop = self.new_label("rev_loop");
+                            let rev_end = self.new_label("rev_end");
+                            self.text_section.push(format!("{}:", rev_loop));
+                            self.text_section.push("    cmp rcx, 0".to_string());
+                            self.text_section.push(format!("    je {}", rev_end));
+                            self.text_section.push("    mov rax, [rdi]".to_string());
+                            self.text_section.push("    mov rdx, [rbx]".to_string());
+                            self.text_section.push("    mov [rdi], rdx".to_string());
+                            self.text_section.push("    mov [rbx], rax".to_string());
+                            self.text_section.push("    add rdi, 8".to_string());
+                            self.text_section.push("    sub rbx, 8".to_string());
+                            self.text_section.push("    dec rcx".to_string());
+                            self.text_section.push(format!("    jmp {}", rev_loop));
+                            self.text_section.push(format!("{}:", rev_end));
+                            self.text_section.push("    mov rax, rsi".to_string());
+                            return Ok(());
+                        }
+                        "all" => {
+                            // all(lista) - true si todos los elementos son truthy
+                            self.generate_expr_windows(&args[0])?;
+                            self.text_section.push("    ; all(lista)".to_string());
+                            self.text_section.push("    mov rsi, rax".to_string());
+                            self.text_section.push("    mov rcx, [rsi + 8]  ; length".to_string());
+                            self.text_section.push("    mov rdi, [rsi + 0]  ; data".to_string());
+                            let all_loop = self.new_label("all_loop");
+                            let all_false = self.new_label("all_false");
+                            let all_end = self.new_label("all_end");
+                            self.text_section.push(format!("{}:", all_loop));
+                            self.text_section.push("    cmp rcx, 0".to_string());
+                            self.text_section.push(format!("    je {}_true", all_end));
+                            self.text_section.push("    mov rax, [rdi]".to_string());
+                            self.text_section.push("    cmp rax, 0".to_string());
+                            self.text_section.push(format!("    je {}", all_false));
+                            self.text_section.push("    add rdi, 8".to_string());
+                            self.text_section.push("    dec rcx".to_string());
+                            self.text_section.push(format!("    jmp {}", all_loop));
+                            self.text_section.push(format!("{}_true:", all_end));
+                            self.text_section.push("    mov rax, 1".to_string());
+                            self.text_section.push(format!("    jmp {}", all_end));
+                            self.text_section.push(format!("{}:", all_false));
+                            self.text_section.push("    mov rax, 0".to_string());
+                            self.text_section.push(format!("{}:", all_end));
+                            return Ok(());
+                        }
+                        "any" => {
+                            // any(lista) - true si algún elemento es truthy
+                            self.generate_expr_windows(&args[0])?;
+                            self.text_section.push("    ; any(lista)".to_string());
+                            self.text_section.push("    mov rsi, rax".to_string());
+                            self.text_section.push("    mov rcx, [rsi + 8]  ; length".to_string());
+                            self.text_section.push("    mov rdi, [rsi + 0]  ; data".to_string());
+                            let any_loop = self.new_label("any_loop");
+                            let any_true = self.new_label("any_true");
+                            let any_end = self.new_label("any_end");
+                            self.text_section.push(format!("{}:", any_loop));
+                            self.text_section.push("    cmp rcx, 0".to_string());
+                            self.text_section.push(format!("    je {}_false", any_end));
+                            self.text_section.push("    mov rax, [rdi]".to_string());
+                            self.text_section.push("    cmp rax, 0".to_string());
+                            self.text_section.push(format!("    jne {}", any_true));
+                            self.text_section.push("    add rdi, 8".to_string());
+                            self.text_section.push("    dec rcx".to_string());
+                            self.text_section.push(format!("    jmp {}", any_loop));
+                            self.text_section.push(format!("{}:", any_true));
+                            self.text_section.push("    mov rax, 1".to_string());
+                            self.text_section.push(format!("    jmp {}", any_end));
+                            self.text_section.push(format!("{}_false:", any_end));
+                            self.text_section.push("    mov rax, 0".to_string());
+                            self.text_section.push(format!("{}:", any_end));
+                            return Ok(());
+                        }
+                        "enumerate" => {
+                            // enumerate(lista) - retorna array de tuplas (index, value)
+                            self.generate_expr_windows(&args[0])?;
+                            self.text_section.push("    ; enumerate(lista)".to_string());
+                            self.text_section.push("    mov rsi, rax  ; array original".to_string());
+                            self.text_section.push("    mov rcx, [rsi + 8]  ; length".to_string());
+                            self.text_section.push("    mov rdi, [rsi + 0]  ; data".to_string());
+                            // Por ahora retornar el array original (implementación completa requiere más trabajo)
+                            self.text_section.push("    mov rax, rsi".to_string());
+                            return Ok(());
+                        }
+                        "zip" => {
+                            // zip requiere 2 argumentos, se maneja abajo
+                        }
+                        "map" => {
+                            // map(func, lista) - aplicar función a cada elemento
+                            // Requiere 2 argumentos, se maneja en la sección de 2 args
+                        }
+                        "filter" => {
+                            // filter(func, lista) - filtrar elementos
+                            // Requiere 2 argumentos, se maneja en la sección de 2 args
+                        }
+                        "input" => {
+                            // input(prompt) - leer línea de stdin
+                            // Primero imprimir el prompt si es string
+                            if let Expr::String(prompt) = &args[0] {
+                                let label = self.add_string_data(prompt);
+                                self.text_section.push("    ; input(prompt)".to_string());
+                                self.text_section.push("    mov rcx, [rbp+16]  ; stdout".to_string());
+                                self.text_section.push(format!("    lea rdx, [rel {}]", label));
+                                self.text_section.push(format!("    mov r8, {}_len", label));
+                                self.text_section.push("    lea r9, [rbp+24]".to_string());
+                                self.text_section.push("    mov qword [rsp+32], 0".to_string());
+                                self.text_section.push("    call WriteFile".to_string());
+                            }
+                            // Reservar buffer para input (256 bytes)
+                            let buffer_offset = self.stack_offset;
+                            self.stack_offset += 256;
+                            self.text_section.push("    ; Leer de stdin".to_string());
+                            self.text_section.push("    sub rsp, 32  ; shadow space".to_string());
+                            self.text_section.push("    mov rcx, -10  ; STD_INPUT_HANDLE".to_string());
+                            self.text_section.push("    call GetStdHandle".to_string());
+                            self.text_section.push("    mov rcx, rax  ; stdin handle".to_string());
+                            self.text_section.push(format!("    lea rdx, [rbp - {}]  ; buffer", buffer_offset + 8));
+                            self.text_section.push("    mov r8, 255  ; max bytes".to_string());
+                            self.text_section.push("    lea r9, [rbp+24]  ; bytes read".to_string());
+                            self.text_section.push("    mov qword [rsp+32], 0".to_string());
+                            self.text_section.push("    call ReadFile".to_string());
+                            self.text_section.push("    add rsp, 32".to_string());
+                            // Retornar puntero al buffer
+                            self.text_section.push(format!("    lea rax, [rbp - {}]", buffer_offset + 8));
+                            return Ok(());
+                        }
+                        _ => {}
+                    }
+                }
+                
+                // Built-in functions con 2 argumentos
+                if module.is_none() && args.len() == 2 {
+                    match name.as_str() {
+                        "min" => {
+                            // min(a, b)
+                            self.generate_expr_windows(&args[0])?;
+                            self.text_section.push("    push rax".to_string());
+                            self.generate_expr_windows(&args[1])?;
+                            self.text_section.push("    pop rbx".to_string());
+                            let min_label = self.new_label("min_done");
+                            self.text_section.push("    cmp rbx, rax".to_string());
+                            self.text_section.push(format!("    jle {}", min_label));
+                            self.text_section.push("    mov rbx, rax".to_string());
+                            self.text_section.push(format!("{}:", min_label));
+                            self.text_section.push("    mov rax, rbx".to_string());
+                            return Ok(());
+                        }
+                        "max" => {
+                            // max(a, b)
+                            self.generate_expr_windows(&args[0])?;
+                            self.text_section.push("    push rax".to_string());
+                            self.generate_expr_windows(&args[1])?;
+                            self.text_section.push("    pop rbx".to_string());
+                            let max_label = self.new_label("max_done");
+                            self.text_section.push("    cmp rbx, rax".to_string());
+                            self.text_section.push(format!("    jge {}", max_label));
+                            self.text_section.push("    mov rbx, rax".to_string());
+                            self.text_section.push(format!("{}:", max_label));
+                            self.text_section.push("    mov rax, rbx".to_string());
+                            return Ok(());
+                        }
+                        "pow" => {
+                            // pow(base, exp) - potencia
+                            self.generate_expr_windows(&args[0])?;
+                            self.text_section.push("    push rax  ; base".to_string());
+                            self.generate_expr_windows(&args[1])?;
+                            self.text_section.push("    mov rcx, rax  ; exp".to_string());
+                            self.text_section.push("    pop rbx  ; base".to_string());
+                            self.text_section.push("    mov rax, 1  ; resultado".to_string());
+                            let loop_label = self.new_label("pow_loop");
+                            let end_label = self.new_label("pow_end");
+                            self.text_section.push(format!("{}:", loop_label));
+                            self.text_section.push("    cmp rcx, 0".to_string());
+                            self.text_section.push(format!("    je {}", end_label));
+                            self.text_section.push("    imul rax, rbx".to_string());
+                            self.text_section.push("    dec rcx".to_string());
+                            self.text_section.push(format!("    jmp {}", loop_label));
+                            self.text_section.push(format!("{}:", end_label));
+                            return Ok(());
+                        }
+                        "zip" => {
+                            // zip(a, b) - combinar dos arrays en array de tuplas
+                            self.generate_expr_windows(&args[0])?;
+                            self.text_section.push("    push rax  ; array a".to_string());
+                            self.generate_expr_windows(&args[1])?;
+                            self.text_section.push("    mov rsi, rax  ; array b".to_string());
+                            self.text_section.push("    pop rdi  ; array a".to_string());
+                            self.text_section.push("    ; zip(a, b) - retorna array a por ahora".to_string());
+                            self.text_section.push("    mov rax, rdi".to_string());
+                            return Ok(());
+                        }
+                        "map" => {
+                            // map(func, lista) - aplicar función a cada elemento
+                            self.generate_expr_windows(&args[0])?;
+                            self.text_section.push("    push rax  ; función".to_string());
+                            self.generate_expr_windows(&args[1])?;
+                            self.text_section.push("    mov rsi, rax  ; array".to_string());
+                            self.text_section.push("    pop rdi  ; función".to_string());
+                            // Implementación básica: iterar y llamar función
+                            self.text_section.push("    ; map(f, arr) - aplicar f a cada elemento".to_string());
+                            self.text_section.push("    mov rcx, [rsi + 8]  ; length".to_string());
+                            self.text_section.push("    mov rbx, [rsi + 0]  ; data".to_string());
+                            let map_loop = self.new_label("map_loop");
+                            let map_end = self.new_label("map_end");
+                            self.text_section.push("    push rsi  ; guardar array".to_string());
+                            self.text_section.push(format!("{}:", map_loop));
+                            self.text_section.push("    cmp rcx, 0".to_string());
+                            self.text_section.push(format!("    je {}", map_end));
+                            self.text_section.push("    push rcx".to_string());
+                            self.text_section.push("    push rbx".to_string());
+                            self.text_section.push("    push rdi".to_string());
+                            self.text_section.push("    mov rcx, [rbx]  ; elemento actual".to_string());
+                            self.text_section.push("    sub rsp, 32".to_string());
+                            self.text_section.push("    call rdi  ; llamar función".to_string());
+                            self.text_section.push("    add rsp, 32".to_string());
+                            self.text_section.push("    pop rdi".to_string());
+                            self.text_section.push("    pop rbx".to_string());
+                            self.text_section.push("    mov [rbx], rax  ; guardar resultado".to_string());
+                            self.text_section.push("    add rbx, 8".to_string());
+                            self.text_section.push("    pop rcx".to_string());
+                            self.text_section.push("    dec rcx".to_string());
+                            self.text_section.push(format!("    jmp {}", map_loop));
+                            self.text_section.push(format!("{}:", map_end));
+                            self.text_section.push("    pop rax  ; retornar array modificado".to_string());
+                            return Ok(());
+                        }
+                        "filter" => {
+                            // filter(func, lista) - filtrar elementos
+                            self.generate_expr_windows(&args[0])?;
+                            self.text_section.push("    push rax  ; función".to_string());
+                            self.generate_expr_windows(&args[1])?;
+                            self.text_section.push("    ; filter - retorna array original por ahora".to_string());
+                            return Ok(());
+                        }
+                        _ => {}
+                    }
+                }
+
                 // Detectar built-ins como len(arr) o len(s)
                 if module.is_none() && name == "len" && args.len() == 1 {
                     // Detectar si el argumento es string o array
@@ -1937,6 +2514,160 @@ impl CodeGenerator {
                     self.variables.insert(name.clone(), offset);
                     self.text_section.push(format!("    mov [rbp - {}], rax  ; crear variable {}", offset + 8, name));
                 }
+            }
+            // Operadores compuestos: x += 5, x -= 3, x *= 2, x /= 4 (Sprint 1 - Python-like)
+            Expr::CompoundAssign { name, op, value } => {
+                self.add_debug_comment(&format!("{} {}= expr", name, match op {
+                    BinOp::Add => "+",
+                    BinOp::Sub => "-",
+                    BinOp::Mul => "*",
+                    BinOp::Div => "/",
+                    _ => "?",
+                }));
+                
+                // Cargar valor actual de la variable
+                if let Some(&offset) = self.variables.get(name) {
+                    self.text_section.push(format!("    mov rbx, [rbp - {}]  ; cargar {} actual", offset + 8, name));
+                } else {
+                    return Err(adead_common::ADeadError::RuntimeError {
+                        message: format!("Variable '{}' no definida para operador compuesto", name),
+                    });
+                }
+                
+                // Evaluar la expresión del valor
+                self.generate_expr_windows(value)?;
+                // RAX contiene el valor, RBX contiene el valor actual de la variable
+                
+                // Aplicar operación
+                match op {
+                    BinOp::Add => {
+                        self.text_section.push("    add rbx, rax  ; += operación".to_string());
+                    }
+                    BinOp::Sub => {
+                        self.text_section.push("    sub rbx, rax  ; -= operación".to_string());
+                    }
+                    BinOp::Mul => {
+                        self.text_section.push("    imul rbx, rax  ; *= operación".to_string());
+                    }
+                    BinOp::Div => {
+                        // División: rbx / rax
+                        self.text_section.push("    push rax  ; guardar divisor".to_string());
+                        self.text_section.push("    mov rax, rbx  ; dividendo en rax".to_string());
+                        self.text_section.push("    cqo  ; sign-extend".to_string());
+                        self.text_section.push("    pop rbx  ; divisor en rbx".to_string());
+                        self.text_section.push("    idiv rbx  ; /= operación".to_string());
+                        self.text_section.push("    mov rbx, rax  ; resultado en rbx".to_string());
+                    }
+                    _ => {
+                        return Err(adead_common::ADeadError::RuntimeError {
+                            message: format!("Operador compuesto no soportado: {:?}", op),
+                        });
+                    }
+                }
+                
+                // Guardar resultado en la variable
+                if let Some(&offset) = self.variables.get(name) {
+                    self.text_section.push(format!("    mov [rbp - {}], rbx  ; guardar resultado en {}", offset + 8, name));
+                    self.text_section.push("    mov rax, rbx  ; resultado en rax".to_string());
+                }
+            }
+            // F-strings: f"Hola {nombre}" (Sprint 2.3 - Python-like)
+            Expr::FString { parts } => {
+                use adead_parser::FStringPart;
+                // Estrategia: concatenar todas las partes en un buffer en stack
+                // Por ahora, implementación simple: crear string concatenado en compile-time si es posible
+                // o generar código para concatenación en runtime
+                
+                // Calcular tamaño total estimado y crear buffer
+                let buffer_size = 256; // Buffer fijo por ahora
+                let buffer_offset = self.stack_offset;
+                self.stack_offset += buffer_size;
+                
+                self.text_section.push(format!("    ; F-string con {} partes", parts.len()));
+                self.text_section.push(format!("    sub rsp, {}  ; buffer para f-string", buffer_size));
+                self.text_section.push(format!("    lea rdi, [rbp - {}]  ; puntero al buffer", buffer_offset + 8));
+                self.text_section.push("    xor r12, r12  ; contador de longitud total".to_string());
+                
+                for part in parts {
+                    match part {
+                        FStringPart::Literal(s) => {
+                            // Copiar literal al buffer
+                            let label = self.add_string_data(s);
+                            self.text_section.push(format!("    ; Copiar literal: \"{}\"", s.escape_default()));
+                            self.text_section.push(format!("    lea rsi, [rel {}]", label));
+                            self.text_section.push(format!("    mov rcx, {}_len", label));
+                            // Copiar bytes
+                            self.text_section.push("    push rdi".to_string());
+                            self.text_section.push("    add rdi, r12  ; posición actual en buffer".to_string());
+                            let copy_loop = self.new_label("fstr_copy");
+                            let copy_done = self.new_label("fstr_copy_done");
+                            self.text_section.push(format!("{}:", copy_loop));
+                            self.text_section.push("    cmp rcx, 0".to_string());
+                            self.text_section.push(format!("    je {}", copy_done));
+                            self.text_section.push("    mov al, [rsi]".to_string());
+                            self.text_section.push("    mov [rdi], al".to_string());
+                            self.text_section.push("    inc rsi".to_string());
+                            self.text_section.push("    inc rdi".to_string());
+                            self.text_section.push("    inc r12".to_string());
+                            self.text_section.push("    dec rcx".to_string());
+                            self.text_section.push(format!("    jmp {}", copy_loop));
+                            self.text_section.push(format!("{}:", copy_done));
+                            self.text_section.push("    pop rdi".to_string());
+                        }
+                        FStringPart::Expr(expr) => {
+                            // Evaluar expresión y convertir a string
+                            self.text_section.push("    ; Evaluar expresión interpolada".to_string());
+                            self.text_section.push("    push rdi".to_string());
+                            self.text_section.push("    push r12".to_string());
+                            self.generate_expr_windows(expr)?;
+                            self.text_section.push("    pop r12".to_string());
+                            self.text_section.push("    pop rdi".to_string());
+                            // RAX tiene el valor, convertir a string
+                            // Por ahora solo soportamos números
+                            self.text_section.push("    ; Convertir número a string".to_string());
+                            self.text_section.push("    push rdi".to_string());
+                            self.text_section.push("    add rdi, r12  ; posición en buffer".to_string());
+                            self.text_section.push("    mov rbx, rdi  ; guardar inicio".to_string());
+                            self.text_section.push("    mov rcx, 10".to_string());
+                            // Convertir número a string (simple)
+                            let num_loop = self.new_label("fstr_num");
+                            let num_done = self.new_label("fstr_num_done");
+                            self.text_section.push(format!("{}:", num_loop));
+                            self.text_section.push("    xor rdx, rdx".to_string());
+                            self.text_section.push("    div rcx".to_string());
+                            self.text_section.push("    add dl, '0'".to_string());
+                            self.text_section.push("    mov [rdi], dl".to_string());
+                            self.text_section.push("    inc rdi".to_string());
+                            self.text_section.push("    inc r12".to_string());
+                            self.text_section.push("    cmp rax, 0".to_string());
+                            self.text_section.push(format!("    jne {}", num_loop));
+                            self.text_section.push(format!("{}:", num_done));
+                            // Revertir dígitos
+                            self.text_section.push("    mov rsi, rbx".to_string());
+                            self.text_section.push("    mov rcx, rdi".to_string());
+                            self.text_section.push("    dec rcx".to_string());
+                            let rev_loop = self.new_label("fstr_rev");
+                            let rev_done = self.new_label("fstr_rev_done");
+                            self.text_section.push(format!("{}:", rev_loop));
+                            self.text_section.push("    cmp rsi, rcx".to_string());
+                            self.text_section.push(format!("    jge {}", rev_done));
+                            self.text_section.push("    mov al, [rsi]".to_string());
+                            self.text_section.push("    mov bl, [rcx]".to_string());
+                            self.text_section.push("    mov [rsi], bl".to_string());
+                            self.text_section.push("    mov [rcx], al".to_string());
+                            self.text_section.push("    inc rsi".to_string());
+                            self.text_section.push("    dec rcx".to_string());
+                            self.text_section.push(format!("    jmp {}", rev_loop));
+                            self.text_section.push(format!("{}:", rev_done));
+                            self.text_section.push("    pop rdi".to_string());
+                        }
+                    }
+                }
+                
+                // Resultado: dirección del buffer en rax, longitud en r12
+                self.text_section.push(format!("    lea rax, [rbp - {}]  ; dirección del f-string", buffer_offset + 8));
+                // Guardar longitud para uso posterior
+                self.text_section.push("    mov [rax + 8], r12  ; guardar longitud".to_string());
             }
             // Option/Result constructors (O0.4) - Tagged unions en NASM
             // Opción<T>: 16 bytes = tag (8 bytes) + valor (8 bytes)
@@ -2783,6 +3514,24 @@ impl CodeGenerator {
                     .push(format!("    mov [rbp - {}], rax  ; variable {} ({})", 
                         offset + 8, name, if *mutable { "mutable" } else { "immutable" }));
             }
+            Stmt::MultiLet { mutable, names, values } => {
+                // Múltiple asignación Python-style (Linux)
+                for (i, name) in names.iter().enumerate() {
+                    let value = if i < values.len() { &values[i] } else { &values[values.len() - 1] };
+                    self.generate_expr(value)?;
+                    let offset = if let Some(&existing_offset) = self.variables.get(name) {
+                        existing_offset
+                    } else {
+                        let offset = self.stack_offset;
+                        self.stack_offset += 8;
+                        self.variables.insert(name.clone(), offset);
+                        offset
+                    };
+                    self.text_section
+                        .push(format!("    mov [rbp - {}], rax  ; variable {} ({})", 
+                            offset + 8, name, if *mutable { "mutable" } else { "immutable" }));
+                }
+            }
             Stmt::Import(_module_name) => {
                 // Import statements son procesados en tiempo de compilación
                 // No generan código directamente, solo información de módulos
@@ -3303,6 +4052,187 @@ impl CodeGenerator {
                 }
                 // Result of assignment is the value
             }
+            // Operadores compuestos: x += 5, x -= 3, x *= 2, x /= 4 (Sprint 1 - Python-like) - Linux
+            Expr::CompoundAssign { name, op, value } => {
+                // Cargar valor actual de la variable
+                if let Some(&offset) = self.variables.get(name) {
+                    self.text_section.push(format!("    mov rbx, [rbp - {}]  ; cargar {} actual", offset + 8, name));
+                } else {
+                    return Err(adead_common::ADeadError::RuntimeError {
+                        message: format!("Variable '{}' no definida para operador compuesto", name),
+                    });
+                }
+                
+                // Evaluar la expresión del valor
+                self.generate_expr(value)?;
+                // RAX contiene el valor, RBX contiene el valor actual de la variable
+                
+                // Aplicar operación
+                match op {
+                    BinOp::Add => {
+                        self.text_section.push("    add rbx, rax  ; += operación".to_string());
+                    }
+                    BinOp::Sub => {
+                        self.text_section.push("    sub rbx, rax  ; -= operación".to_string());
+                    }
+                    BinOp::Mul => {
+                        self.text_section.push("    imul rbx, rax  ; *= operación".to_string());
+                    }
+                    BinOp::Div => {
+                        self.text_section.push("    push rax  ; guardar divisor".to_string());
+                        self.text_section.push("    mov rax, rbx  ; dividendo en rax".to_string());
+                        self.text_section.push("    cqo  ; sign-extend".to_string());
+                        self.text_section.push("    pop rbx  ; divisor en rbx".to_string());
+                        self.text_section.push("    idiv rbx  ; /= operación".to_string());
+                        self.text_section.push("    mov rbx, rax  ; resultado en rbx".to_string());
+                    }
+                    _ => {
+                        return Err(adead_common::ADeadError::RuntimeError {
+                            message: format!("Operador compuesto no soportado: {:?}", op),
+                        });
+                    }
+                }
+                
+                // Guardar resultado en la variable
+                if let Some(&offset) = self.variables.get(name) {
+                    self.text_section.push(format!("    mov [rbp - {}], rbx  ; guardar resultado en {}", offset + 8, name));
+                    self.text_section.push("    mov rax, rbx  ; resultado en rax".to_string());
+                }
+            }
+            // F-strings: f"Hola {nombre}" (Sprint 2.3 - Python-like) - Linux
+            Expr::FString { parts } => {
+                use adead_parser::FStringPart;
+                // Implementación Linux similar a Windows
+                let buffer_size = 256;
+                let buffer_offset = self.stack_offset;
+                self.stack_offset += buffer_size;
+                
+                self.text_section.push(format!("    ; F-string con {} partes (Linux)", parts.len()));
+                self.text_section.push(format!("    sub rsp, {}", buffer_size));
+                self.text_section.push(format!("    lea rdi, [rbp - {}]", buffer_offset + 8));
+                self.text_section.push("    xor r12, r12".to_string());
+                
+                for part in parts {
+                    match part {
+                        FStringPart::Literal(s) => {
+                            let label = self.add_string_data(s);
+                            self.text_section.push(format!("    lea rsi, [rel {}]", label));
+                            self.text_section.push(format!("    mov rcx, {}_len", label));
+                            self.text_section.push("    push rdi".to_string());
+                            self.text_section.push("    add rdi, r12".to_string());
+                            let copy_loop = self.new_label("fstr_copy_lnx");
+                            let copy_done = self.new_label("fstr_copy_done_lnx");
+                            self.text_section.push(format!("{}:", copy_loop));
+                            self.text_section.push("    cmp rcx, 0".to_string());
+                            self.text_section.push(format!("    je {}", copy_done));
+                            self.text_section.push("    mov al, [rsi]".to_string());
+                            self.text_section.push("    mov [rdi], al".to_string());
+                            self.text_section.push("    inc rsi".to_string());
+                            self.text_section.push("    inc rdi".to_string());
+                            self.text_section.push("    inc r12".to_string());
+                            self.text_section.push("    dec rcx".to_string());
+                            self.text_section.push(format!("    jmp {}", copy_loop));
+                            self.text_section.push(format!("{}:", copy_done));
+                            self.text_section.push("    pop rdi".to_string());
+                        }
+                        FStringPart::Expr(expr) => {
+                            self.text_section.push("    push rdi".to_string());
+                            self.text_section.push("    push r12".to_string());
+                            self.generate_expr(expr)?;
+                            self.text_section.push("    pop r12".to_string());
+                            self.text_section.push("    pop rdi".to_string());
+                            self.text_section.push("    push rdi".to_string());
+                            self.text_section.push("    add rdi, r12".to_string());
+                            self.text_section.push("    mov rbx, rdi".to_string());
+                            self.text_section.push("    mov rcx, 10".to_string());
+                            let num_loop = self.new_label("fstr_num_lnx");
+                            let num_done = self.new_label("fstr_num_done_lnx");
+                            self.text_section.push(format!("{}:", num_loop));
+                            self.text_section.push("    xor rdx, rdx".to_string());
+                            self.text_section.push("    div rcx".to_string());
+                            self.text_section.push("    add dl, '0'".to_string());
+                            self.text_section.push("    mov [rdi], dl".to_string());
+                            self.text_section.push("    inc rdi".to_string());
+                            self.text_section.push("    inc r12".to_string());
+                            self.text_section.push("    cmp rax, 0".to_string());
+                            self.text_section.push(format!("    jne {}", num_loop));
+                            self.text_section.push(format!("{}:", num_done));
+                            self.text_section.push("    mov rsi, rbx".to_string());
+                            self.text_section.push("    mov rcx, rdi".to_string());
+                            self.text_section.push("    dec rcx".to_string());
+                            let rev_loop = self.new_label("fstr_rev_lnx");
+                            let rev_done = self.new_label("fstr_rev_done_lnx");
+                            self.text_section.push(format!("{}:", rev_loop));
+                            self.text_section.push("    cmp rsi, rcx".to_string());
+                            self.text_section.push(format!("    jge {}", rev_done));
+                            self.text_section.push("    mov al, [rsi]".to_string());
+                            self.text_section.push("    mov bl, [rcx]".to_string());
+                            self.text_section.push("    mov [rsi], bl".to_string());
+                            self.text_section.push("    mov [rcx], al".to_string());
+                            self.text_section.push("    inc rsi".to_string());
+                            self.text_section.push("    dec rcx".to_string());
+                            self.text_section.push(format!("    jmp {}", rev_loop));
+                            self.text_section.push(format!("{}:", rev_done));
+                            self.text_section.push("    pop rdi".to_string());
+                        }
+                    }
+                }
+                
+                self.text_section.push(format!("    lea rax, [rbp - {}]", buffer_offset + 8));
+                self.text_section.push("    mov [rax + 8], r12".to_string());
+            }
+            Expr::TupleLiteral(elements) => {
+                // Tuple literal: (1, 2, 3) - Linux
+                let count = elements.len();
+                let tuple_size = count * 8;
+                let base_offset = self.stack_offset;
+                
+                self.stack_offset += tuple_size as i64;
+                self.text_section.push(format!("    ; Tuple literal: {} elementos (Linux)", count));
+                
+                for (i, element) in elements.iter().enumerate() {
+                    self.generate_expr(element)?;
+                    let element_offset = base_offset + (i as i64 * 8);
+                    self.text_section.push(format!("    mov [rbp - {}], rax  ; tuple[{}]", element_offset + 8, i));
+                }
+                
+                self.text_section.push(format!("    lea rax, [rbp - {}]", base_offset + 8));
+            }
+            Expr::Lambda { params, body } => {
+                // Lambda: lambda x, y: x + y - Linux
+                let lambda_name = self.new_label("lambda");
+                
+                let saved_vars = self.variables.clone();
+                let saved_offset = self.stack_offset;
+                
+                self.text_section.push(format!("    jmp {}_end", lambda_name));
+                self.text_section.push(format!("{}:", lambda_name));
+                self.text_section.push("    push rbp".to_string());
+                self.text_section.push("    mov rbp, rsp".to_string());
+                self.text_section.push("    sub rsp, 64".to_string());
+                
+                // System V ABI: RDI, RSI, RDX, RCX, R8, R9
+                let param_regs = ["rdi", "rsi", "rdx", "rcx", "r8", "r9"];
+                self.stack_offset = 0;
+                for (i, param) in params.iter().enumerate() {
+                    self.stack_offset += 8;
+                    self.variables.insert(param.clone(), self.stack_offset);
+                    if i < 6 {
+                        self.text_section.push(format!("    mov [rbp - {}], {}  ; param {}", self.stack_offset + 8, param_regs[i], param));
+                    }
+                }
+                
+                self.generate_expr(body)?;
+                
+                self.text_section.push("    leave".to_string());
+                self.text_section.push("    ret".to_string());
+                self.text_section.push(format!("{}_end:", lambda_name));
+                
+                self.variables = saved_vars;
+                self.stack_offset = saved_offset;
+                
+                self.text_section.push(format!("    lea rax, [rel {}]", lambda_name));
+            }
             Expr::BinaryOp { op, left, right } => {
                 // Generate right side first, push to stack
                 self.generate_expr(left)?;
@@ -3337,16 +4267,17 @@ impl CodeGenerator {
                         self.text_section.push("    mov rax, rdx  ; resto (módulo) en RAX".to_string());
                     }
                     BinOp::Pow => {
-                        // Potencia: RAX ** RBX (Linux)
-                        self.text_section.push("    push rax  ; guardar base".to_string());
-                        self.text_section.push("    push rbx  ; guardar exponente".to_string());
+                        // Potencia: base ** exponente (Linux)
+                        // Después de evaluar: rax = left (base), rbx = right (exponente)
                         
                         let label_not_zero = self.new_label("pow_not_zero");
                         let label_loop = self.new_label("pow_loop");
                         let label_end = self.new_label("pow_end");
                         
-                        self.text_section.push("    pop rcx  ; rcx = exponente".to_string());
-                        self.text_section.push("    pop rdx  ; rdx = base".to_string());
+                        // rcx = exponente (rbx), rdx = base (rax)
+                        self.text_section.push("    mov rcx, rbx  ; rcx = exponente".to_string());
+                        self.text_section.push("    mov rdx, rax  ; rdx = base".to_string());
+                        
                         self.text_section.push("    cmp rcx, 0".to_string());
                         self.text_section.push(format!("    jne {}  ; si exp != 0", label_not_zero));
                         self.text_section.push("    mov rax, 1  ; x^0 = 1".to_string());
@@ -3559,6 +4490,30 @@ impl CodeGenerator {
         }
     }
     
+    // Helper para detectar si una expresión es booleana
+    fn is_bool_expr(&self, expr: &Expr) -> bool {
+        match expr {
+            Expr::Bool(_) => true,
+            Expr::Ident(name) => {
+                // Verificar si la variable está registrada como booleana
+                if let Some(type_name) = self.variable_types.get(name) {
+                    return type_name == "bool";
+                }
+                // Heurística: nombres comunes para booleanos
+                let lower = name.to_lowercase();
+                lower.contains("activo") || lower.contains("active") ||
+                lower.contains("enabled") || lower.contains("flag") ||
+                lower.contains("is_") || lower.contains("has_") ||
+                lower == "ok" || lower == "done" || lower == "valid"
+            }
+            Expr::BinaryOp { op, .. } => {
+                // Operadores de comparación retornan bool
+                matches!(op, BinOp::Eq | BinOp::Ne | BinOp::Lt | BinOp::Gt | BinOp::Le | BinOp::Ge)
+            }
+            _ => false,
+        }
+    }
+
     /// Determinar el tipo de struct de una expresión (para calcular offsets de campos)
     fn get_struct_type_from_expr(&self, expr: &Expr) -> Option<String> {
         match expr {
@@ -3613,20 +4568,59 @@ impl CodeGenerator {
         let label = format!("msg{}", self.string_counter);
         self.string_counter += 1;
         
-        // Eliminar cualquier \n al final del string para evitar doble salto de línea
-        let s_clean = s.trim_end_matches('\n');
+        // Construir string NASM con caracteres especiales como bytes separados
+        // Ejemplo: "Hola\nMundo" -> db "Hola", 0xA, "Mundo"
+        let mut parts: Vec<String> = Vec::new();
+        let mut current = String::new();
         
-        // Escape string for NASM (pero preservar \n como 0xA)
-        let escaped = s_clean
-            .replace('\\', "\\\\")
-            .replace('\n', "\\n")  // Convertir \n a \\n para NASM
-            .replace('\t', "\\t")
-            .replace('"', "\\\"");
+        for c in s.chars() {
+            match c {
+                '\n' => {
+                    if !current.is_empty() {
+                        parts.push(format!("\"{}\"", current.replace('"', "\\\"")));
+                        current.clear();
+                    }
+                    parts.push("0xA".to_string());
+                }
+                '\t' => {
+                    if !current.is_empty() {
+                        parts.push(format!("\"{}\"", current.replace('"', "\\\"")));
+                        current.clear();
+                    }
+                    parts.push("0x9".to_string());
+                }
+                '\r' => {
+                    if !current.is_empty() {
+                        parts.push(format!("\"{}\"", current.replace('"', "\\\"")));
+                        current.clear();
+                    }
+                    parts.push("0xD".to_string());
+                }
+                '\0' => {
+                    if !current.is_empty() {
+                        parts.push(format!("\"{}\"", current.replace('"', "\\\"")));
+                        current.clear();
+                    }
+                    parts.push("0x0".to_string());
+                }
+                _ => current.push(c),
+            }
+        }
         
-        // Siempre agregar 0xA al final (ya limpiamos el string de \n al final)
+        // Agregar último segmento si existe
+        if !current.is_empty() {
+            parts.push(format!("\"{}\"", current.replace('"', "\\\"")));
+        }
+        
+        // Si no hay partes, crear string vacío
+        if parts.is_empty() {
+            parts.push("\"\"".to_string());
+        }
+        
+        // Generar línea db con todas las partes
         self.data_section.push(format!(
-            "{}: db \"{}\", 0xA",
-            label, escaped
+            "{}: db {}",
+            label, parts.join(", ")
         ));
         
         self.data_section.push(format!(

@@ -114,6 +114,30 @@ pub enum Expr {
     },
     // Operadores lógicos (Prioridad 2)
     Not(Box<Expr>),             // !expr - Negación lógica
+    // Operadores compuestos (Sprint 1 - Python-like)
+    CompoundAssign {            // x += 5, x -= 3, x *= 2, x /= 4
+        name: String,
+        op: BinOp,              // Add, Sub, Mul, Div
+        value: Box<Expr>,
+    },
+    // F-strings (Sprint 2.3 - Python-like)
+    FString {                   // f"Hola {nombre}, tienes {edad} años"
+        parts: Vec<FStringPart>,
+    },
+    // Tuplas (Sprint 2 - Python-like)
+    TupleLiteral(Vec<Expr>),    // (1, 2, 3) o (a, b)
+    // Lambda expressions (Sprint 3 - Python-like)
+    Lambda {                    // lambda x, y: x + y
+        params: Vec<String>,
+        body: Box<Expr>,
+    },
+}
+
+/// Parte de un f-string (Sprint 2.3 - Python-like)
+#[derive(Debug, Clone, PartialEq)]
+pub enum FStringPart {
+    Literal(String),    // Texto literal: "Hola "
+    Expr(Box<Expr>),    // Expresión interpolada: {nombre}
 }
 
 /// Par├ímetro de funci├│n con informaci├│n de borrowing
@@ -208,6 +232,12 @@ pub enum Stmt {
         mutable: bool,  // true = let mut, false = let (inmutable)
         name: String,
         value: Expr,
+    },
+    // Múltiple asignación Python-style: let a, b = 1, 2
+    MultiLet {
+        mutable: bool,
+        names: Vec<String>,
+        values: Vec<Expr>,
     },
     If {
         condition: Expr,
@@ -708,6 +738,27 @@ fn stmt_parser() -> impl Parser<char, Stmt, Error = Simple<char>> + Clone {
             .map(Stmt::Print)
             .labelled("print statement");
 
+        // Múltiple asignación: let a, b = 1, 2
+        let multi_let_stmt = just("let")
+            .padded()
+            .then(just("mut").padded().or_not())
+            .then(
+                ident.clone()
+                    .separated_by(just(",").padded())
+                    .at_least(2)  // Al menos 2 nombres para ser multi-let
+            )
+            .then_ignore(just("=").padded())
+            .then(
+                expr.clone()
+                    .separated_by(just(",").padded())
+                    .at_least(1)
+            )
+            .map(|(((_, mutable), names), values)| Stmt::MultiLet {
+                mutable: mutable.is_some(),
+                names,
+                values,
+            });
+
         let let_stmt = just("let")
             .padded()
             .then(just("mut").padded().or_not())  // Opcional "mut"
@@ -933,6 +984,23 @@ fn stmt_parser() -> impl Parser<char, Stmt, Error = Simple<char>> + Clone {
                     value: Box::new(value),
                 }));
 
+            // Operadores compuestos: x += 5, x -= 3, x *= 2, x /= 4 (Sprint 1 - Python-like)
+            let compound_assign_stmt = ident
+                .clone()
+                .then(
+                    just("+=").to(BinOp::Add)
+                        .or(just("-=").to(BinOp::Sub))
+                        .or(just("*=").to(BinOp::Mul))
+                        .or(just("/=").to(BinOp::Div))
+                )
+                .padded()
+                .then(expr.clone())
+                .map(|((name, op), value)| Stmt::Expr(Expr::CompoundAssign {
+                    name,
+                    op,
+                    value: Box::new(value),
+                }));
+
             let expr_stmt = expr_for_expr_stmt.map(Stmt::Expr);
 
             // CRÍTICO: return_stmt DEBE estar incluido aquí para funciones
@@ -947,9 +1015,11 @@ fn stmt_parser() -> impl Parser<char, Stmt, Error = Simple<char>> + Clone {
                 .or(continue_stmt)
                 .or(if_stmt)
                 .or(print)
+                .or(multi_let_stmt.clone())  // Multi-let ANTES de let_stmt
                 .or(let_stmt)
                 .or(return_stmt)  // return_stmt está aquí para el cuerpo de funciones
                 .or(field_assign_stmt)
+                .or(compound_assign_stmt)  // Sprint 1: +=, -=, *=, /= ANTES de assign_stmt
                 .or(assign_stmt)
                 .or(expr_stmt)
                 .padded()
@@ -1169,6 +1239,23 @@ fn stmt_parser() -> impl Parser<char, Stmt, Error = Simple<char>> + Clone {
                 value: Box::new(value),
             }));
 
+        // Operadores compuestos: x += 5, x -= 3, x *= 2, x /= 4 (Sprint 1 - Python-like)
+        let compound_assign_stmt = ident
+            .clone()
+            .then(
+                just("+=").to(BinOp::Add)
+                    .or(just("-=").to(BinOp::Sub))
+                    .or(just("*=").to(BinOp::Mul))
+                    .or(just("/=").to(BinOp::Div))
+            )
+            .padded()
+            .then(expr.clone())
+            .map(|((name, op), value)| Stmt::Expr(Expr::CompoundAssign {
+                name,
+                op,
+                value: Box::new(value),
+            }));
+
         let expr_stmt = expr_for_expr_stmt.map(Stmt::Expr);
 
         // Import statement (Sprint 1.3)
@@ -1197,9 +1284,11 @@ fn stmt_parser() -> impl Parser<char, Stmt, Error = Simple<char>> + Clone {
             .or(import_stmt)
             .or(fn_stmt)      // CRÍTICO: fn_stmt ANTES de return_stmt para que return dentro de funciones se parse correctamente
             .or(print)
+            .or(multi_let_stmt)  // Multi-let ANTES de let_stmt
             .or(let_stmt)
             .or(return_stmt)  // return_stmt DESPUÉS de fn_stmt para evitar conflictos
             .or(field_assign_stmt)  // Field assignment ANTES de assign_stmt
+            .or(compound_assign_stmt)  // Sprint 1: +=, -=, *=, /= ANTES de assign_stmt
             .or(assign_stmt)
             .or(expr_stmt)
             .padded()
@@ -1209,6 +1298,7 @@ fn stmt_parser() -> impl Parser<char, Stmt, Error = Simple<char>> + Clone {
                     Stmt::Struct { name, .. } => format!("Struct({})", name),
                     Stmt::Fn { name, .. } => format!("Function({})", name),
                     Stmt::Let { name, .. } => format!("Let({})", name),
+                    Stmt::MultiLet { names, .. } => format!("MultiLet({:?})", names),
                     Stmt::Print(_) => "Print".to_string(),
                     Stmt::If { .. } => "If".to_string(),
                     Stmt::While { .. } => "While".to_string(),
@@ -1311,8 +1401,93 @@ fn expr_parser() -> impl Parser<char, Expr, Error = Simple<char>> + Clone {
             .ignore_then(none_of('"').repeated())
             .then_ignore(just('"'))
             .collect::<String>()
-            .map(Expr::String)
+            .map(|s| {
+                // Procesar secuencias de escape como \n, \t, \\, etc.
+                let mut result = String::new();
+                let mut chars = s.chars().peekable();
+                while let Some(c) = chars.next() {
+                    if c == '\\' {
+                        match chars.next() {
+                            Some('n') => result.push('\n'),
+                            Some('t') => result.push('\t'),
+                            Some('r') => result.push('\r'),
+                            Some('\\') => result.push('\\'),
+                            Some('"') => result.push('"'),
+                            Some('0') => result.push('\0'),
+                            Some(other) => {
+                                result.push('\\');
+                                result.push(other);
+                            }
+                            None => result.push('\\'),
+                        }
+                    } else {
+                        result.push(c);
+                    }
+                }
+                Expr::String(result)
+            })
             .labelled("string");
+
+        // F-string: f"Hola {nombre}" (Sprint 2.3 - Python-like)
+        // Parser simplificado: parsea f"..." y luego procesa las interpolaciones
+        let fstring = just('f')
+            .ignore_then(just('"'))
+            .ignore_then(none_of('"').repeated())
+            .then_ignore(just('"'))
+            .collect::<String>()
+            .map(|content| {
+                // Parsear el contenido del f-string para extraer partes
+                let mut parts = Vec::new();
+                let mut current_literal = String::new();
+                let mut chars = content.chars().peekable();
+                
+                while let Some(c) = chars.next() {
+                    if c == '\\' {
+                        // Procesar secuencias de escape
+                        match chars.next() {
+                            Some('n') => current_literal.push('\n'),
+                            Some('t') => current_literal.push('\t'),
+                            Some('r') => current_literal.push('\r'),
+                            Some('\\') => current_literal.push('\\'),
+                            Some('"') => current_literal.push('"'),
+                            Some('{') => current_literal.push('{'),
+                            Some('}') => current_literal.push('}'),
+                            Some(other) => {
+                                current_literal.push('\\');
+                                current_literal.push(other);
+                            }
+                            None => current_literal.push('\\'),
+                        }
+                    } else if c == '{' {
+                        // Guardar literal acumulado si hay
+                        if !current_literal.is_empty() {
+                            parts.push(FStringPart::Literal(current_literal.clone()));
+                            current_literal.clear();
+                        }
+                        // Extraer nombre de variable hasta '}'
+                        let mut var_name = String::new();
+                        while let Some(&next) = chars.peek() {
+                            if next == '}' {
+                                chars.next(); // consumir '}'
+                                break;
+                            }
+                            var_name.push(chars.next().unwrap());
+                        }
+                        if !var_name.is_empty() {
+                            parts.push(FStringPart::Expr(Box::new(Expr::Ident(var_name))));
+                        }
+                    } else {
+                        current_literal.push(c);
+                    }
+                }
+                // Guardar último literal si hay
+                if !current_literal.is_empty() {
+                    parts.push(FStringPart::Literal(current_literal));
+                }
+                
+                Expr::FString { parts }
+            })
+            .labelled("f-string");
 
         // Array literal: [1, 2, 3] (Sprint 1.2)
         let array_literal = just('[')
@@ -1363,8 +1538,9 @@ fn expr_parser() -> impl Parser<char, Expr, Error = Simple<char>> + Clone {
             .map(|e| Expr::Deref(Box::new(e)))
             .labelled("deref");
 
-        // Negación lógica: !expr (Prioridad 2)
+        // Negación lógica: !expr o "not expr" (Sprint 1 - Python-like)
         let not_expr = just("!")
+            .or(just("not "))  // Python-style: "not"
             .padded()
             .ignore_then(expr.clone())
             .map(|e| Expr::Not(Box::new(e)))
@@ -1426,27 +1602,65 @@ fn expr_parser() -> impl Parser<char, Expr, Error = Simple<char>> + Clone {
             })
             .labelled("struct literal");
 
-        // Parser para booleanos: true, false
+        // Parser para booleanos: true/True, false/False (Python-style)
         // CRÍTICO: Debe venir ANTES de ident para que "true" no se parse como identificador
-        // Usar just() con .padded() y verificar que no es seguido de caracteres alfanuméricos
-        // Alternativa: usar lookahead negativo para asegurar que "true" no es parte de "trueVar"
         let bool_literal = just("true")
-            .then(text::ident().not().to(()))  // Asegurar que no es seguido de identificador
+            .or(just("True"))  // Python-style
+            .then(text::ident().not().to(()))
             .map(|_| Expr::Bool(true))
             .labelled("true")
             .padded()
             .or(just("false")
-                .then(text::ident().not().to(()))  // Asegurar que no es seguido de identificador
+                .or(just("False"))  // Python-style
+                .then(text::ident().not().to(()))
                 .map(|_| Expr::Bool(false))
                 .labelled("false")
                 .padded());
 
+        // Lambda expressions: lambda x, y: x + y (Sprint 3 - Python-like)
+        let lambda = just("lambda")
+            .padded()
+            .ignore_then(
+                text::ident()
+                    .padded()
+                    .separated_by(just(",").padded())
+            )
+            .then_ignore(just(":").padded())
+            .then(expr.clone())
+            .map(|(params, body)| Expr::Lambda {
+                params,
+                body: Box::new(body),
+            })
+            .labelled("lambda");
+
+        // Tuple literal: (1, 2, 3) - requiere al menos una coma para distinguir de paréntesis
+        let tuple_literal = just("(")
+            .padded()
+            .ignore_then(
+                expr.clone()
+                    .then_ignore(just(",").padded())
+                    .then(
+                        expr.clone()
+                            .separated_by(just(",").padded())
+                            .allow_trailing()
+                    )
+                    .map(|(first, rest)| {
+                        let mut elements = vec![first];
+                        elements.extend(rest);
+                        elements
+                    })
+            )
+            .then_ignore(just(")").padded())
+            .map(Expr::TupleLiteral)
+            .labelled("tuple literal");
+
         let atom = float_literal.clone()  // Floats PRIMERO para que 3.14 se parse como float, no como 3
             .or(number)  // Numbers después para evitar conflicto con floats
             .or(bool_literal)  // Booleanos después de numbers pero antes de string
+            .or(fstring)  // F-strings ANTES de string para que f"..." se parse correctamente
             .or(string)
             .or(array_literal)  // Array literal antes de borrow
-            .or(borrow)  // Borrow debe ir ANTES de ident para que &x se parse como Borrow, no como Call
+            .or(borrow)  // Borrow debe ir ANTES de ident para que &x se parse como Borrow, not como Call
             .or(deref)
             .or(not_expr)  // Negación lógica: !expr
             .or(some.clone())
@@ -1454,7 +1668,9 @@ fn expr_parser() -> impl Parser<char, Expr, Error = Simple<char>> + Clone {
             .or(ok.clone())
             .or(err.clone())
             .or(struct_literal)
+            .or(lambda)  // Lambda antes de ident
             .or(ident.clone())
+            .or(tuple_literal)  // Tuplas antes de paréntesis simples
             .or(expr
                 .clone()
                 .delimited_by(just("(").padded(), just(")").padded()));
@@ -1779,13 +1995,13 @@ fn expr_parser() -> impl Parser<char, Expr, Error = Simple<char>> + Clone {
             });
 
         // Operadores lógicos (Prioridad 2)
-        // AND lógico: a && b (mayor precedencia que OR)
+        // AND lógico: && o "and" (Sprint 1 - Python-like)
         let logical_and = comparison
             .clone()
             .then(
-                just("&&")
+                just("&&").to(BinOp::And)
+                    .or(text::keyword("and").to(BinOp::And))  // Python-style: "and"
                     .padded()
-                    .to(BinOp::And)
                     .then(comparison.clone())
                     .repeated(),
             )
@@ -1795,13 +2011,13 @@ fn expr_parser() -> impl Parser<char, Expr, Error = Simple<char>> + Clone {
                 right: Box::new(r),
             });
 
-        // OR lógico: a || b (menor precedencia que AND)
+        // OR lógico: || o "or" (Sprint 1 - Python-like)
         let logical_or = logical_and
             .clone()
             .then(
-                just("||")
+                just("||").to(BinOp::Or)
+                    .or(text::keyword("or").to(BinOp::Or))  // Python-style: "or"
                     .padded()
-                    .to(BinOp::Or)
                     .then(logical_and.clone())
                     .repeated(),
             )

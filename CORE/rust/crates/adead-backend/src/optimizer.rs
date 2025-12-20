@@ -93,5 +93,62 @@ impl CodeOptimizer {
         // En el futuro, podríamos analizar qué registros realmente se usan
         code.to_string()
     }
+
+    /// Limpiar y formatear el ASM generado para mejor legibilidad
+    pub fn clean_asm(&self, code: &str) -> String {
+        let mut result = Vec::new();
+        let mut prev_was_empty = false;
+        let mut in_data_section = false;
+        
+        for line in code.lines() {
+            let trimmed = line.trim();
+            
+            // Detectar secciones
+            if trimmed.starts_with("section .data") {
+                in_data_section = true;
+                if !result.is_empty() && !prev_was_empty {
+                    result.push(String::new());
+                }
+                result.push(line.to_string());
+                prev_was_empty = false;
+                continue;
+            }
+            if trimmed.starts_with("section .text") {
+                in_data_section = false;
+                if !result.is_empty() && !prev_was_empty {
+                    result.push(String::new());
+                }
+                result.push(line.to_string());
+                prev_was_empty = false;
+                continue;
+            }
+            
+            // Eliminar comentarios de debug redundantes
+            if trimmed.starts_with("; ADead:") && trimmed.contains("...") {
+                continue;
+            }
+            
+            // Eliminar líneas vacías consecutivas
+            if trimmed.is_empty() {
+                if !prev_was_empty {
+                    result.push(String::new());
+                    prev_was_empty = true;
+                }
+                continue;
+            }
+            
+            // Añadir línea vacía antes de labels de función
+            if (trimmed.starts_with("fn_") || trimmed == "main:") && trimmed.ends_with(":") {
+                if !result.is_empty() && !prev_was_empty {
+                    result.push(String::new());
+                }
+            }
+            
+            result.push(line.to_string());
+            prev_was_empty = false;
+        }
+        
+        result.join("\n")
+    }
 }
 

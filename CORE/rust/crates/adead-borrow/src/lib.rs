@@ -105,6 +105,19 @@ impl BorrowChecker {
                     self.variable_types.insert(name.clone(), struct_name.clone());
                 }
             }
+            // Múltiple asignación Python-style
+            if let Stmt::MultiLet { mutable, names, values: _ } = stmt {
+                for name in names {
+                    self.variables.insert(
+                        name.clone(),
+                        VariableInfo {
+                            ownership: OwnershipState::Owned,
+                            mutable: *mutable,
+                            borrowed_by: Vec::new(),
+                        },
+                    );
+                }
+            }
         }
         
         // Tercera pasada: verificar statements completos (ahora las variables y structs están registrados)
@@ -123,6 +136,14 @@ impl BorrowChecker {
                 self.check_expr(value)?;
                 // Verificar borrowing en el valor (ahora que todas las variables están registradas)
                 self.check_expr_borrowing(value)?;
+                Ok(())
+            }
+            Stmt::MultiLet { mutable: _, names: _, values } => {
+                // Verificar cada valor en la múltiple asignación
+                for value in values {
+                    self.check_expr(value)?;
+                    self.check_expr_borrowing(value)?;
+                }
                 Ok(())
             }
             Stmt::Print(expr) => {
@@ -410,6 +431,52 @@ impl BorrowChecker {
                 for arg in args {
                     self.check_expr(arg)?;
                 }
+                Ok(())
+            }
+            Expr::CompoundAssign { name, op: _, value } => {
+                // Operadores compuestos: x += 5, x -= 3, etc.
+                self.check_expr(value)?;
+                // Verificar que la variable existe y es mutable
+                if let Some(info) = self.find_variable(name) {
+                    if info.ownership == OwnershipState::Moved {
+                        return Err(ADeadError::TypeError {
+                            message: format!("Variable '{}' fue movida y ya no es válida", name),
+                        });
+                    }
+                    if !info.mutable {
+                        return Err(ADeadError::TypeError {
+                            message: format!(
+                                "Variable '{}' es inmutable. Usa 'let mut' para operadores compuestos",
+                                name
+                            ),
+                        });
+                    }
+                } else {
+                    return Err(ADeadError::TypeError {
+                        message: format!("Variable '{}' no definida", name),
+                    });
+                }
+                Ok(())
+            }
+            Expr::FString { parts } => {
+                // F-strings: verificar que las variables interpoladas existen
+                for part in parts {
+                    if let adead_parser::FStringPart::Expr(expr) = part {
+                        self.check_expr(expr)?;
+                    }
+                }
+                Ok(())
+            }
+            Expr::TupleLiteral(elements) => {
+                // Tuplas: verificar cada elemento
+                for element in elements {
+                    self.check_expr(element)?;
+                }
+                Ok(())
+            }
+            Expr::Lambda { params: _, body } => {
+                // Lambda: verificar el cuerpo
+                self.check_expr(body)?;
                 Ok(())
             }
         }

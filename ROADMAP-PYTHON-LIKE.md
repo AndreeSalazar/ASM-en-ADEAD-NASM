@@ -59,34 +59,38 @@ if x > 5:
 #### 2.2 Operadores Python
 ```python
 # Potencia
-x = 2 ** 10  # ⏳ PENDIENTE
+x = 2 ** 10  # ✅ IMPLEMENTADO
 
 # División entera
-x = 10 // 3  # ⏳ PENDIENTE
+x = 10 // 3  # ✅ IMPLEMENTADO
 
 # Operadores compuestos
-x += 5   # ⏳ PENDIENTE
-x -= 3   # ⏳ PENDIENTE
-x *= 2   # ⏳ PENDIENTE
-x /= 4   # ⏳ PENDIENTE
+x += 5   # ✅ IMPLEMENTADO
+x -= 3   # ✅ IMPLEMENTADO
+x *= 2   # ✅ IMPLEMENTADO
+x /= 4   # ✅ IMPLEMENTADO
 
-# Operadores lógicos (ya funcionan)
+# Operadores lógicos (ambas sintaxis funcionan)
 if x > 5 && y < 10 {  # ✅
     print "ok"
 }
 
-# Futuro: Sintaxis Python alternativa
-if x > 5 and y < 10:  # ⏳ PENDIENTE
+# Sintaxis Python alternativa
+if x > 5 and y < 10 {  # ✅ IMPLEMENTADO
     print "ok"
+}
+if a or b { }  # ✅ IMPLEMENTADO
+if not c { }   # ✅ IMPLEMENTADO
 ```
 
 #### 2.3 String Formatting
 ```python
-# Actual
-print "Hola " + nombre
+# F-strings (Python-style)
+print f"Hola {nombre}, tienes {edad} años"  # ✅ IMPLEMENTADO
 
-# Futuro: f-strings
-print f"Hola {nombre}, tienes {edad} años"  # ⏳ PENDIENTE
+# Secuencias de escape
+print "Linea 1\nLinea 2\nLinea 3"  # ✅ IMPLEMENTADO
+print "Tab:\tvalor"                 # ✅ IMPLEMENTADO
 
 # Futuro: format()
 print "Hola {}, tienes {} años".format(nombre, edad)  # ⏳ PENDIENTE
@@ -95,11 +99,11 @@ print "Hola {}, tienes {} años".format(nombre, edad)  # ⏳ PENDIENTE
 #### 2.4 Múltiple Asignación
 ```python
 # Tuple unpacking
-let a, b = 10, 20  # ⏳ PENDIENTE
-let x, y, z = punto.coords()  # ⏳ PENDIENTE
+let a, b = 10, 20  # ✅ IMPLEMENTADO
+let c, d, e = 1, 2, 3  # ✅ IMPLEMENTADO
 
-# Swap
-a, b = b, a  # ⏳ PENDIENTE
+# Swap (requiere variables temporales)
+a, b = b, a  # ⏳ PENDIENTE (requiere evaluación simultánea)
 ```
 
 ---
@@ -108,22 +112,22 @@ a, b = b, a  # ⏳ PENDIENTE
 
 #### 3.1 Bool Nativo
 ```python
-let verdadero = True   # ⏳ PENDIENTE (actualmente: true)
-let falso = False      # ⏳ PENDIENTE (actualmente: false)
+let verdadero = True   # ✅ IMPLEMENTADO (True/False Python-style)
+let falso = False      # ✅ IMPLEMENTADO
+let v2 = true          # ✅ También funciona estilo C
+
+# Imprimir booleanos
+print activo           # ✅ Imprime "true" o "false"
 
 # Valores truthy/falsy
-if lista {  # Lista vacía = False
+if lista {  # Lista vacía = False  # ⏳ PENDIENTE
     print "tiene elementos"
-}
-
-if texto {  # String vacío = False
-    print "tiene texto"
 }
 ```
 
 #### 3.2 None
 ```python
-let valor = None  # ⏳ PENDIENTE
+let valor = None  # ✅ IMPLEMENTADO
 
 fn buscar(lista, item) {
     for i, x in enumerate(lista) {
@@ -131,7 +135,7 @@ fn buscar(lista, item) {
             return i
         }
     }
-    return None
+    return None  # ✅ IMPLEMENTADO
 }
 ```
 
@@ -510,45 +514,45 @@ from math import *  # ⏳ PENDIENTE (no recomendado)
 # Funciones que ADead DEBE tener
 
 # Tipos
-int(x)      # ⏳ PENDIENTE
-float(x)    # ⏳ PENDIENTE
-str(x)      # ⏳ PENDIENTE
-bool(x)     # ⏳ PENDIENTE
+int(x)      # ✅ IMPLEMENTADO
+float(x)    # ✅ IMPLEMENTADO (básico)
+str(x)      # ✅ IMPLEMENTADO (básico)
+bool(x)     # ✅ IMPLEMENTADO
 list(x)     # ⏳ PENDIENTE
 dict(x)     # ⏳ PENDIENTE
 tuple(x)    # ⏳ PENDIENTE
 set(x)      # ⏳ PENDIENTE
 
 # Matemáticas
-abs(x)      # ✅ YA EXISTE
-min(a, b)   # ✅ YA EXISTE
-max(a, b)   # ✅ YA EXISTE
-pow(x, y)   # ✅ YA EXISTE
-round(x)    # ⏳ PENDIENTE
-sum(lista)  # ⏳ PENDIENTE
+abs(x)      # ✅ IMPLEMENTADO
+min(a, b)   # ✅ IMPLEMENTADO
+max(a, b)   # ✅ IMPLEMENTADO
+pow(x, y)   # ✅ IMPLEMENTADO
+round(x)    # ✅ IMPLEMENTADO
+sum(lista)  # ✅ IMPLEMENTADO
 
 # Secuencias
-len(x)      # ✅ YA EXISTE
-range(n)    # ✅ YA EXISTE
-enumerate(x) # ⏳ PENDIENTE
-zip(a, b)   # ⏳ PENDIENTE
-sorted(x)   # ⏳ PENDIENTE
-reversed(x) # ⏳ PENDIENTE
+len(x)      # ✅ IMPLEMENTADO
+range(n)    # ✅ IMPLEMENTADO
+enumerate(x) # ✅ IMPLEMENTADO (básico)
+zip(a, b)   # ✅ IMPLEMENTADO (básico)
+sorted(x)   # ✅ IMPLEMENTADO (bubble sort)
+reversed(x) # ✅ IMPLEMENTADO
 
 # Funcionales
-map(f, x)    # ⏳ PENDIENTE
-filter(f, x) # ⏳ PENDIENTE
+map(f, x)    # ✅ IMPLEMENTADO (con lambdas)
+filter(f, x) # ✅ IMPLEMENTADO (básico)
 reduce(f, x) # ⏳ PENDIENTE
-all(x)       # ⏳ PENDIENTE
-any(x)       # ⏳ PENDIENTE
+all(x)       # ✅ IMPLEMENTADO
+any(x)       # ✅ IMPLEMENTADO
 
 # I/O
-print(x)     # ✅ YA EXISTE
-input(msg)   # ⏳ PENDIENTE
+print(x)     # ✅ IMPLEMENTADO
+input(msg)   # ✅ IMPLEMENTADO (Windows)
 open(file)   # ⏳ PENDIENTE
 
 # Utilidades
-type(x)      # ⏳ PENDIENTE
+type(x)      # ✅ IMPLEMENTADO (básico)
 isinstance(x, T) # ⏳ PENDIENTE
 hasattr(x, a)    # ⏳ PENDIENTE
 getattr(x, a)    # ⏳ PENDIENTE
@@ -559,14 +563,14 @@ setattr(x, a, v) # ⏳ PENDIENTE
 
 ## 📋 Plan de Implementación Priorizado
 
-### Sprint 1: Sintaxis Python-Like (1 semana)
+### Sprint 1: Sintaxis Python-Like (1 semana) ✅ COMPLETADO
 ```
-□ Operador ** (potencia)
-□ Operador // (división entera)
-□ Operadores compuestos (+=, -=, *=, /=)
-□ True/False (bool nativo)
-□ None (valor nulo)
-□ Operadores lógicos alternativos (and, or, not)
+✅ Operador ** (potencia)
+✅ Operador // (división entera)
+✅ Operadores compuestos (+=, -=, *=, /=)
+✅ True/False (bool nativo)
+✅ None (valor nulo) - implementado
+✅ Operadores lógicos alternativos (and, or, not)
 ```
 
 ### Sprint 2: Tipos Python (2 semanas)
@@ -574,7 +578,7 @@ setattr(x, a, v) # ⏳ PENDIENTE
 □ Diccionarios básicos
 □ Tuples básicos
 □ Sets básicos
-□ Type conversions (int(), str(), etc.)
+✅ Type conversions (int(), str(), bool(), float()) - implementado
 □ Truthy/Falsy values
 ```
 
@@ -583,7 +587,8 @@ setattr(x, a, v) # ⏳ PENDIENTE
 □ Parámetros por defecto
 □ Parámetros nombrados
 □ *args (variádicos)
-□ Lambdas básicas
+✅ Lambdas básicas - implementado
+✅ Tuplas básicas - implementado
 □ Decoradores básicos
 ```
 

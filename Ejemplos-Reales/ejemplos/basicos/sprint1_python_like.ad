@@ -1,0 +1,39 @@
+# ============================================
+# Sprint 1: Sintaxis Python-Like en ADead
+# ============================================
+# Demuestra las nuevas características Python-like
+
+print "=== Sprint 1: Python-Like ==="
+
+# --- Operadores Compuestos ---
+print "1. Operadores compuestos:"
+let mut x = 10
+print x
+x += 5
+print x
+x -= 3
+print x
+x *= 2
+print x
+
+# --- Booleanos true/false ---
+print "2. Booleanos:"
+print true
+print false
+
+# --- Operadores Logicos Python-style ---
+print "3. and/or/not:"
+
+if true and true {
+    print "and OK"
+}
+
+if false or true {
+    print "or OK"
+}
+
+if not false {
+    print "not OK"
+}
+
+print "=== Completado! ==="

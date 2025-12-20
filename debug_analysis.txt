@@ -4,30 +4,26 @@
 
 📊 RESUMEN EJECUTIVO
 --------------------------------------------------------------------------------
-Total de Statements: 16
+Total de Statements: 12
 Structs: 0
 Funciones: 0
-Other Statements: 16
+Other Statements: 12
 Problemas Detectados: 0
 
 📝 STATEMENTS EN MAIN
 --------------------------------------------------------------------------------
-  ✅ [0] let base = Number(2)
-  ✅ [1] let exp = Number(10)
-  ✅ [2] let potencia = BinaryOp { op: Pow, left: Ident("base"), right: Ident("exp") }
-  ✅ [3] print Ident: potencia
-  ✅ [4] let dividendo = Number(17)
-  ✅ [5] let divisor = Number(5)
-  ✅ [6] let cociente = BinaryOp { op: FloorDiv, left: Ident("dividendo"), right: Ident("divisor") }
-  ✅ [7] print Ident: cociente
-  ✅ [8] let div_normal = BinaryOp { op: Div, left: Number(17), right: Number(5) }
-  ✅ [9] let div_entera = BinaryOp { op: FloorDiv, left: Number(17), right: Number(5) }
-  ✅ [10] print Ident: div_normal
-  ✅ [11] print Ident: div_entera
-  ✅ [12] print BinaryOp { op: Pow, left: Number(3), right: Number(2) }
-  ✅ [13] print BinaryOp { op: Pow, left: Number(5), right: Number(3) }
-  ✅ [14] print BinaryOp { op: Pow, left: Number(10), right: Number(0) }
-  ✅ [15] print BinaryOp { op: Pow, left: Number(1), right: Number(100) }
+  ✅ [0] print String("=== Test Built-in Functions ===\n")
+  ✅ [1] let neg = BinaryOp { op: Sub, left: Number(0), right: Number(42) }
+  ✅ [2] let pos = Call: abs(1 args)
+  ✅ [3] print Ident: pos
+  ✅ [4] print String("\n")
+  ✅ [5] let m1 = Call: min(2 args)
+  ✅ [6] print Ident: m1
+  ✅ [7] print String("\n")
+  ✅ [8] let m2 = Call: max(2 args)
+  ✅ [9] print Ident: m2
+  ✅ [10] print String("\n")
+  ✅ [11] print String("=== Fin ===\n")
 
 ✅ NO SE DETECTARON PROBLEMAS
 --------------------------------------------------------------------------------

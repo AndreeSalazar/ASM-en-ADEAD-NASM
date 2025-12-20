@@ -1,7 +1,21 @@
+# ═══════════════════════════════════════════════════════════════
+# ADead Compiler - Cargo Configuration
+# Optimizado para builds rápidos y binarios eficientes
+# ═══════════════════════════════════════════════════════════════
+
 [target.x86_64-pc-windows-msvc]
+# Usar lld como linker (mucho más rápido que link.exe)
+# rustflags = ["-C", "link-arg=-fuse-ld=lld", "-C", "link-arg=/DEBUG:NONE"]
 rustflags = ["-C", "link-arg=/DEBUG:NONE"]
 
-[profile.release]
-debug = false
-strip = true
+[build]
+# Compilación paralela - usar todos los cores disponibles
+jobs = 8
+
+[net]
+# Descargas paralelas de crates
+git-fetch-with-cli = true
+
+[registries.crates-io]
+protocol = "sparse"
 

@@ -1,4 +1,0 @@
-let arr = [1, 2, 3]
-arr.append(4)
-let last = arr.pop()
-print last

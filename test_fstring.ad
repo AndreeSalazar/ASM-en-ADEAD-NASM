@@ -1,0 +1,20 @@
+# Test Built-in Functions - Simple
+print "=== Test Built-in Functions ===\n"
+
+# abs funciona
+let neg = 0 - 42
+let pos = abs(neg)
+print pos
+print "\n"
+
+# min funciona
+let m1 = min(10, 5)
+print m1
+print "\n"
+
+# max funciona
+let m2 = max(10, 5)
+print m2
+print "\n"
+
+print "=== Fin ===\n"
